@@ -78,7 +78,7 @@ void ClearConsole()
     SetConsoleCursorPosition(hConsole, coordScreen);
 }
 
-bool HaveAdministratorPrivilidges(
+bool HaveAdministratorPrivileges(
     void)
 {
     static int elevated = -1;

@@ -92,13 +92,13 @@ int main(int argc, char ** argv)
 
     if (waitpid >= 0) {
         WaitForProcess(waitpid);
-        if (!HaveAdministratorPrivilidges()) {
+        if (!HaveAdministratorPrivileges()) {
             printf("Elevation process failed. Aborting.\n");
             return 0;
         }
     }
 
-    if (!HaveAdministratorPrivilidges()) {
+    if (!HaveAdministratorPrivileges()) {
         printf("Process is not running as admin. Attempting to elevate.\n");
         RestartAsAdministrator(argc, argv);
         return 0;
