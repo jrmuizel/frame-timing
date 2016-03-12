@@ -21,6 +21,6 @@
 std::string FormatString(const char *fmt, ...);
 void ClearConsole();
 
-bool HaveAdministratorPrivilidges(void);
+bool HaveAdministratorPrivileges(void);
 void RestartAsAdministrator(int argc, char **argv);
 void WaitForProcess(int pid);
