@@ -32,6 +32,8 @@ struct DxgiConsumer : ITraceConsumer
     CRITICAL_SECTION mMutex;
     std::vector<PresentEvent> mPresents;
 
+    std::map<uint64_t, PresentEvent> mPendingPresents;
+
     bool DequeuePresents(std::vector<PresentEvent>& outPresents)
     {
         if (mPresents.size())
@@ -66,46 +68,61 @@ void DxgiConsumer::OnEventRecord(PEVENT_RECORD pEventRecord)
 
     auto hdr = pEventRecord->EventHeader;
 
-    //if (hdr.EventDescriptor.Id != Present_Start)
-    if (hdr.EventDescriptor.Id != IDXGISwapChain_Present_Start)
+    uint64_t procAndThreadId = (static_cast<uint64_t>(hdr.ProcessId) << 32) | hdr.ThreadId;
+    if (hdr.EventDescriptor.Id == IDXGISwapChain_Present_Start)
     {
-        return;
+        PresentEvent event = { 0 };
+        event.ProcessId = hdr.ProcessId;
+        event.QpcTime = *(uint64_t*)&pEventRecord->EventHeader.TimeStamp;
+
+        if (pEventRecord->UserDataLength >= 16 &&
+            !(pEventRecord->EventHeader.Flags & EVENT_HEADER_FLAG_32_BIT_HEADER))
+        {
+            struct IDXGISwapChain_Present_Start_Data_64 {
+                uint64_t SwapChainAddress;
+                uint32_t SyncInterval;
+                uint32_t Flags;
+            };
+            auto data = (IDXGISwapChain_Present_Start_Data_64*)pEventRecord->UserData;
+            event.SwapChainAddress = data->SwapChainAddress;
+            event.SyncInterval = data->SyncInterval;
+            event.PresentFlags = data->Flags;
+        }
+        else if(pEventRecord->UserDataLength >= 12 &&
+            (pEventRecord->EventHeader.Flags & EVENT_HEADER_FLAG_32_BIT_HEADER))
+        {
+            struct IDXGISwapChain_Present_Start_Data_32 {
+                uint32_t SwapChainAddress;
+                uint32_t SyncInterval;
+                uint32_t Flags;
+            };
+            auto data = (IDXGISwapChain_Present_Start_Data_32*)pEventRecord->UserData;
+            event.SwapChainAddress = data->SwapChainAddress;
+            event.SyncInterval = data->SyncInterval;
+            event.PresentFlags = data->Flags;
+        }
+
+        
+        mPendingPresents[procAndThreadId] = event;
     }
-
-    PresentEvent event = { 0 };
-    event.ProcessId = hdr.ProcessId;
-    event.QpcTime = *(uint64_t*)&pEventRecord->EventHeader.TimeStamp;
-
-    if (pEventRecord->UserDataLength >= 16 &&
-        !(pEventRecord->EventHeader.Flags & EVENT_HEADER_FLAG_32_BIT_HEADER))
+    else if (hdr.EventDescriptor.Id == IDXGISwapChain_Present_Stop)
     {
-        struct IDXGISwapChain_Present_Start_Data_64 {
-            uint64_t SwapChainAddress;
-            uint32_t SyncInterval;
-            uint32_t Flags;
-        };
-        auto data = (IDXGISwapChain_Present_Start_Data_64*)pEventRecord->UserData;
-        event.SwapChainAddress = data->SwapChainAddress;
-        event.SyncInterval = data->SyncInterval;
-        event.PresentFlags = data->Flags;
-    }
-    else if(pEventRecord->UserDataLength >= 12 &&
-        (pEventRecord->EventHeader.Flags & EVENT_HEADER_FLAG_32_BIT_HEADER))
-    {
-        struct IDXGISwapChain_Present_Start_Data_32 {
-            uint32_t SwapChainAddress;
-            uint32_t SyncInterval;
-            uint32_t Flags;
-        };
-        auto data = (IDXGISwapChain_Present_Start_Data_32*)pEventRecord->UserData;
-        event.SwapChainAddress = data->SwapChainAddress;
-        event.SyncInterval = data->SyncInterval;
-        event.PresentFlags = data->Flags;
-    }
+        auto eventIter = mPendingPresents.find(procAndThreadId);
+        if (eventIter == mPendingPresents.end())
+        {
+            return;
+        }
 
-    EnterCriticalSection(&mMutex);
-    mPresents.push_back(event);
-    LeaveCriticalSection(&mMutex);
+        auto event = eventIter->second;
+        mPendingPresents.erase(eventIter);
+
+        uint64_t EndTime = *(uint64_t*)&pEventRecord->EventHeader.TimeStamp;
+        event.TimeTaken = EndTime - event.QpcTime;
+
+        EnterCriticalSection(&mMutex);
+        mPresents.push_back(event);
+        LeaveCriticalSection(&mMutex);
+    }
 }
 
 static void EtwProcessingThread(TraceSession *session)

@@ -25,6 +25,7 @@
 struct PresentEvent {
     uint64_t QpcTime;
     uint64_t SwapChainAddress;
+    uint64_t TimeTaken;
     uint32_t SyncInterval;
     uint32_t PresentFlags;
     uint32_t ProcessId;

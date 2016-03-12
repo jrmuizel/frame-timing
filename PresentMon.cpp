@@ -17,6 +17,7 @@
 #include "PresentMon.hpp"
 #include "Util.hpp"
 #include <algorithm>
+#include <numeric>
 #include <ctime>
 
 #include <windows.h>
@@ -94,8 +95,9 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
             auto& curr = chain.mPresentHistory[len - 1];
             auto& prev = chain.mPresentHistory[len - 2];
             double deltaMilliseconds = 1000 * double(curr.QpcTime - prev.QpcTime) / perfFreq;
-            fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%.3lf,%d,%d\n",
-                proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, deltaMilliseconds, curr.SyncInterval, curr.PresentFlags);
+            double timeTakenMilliseconds = 1000 * double(curr.TimeTaken) / perfFreq;
+            fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%.3lf,%.3lf,%d,%d\n",
+                proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, deltaMilliseconds, timeTakenMilliseconds, curr.SyncInterval, curr.PresentFlags);
         }
     }
 }
@@ -105,10 +107,25 @@ static double ComputeFps(SwapChainData& stats, uint64_t qpcFreq)
     // TODO: better method
     auto start = stats.mPresentHistory.front().QpcTime;
     auto end = stats.mPresentHistory.back().QpcTime;
-    auto count = stats.mPresentHistory.size();
+    auto count = stats.mPresentHistory.size() - 1;
 
     double deltaT = double(end - start) / qpcFreq;
     return count / deltaT;
+}
+
+static double ComputeCpuFrameTime(SwapChainData& stats, uint64_t qpcFreq)
+{
+    if (stats.mPresentHistory.empty())
+    {
+        return 0.0;
+    }
+
+    uint64_t timeInPresent = std::accumulate(stats.mPresentHistory.begin(), stats.mPresentHistory.end() - 1, 0ull,
+                                   [](uint64_t current, PresentEvent const& e) { return current + e.TimeTaken; });
+    uint64_t totalTime = stats.mPresentHistory.back().QpcTime - stats.mPresentHistory.front().QpcTime;
+    
+    double timeNotInPresent = double(totalTime - timeInPresent) / qpcFreq;
+    return timeNotInPresent / (stats.mPresentHistory.size() - 1);
 }
 
 void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
@@ -134,7 +151,7 @@ void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
     }
 
     if (pm.mOutputFile) {
-        fprintf(pm.mOutputFile, "module,pid,chain,delta,vsync,flags\n");
+        fprintf(pm.mOutputFile, "module,pid,chain,delta,timeTaken,vsync,flags\n");
     }
 }
 
@@ -163,8 +180,9 @@ void PresentMon_Update(PresentMonData& pm, std::vector<PresentEvent> presents, u
         for (auto& chain : proc.second.mChainMap)
         {
             double fps = ComputeFps(chain.second, perfFreq);
-            display += FormatString("\t%016llX: SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps)%s\n",
-                chain.first, chain.second.mLastSyncInterval, chain.second.mLastFlags, 1000.0/fps, fps,
+            double cpuTime = ComputeCpuFrameTime(chain.second, perfFreq);
+            display += FormatString("\t%016llX: SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, %.2lf ms CPU)%s\n",
+                chain.first, chain.second.mLastSyncInterval, chain.second.mLastFlags, 1000.0/fps, fps, cpuTime * 1000.0,
                 (now - chain.second.mLastUpdateTicks) > 1000 ? " [STALE]" : "");
         }
     }
