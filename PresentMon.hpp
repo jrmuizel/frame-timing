@@ -21,14 +21,40 @@
 #include <string>
 #include <map>
 #include <deque>
+#include <memory>
 
+enum class PresentMode
+{
+    Unknown,
+    Fullscreen,
+    Composed_Flip,
+    DirectFlip,
+    IndependentFlip,
+    ImmediateIndependentFlip,
+};
+enum class PresentResult
+{
+    Unknown, Presented, Discarded
+};
 struct PresentEvent {
-    uint64_t QpcTime;
-    uint64_t SwapChainAddress;
-    uint64_t TimeTaken;
-    uint32_t SyncInterval;
-    uint32_t PresentFlags;
-    uint32_t ProcessId;
+    // Available from DXGI Present
+    uint64_t QpcTime = 0;
+    uint64_t SwapChainAddress = 0;
+    uint32_t SyncInterval = 0;
+    uint32_t PresentFlags = 0;
+    uint32_t ProcessId = 0;
+
+    PresentMode PresentMode = PresentMode::Unknown;
+
+    // Time spent in DXGI Present call
+    uint64_t TimeTaken = 0;
+
+    // Timestamp of "ready" state (GPU work completed)
+    uint64_t ReadyTime = 0;
+
+    // Timestamp of "complete" state (data on screen or discarded)
+    uint64_t ScreenTime = 0;
+    PresentResult FinalState = PresentResult::Unknown;
 };
 
 struct SwapChainData {
@@ -59,6 +85,6 @@ struct PresentMonData {
 void PresentMonEtw(PresentMonArgs args);
 
 void PresentMon_Init(const PresentMonArgs& args, PresentMonData& data);
-void PresentMon_Update(PresentMonData& data, std::vector<PresentEvent> presents, uint64_t perfFreq);
+void PresentMon_Update(PresentMonData& data, std::vector<std::shared_ptr<PresentEvent>> presents, uint64_t perfFreq);
 void PresentMon_Shutdown(PresentMonData& data);
 

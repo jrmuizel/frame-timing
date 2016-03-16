@@ -45,7 +45,7 @@ static void UpdateProcessInfo(ProcessInfo& info, uint64_t now, uint32_t thisPid)
     if (now - info.mLastRefreshTicks > 1000) {
         info.mLastRefreshTicks = now;
         char path[MAX_PATH] = "<error>";
-        HANDLE h = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, thisPid);
+        HANDLE h = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, thisPid);
         if (h) {
             GetModuleFileNameExA(h, NULL, path, sizeof(path) - 1);
             std::string name = PathFindFileNameA(path);
@@ -155,7 +155,7 @@ void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
     }
 }
 
-void PresentMon_Update(PresentMonData& pm, std::vector<PresentEvent> presents, uint64_t perfFreq)
+void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEvent>> presents, uint64_t perfFreq)
 {
     std::string display;
     uint64_t now = GetTickCount64();
@@ -163,7 +163,7 @@ void PresentMon_Update(PresentMonData& pm, std::vector<PresentEvent> presents, u
     // store the new presents into processes
     for (auto& p : presents)
     {
-        AddPresent(pm, p, now, perfFreq);
+        AddPresent(pm, *p, now, perfFreq);
     }
 
     // update all processes
