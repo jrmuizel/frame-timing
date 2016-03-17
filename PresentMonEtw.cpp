@@ -101,12 +101,17 @@ struct DxgiConsumer : ITraceConsumer
     // The second map contains a queue of presents currently pending for a process
     //   These presents have been "batched" and will be submitted by a driver worker thread
     //   The assumption is that they will be submitted to kernel in the same order they were submitted to DXGI,
-    //   but this might not hold true if there are multiple D3D devices in play
+    //   but this might not hold true especially if there are multiple D3D devices in play
     std::map<uint32_t, std::shared_ptr<PresentEvent>> mPendingPresentByThread;
     std::map<uint32_t, std::deque<std::shared_ptr<PresentEvent>>> mPendingPresentsByProcess;
 
     // Fullscreen presents map from present sequence id
     std::map<uint32_t, std::shared_ptr<PresentEvent>> mFullscreenPresents;
+
+    // Present history tokens
+    typedef std::tuple<uint64_t, uint64_t, uint32_t> PresentHistoryTokenKey;
+    std::map<PresentHistoryTokenKey, std::shared_ptr<PresentEvent>> mPresentHistoryTokens;
+    std::map<uint64_t, std::shared_ptr<PresentEvent>> mPresentHistoryByTokenPtr;
 
     bool DequeuePresents(std::vector<std::shared_ptr<PresentEvent>>& outPresents)
     {
@@ -190,22 +195,24 @@ void DxgiConsumer::OnDXGIEvent(PEVENT_RECORD pEventRecord)
         assert(event.QpcTime < EndTime);
         event.TimeTaken = EndTime - event.QpcTime;
 
-        auto& eventDeque = mPendingPresentsByProcess[hdr.ProcessId];
-        eventDeque.push_back(eventIter->second);
+        if (event.PresentMode == PresentMode::Unknown) {
+            auto& eventDeque = mPendingPresentsByProcess[hdr.ProcessId];
+            eventDeque.push_back(eventIter->second);
 
 #if _DEBUG
-        auto& container = mPendingPresentsByProcess[hdr.ProcessId];
-        for (UINT i = 0; i < container.size() - 1; ++i)
-        {
-            assert(container[i]->QpcTime < container[i + 1]->QpcTime);
-        }
+            auto& container = mPendingPresentsByProcess[hdr.ProcessId];
+            for (UINT i = 0; i < container.size() - 1; ++i)
+            {
+                assert(container[i]->QpcTime <= container[i + 1]->QpcTime);
+            }
 #endif
 
-        const uint32_t cMaxPendingPresents = 20;
-        if (eventDeque.size() > cMaxPendingPresents)
-        {
-            CompletePresent(eventDeque.front());
-            eventDeque.pop_front();
+            const uint32_t cMaxPendingPresents = 20;
+            if (eventDeque.size() > cMaxPendingPresents)
+            {
+                CompletePresent(eventDeque.front());
+                eventDeque.pop_front();
+            }
         }
     }
 }
@@ -256,6 +263,7 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
         return std::make_pair(eventIter->second, eventDeque.end());
     };
 
+    TraceEventInfo eventInfo(pEventRecord);
     switch (hdr.EventDescriptor.Id)
     {
         case DxgKrnl_Flip:
@@ -280,55 +288,52 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                 MMIOFlip = 3,
                 Software = 7,
             };
-            struct DxgKrnl_QueueSubmit_Data {
-                ptr_t Context;
-                DxgKrnl_QueueSubmit_Type Type;
-                uint32_t SubmitSequence;
-            };
+            auto Type = eventInfo.GetData<DxgKrnl_QueueSubmit_Type>(L"PacketType");
+            auto SubmitSequence = eventInfo.GetData<uint32_t>(L"SubmitSequence");
 
-            if (pEventRecord->UserDataLength >= sizeof(DxgKrnl_QueueSubmit_Data)) {
-                auto data = (DxgKrnl_QueueSubmit_Data*)pEventRecord->UserData;
+            if (Type == DxgKrnl_QueueSubmit_Type::MMIOFlip) {
+                auto eventIter = mPendingPresentByThread.find(hdr.ThreadId);
+                if (eventIter == mPendingPresentByThread.end()) {
+                    return;
+                }
 
-                if (data->Type == DxgKrnl_QueueSubmit_Type::MMIOFlip) {
-                    auto eventIter = mPendingPresentByThread.find(hdr.ThreadId);
-                    if (eventIter == mPendingPresentByThread.end()) {
-                        return;
-                    }
+                mFullscreenPresents.emplace(SubmitSequence, eventIter->second);
 
-                    mFullscreenPresents.emplace(data->SubmitSequence, eventIter->second);
-
-                    if (eventIter->second->TimeTaken != 0) {
-                        mPendingPresentByThread.erase(eventIter);
-                    }
+                if (eventIter->second->TimeTaken != 0) {
+                    mPendingPresentByThread.erase(eventIter);
                 }
             }
             break;
         }
         case DxgKrnl_MMIOFlip:
         {
-            struct DxgKrnl_MMIOFlip_Data {
-                ptr_t Adapter;
-                uint32_t VidPnSourceId;
-                uint32_t FlipSubmitSequence;
+            enum DxgKrnl_MMIOFlip_Flags {
+                FlipImmediate = 0x2,
+                FlipOnNextVSync = 0x4
             };
-            if (pEventRecord->UserDataLength < sizeof(DxgKrnl_MMIOFlip_Data)) {
-                return;
-            }
 
-            auto data = (DxgKrnl_MMIOFlip_Data*)pEventRecord->UserData;
+            auto FlipSubmitSequence = eventInfo.GetData<uint32_t>(L"FlipSubmitSequence");
+            auto Flags = eventInfo.GetData<DxgKrnl_MMIOFlip_Flags>(L"Flags");
 
-            auto eventIter = mFullscreenPresents.find(data->FlipSubmitSequence);
+            auto eventIter = mFullscreenPresents.find(FlipSubmitSequence);
             if (eventIter == mFullscreenPresents.end()) {
                 return;
             }
 
             eventIter->second->ReadyTime = EventTime;
+
+            if (Flags & DxgKrnl_MMIOFlip_Flags::FlipImmediate) {
+                eventIter->second->FinalState = PresentResult::Presented;
+                eventIter->second->ScreenTime = *(uint64_t*)&pEventRecord->EventHeader.TimeStamp;
+                CompletePresent(eventIter->second);
+                mFullscreenPresents.erase(eventIter);
+            }
+
             break;
         }
         case DxgKrnl_VSyncDPC:
         {
-            TraceEventInfo eventInfo(pEventRecord);
-            uint64_t FlipFenceId = eventInfo.GetData<uint64_t>(L"FlipFenceId");
+            auto FlipFenceId = eventInfo.GetData<uint64_t>(L"FlipFenceId");
 
             uint32_t FlipSubmitSequence = (uint32_t)(FlipFenceId >> 32u);
             auto eventIter = mFullscreenPresents.find(FlipSubmitSequence);
@@ -341,6 +346,34 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             CompletePresent(eventIter->second);
 
             mFullscreenPresents.erase(eventIter);
+            break;
+        }
+        case DxgKrnl_PresentHistoryDetailed:
+        {
+            auto eventIter = mPendingPresentByThread.find(hdr.ThreadId);
+            if (eventIter == mPendingPresentByThread.end()) {
+                return;
+            }
+
+            uint64_t TokenPtr = eventInfo.GetData<ptr_t>(L"Token");
+            mPresentHistoryByTokenPtr[TokenPtr] = eventIter->second;
+
+            if (eventIter->second->TimeTaken != 0) {
+                mPendingPresentByThread.erase(eventIter);
+            }
+            break;
+        }
+        case DxgKrnl_PresentHistory:
+        {
+            uint64_t TokenPtr = eventInfo.GetData<ptr_t>(L"Token");
+            auto eventIter = mPresentHistoryByTokenPtr.find(TokenPtr);
+            if (eventIter == mPresentHistoryByTokenPtr.end()) {
+                return;
+            }
+
+            eventIter->second->ReadyTime = EventTime;
+            mPresentHistoryByTokenPtr.erase(eventIter);
+            break;
         }
     }
 }
@@ -348,6 +381,130 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
 template <typename ptr_t>
 void DxgiConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
 {
+    enum {
+        Win32K_TokenCompositionSurfaceObject = 201,
+        Win32K_TokenStateChanged = 301,
+    };
+
+    auto& hdr = pEventRecord->EventHeader;
+    uint64_t EventTime = *(uint64_t*)&hdr.TimeStamp;
+
+    auto FindPendingPresentByProcess = [EventTime](std::deque<std::shared_ptr<PresentEvent>> &eventDeque)
+    {
+        for (auto iter = eventDeque.begin(), end = eventDeque.end();
+                iter != end;
+                ++iter)
+        {
+            auto& event = *iter->get();
+            if (event.QpcTime > EventTime) {
+                return end;
+            }
+
+            return iter;
+        }
+        return eventDeque.end();
+    };
+    auto FindPendingPresent = [this, EventTime, &hdr, &FindPendingPresentByProcess](std::deque<std::shared_ptr<PresentEvent>> &eventDeque)
+    {
+        auto eventIter = mPendingPresentByThread.find(hdr.ThreadId);
+
+        if (eventIter == mPendingPresentByThread.end()) {
+            auto dequeIter = FindPendingPresentByProcess(eventDeque);
+            if (dequeIter == eventDeque.end()) {
+                return std::make_pair(std::shared_ptr<PresentEvent>(nullptr), eventDeque.end());
+            }
+
+            return std::make_pair(*dequeIter, dequeIter);
+        }
+        
+        return std::make_pair(eventIter->second, eventDeque.end());
+    };
+
+    TraceEventInfo eventInfo(pEventRecord);
+
+    switch (hdr.EventDescriptor.Id)
+    {
+        case Win32K_TokenCompositionSurfaceObject:
+        {
+            auto &eventDeque = mPendingPresentsByProcess[hdr.ProcessId];
+            auto eventPair = FindPendingPresent(eventDeque);
+
+            if (!eventPair.first) {
+                return;
+            }
+            
+            eventPair.first->PresentMode = PresentMode::Composed_Flip;
+
+            if (eventPair.second != eventDeque.end()) {
+                eventDeque.erase(eventPair.second);
+                mPendingPresentByThread[hdr.ThreadId] = eventPair.first;
+            }
+
+            PresentHistoryTokenKey key(eventInfo.GetData<ptr_t>(L"pCompositionSurfaceObject"),
+                                       eventInfo.GetData<uint64_t>(L"PresentCount"),
+                                       eventInfo.GetData<uint32_t>(L"SwapChainIndex"));
+            mPresentHistoryTokens[key] = eventPair.first;
+            break;
+        }
+        case Win32K_TokenStateChanged:
+        {
+            PresentHistoryTokenKey key(eventInfo.GetData<ptr_t>(L"pCompositionSurfaceObject"),
+                                       eventInfo.GetData<uint32_t>(L"PresentCount"),
+                                       eventInfo.GetData<uint32_t>(L"SwapChainIndex"));
+            auto eventIter = mPresentHistoryTokens.find(key);
+            if (eventIter == mPresentHistoryTokens.end()) {
+                return;
+            }
+
+            enum class TokenState {
+                InFrame = 3,
+                Confirmed = 4,
+                Retired = 5,
+                Discarded = 6,
+            };
+            
+            auto &event = *eventIter->second;
+            auto state = eventInfo.GetData<TokenState>(L"NewState");
+            switch (state)
+            {
+                case TokenState::InFrame:
+                case TokenState::Confirmed:
+                {
+                    event.FinalState = PresentResult::Presented;
+
+                    bool iFlip = eventInfo.GetData<BOOL>(L"IndependentFlip") != 0;
+                    if (iFlip) {
+                        event.PresentMode = PresentMode::IndependentFlip;
+                    }
+
+                    break;
+                }
+                case TokenState::Retired:
+                {
+                    event.ScreenTime = EventTime;
+                    break;
+                }
+                case TokenState::Discarded:
+                {
+                    auto sharedPtr = eventIter->second;
+                    mPresentHistoryTokens.erase(eventIter);
+
+                    if (event.FinalState == PresentResult::Unknown) {
+                        event.FinalState = PresentResult::Discarded;
+                    }
+
+                    if (event.PresentMode == PresentMode::IndependentFlip) {
+                        event.ScreenTime = EventTime;
+                    }
+
+                    CompletePresent(sharedPtr);
+
+                    break;
+                }
+            }
+            break;
+        }
+    }
 }
 
 template <typename ptr_t>

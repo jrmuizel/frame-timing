@@ -28,7 +28,7 @@
 #pragma comment(lib, "shlwapi.lib")
 
 enum {
-    MAX_HISTORY_LENGTH = 60,
+    MAX_HISTORY_LENGTH = 200,
     CHAIN_TIMEOUT_THRESHOLD_TICKS = 10000 // 10 sec
 };
 
