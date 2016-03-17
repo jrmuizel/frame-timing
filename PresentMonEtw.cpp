@@ -113,6 +113,9 @@ struct DxgiConsumer : ITraceConsumer
     std::map<PresentHistoryTokenKey, std::shared_ptr<PresentEvent>> mPresentHistoryTokens;
     std::map<uint64_t, std::shared_ptr<PresentEvent>> mPresentHistoryByTokenPtr;
 
+    // Present by window, used for determining superceding presents
+    std::map<uint64_t, std::shared_ptr<PresentEvent>> mPresentByWindow;
+
     bool DequeuePresents(std::vector<std::shared_ptr<PresentEvent>>& outPresents)
     {
         if (mCompletedPresents.size())
@@ -136,8 +139,15 @@ struct DxgiConsumer : ITraceConsumer
     virtual bool ContinueProcessing() { return !g_Quit; }
 
 private:
-    void CompletePresent(std::shared_ptr<PresentEvent> const& p)
+    void CompletePresent(std::shared_ptr<PresentEvent> p)
     {
+        if (p->QueueSubmitSequence != 0) {
+            mFullscreenPresents.erase(p->QueueSubmitSequence);
+        }
+        if (p->Hwnd != 0) {
+            mPresentByWindow.erase(p->Hwnd);
+        }
+
         EnterCriticalSection(&mMutex);
         mCompletedPresents.push_back(p);
         LeaveCriticalSection(&mMutex);
@@ -222,14 +232,31 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
 {
     enum {
         DxgKrnl_Flip = 168,
+        DxgKrnl_QueueSubmit = 178,
         DxgKrnl_MMIOFlip = 116,
         DxgKrnl_VSyncDPC = 17,
-        DxgKrnl_QueueSubmit = 178,
+        DxgKrnl_Present = 184,
         DxgKrnl_PresentHistoryDetailed = 215,
         DxgKrnl_PresentHistory = 171,
+        DxgKrnl_Blit = 166,
     };
 
     auto& hdr = pEventRecord->EventHeader;
+    switch (hdr.EventDescriptor.Id) 
+    {
+    case DxgKrnl_Flip:
+    case DxgKrnl_QueueSubmit:
+    case DxgKrnl_MMIOFlip:
+    case DxgKrnl_VSyncDPC:
+    case DxgKrnl_Present:
+    case DxgKrnl_PresentHistoryDetailed:
+    case DxgKrnl_PresentHistory:
+    case DxgKrnl_Blit:
+        break;
+    default:
+        return;
+    }
+
     uint64_t EventTime = *(uint64_t*)&hdr.TimeStamp;
 
     auto FindPendingPresentByProcess = [EventTime](std::deque<std::shared_ptr<PresentEvent>> &eventDeque)
@@ -268,6 +295,9 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
     {
         case DxgKrnl_Flip:
         {
+            // A flip event is emitted during fullscreen present submission.
+            // Afterwards, expect an MMIOFlip packet on the same thread, used
+            // to trace the flip to screen.
             auto &eventDeque = mPendingPresentsByProcess[hdr.ProcessId];
             auto eventPair = FindPendingPresent(eventDeque);
 
@@ -284,6 +314,9 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
         }
         case DxgKrnl_QueueSubmit:
         {
+            // A QueueSubmit can be many types, but these are interesting for present.
+            // This event is emitted after a flip/blt/PHT event, and may be the only way
+            // to trace completion of the present.
             enum class DxgKrnl_QueueSubmit_Type {
                 MMIOFlip = 3,
                 Software = 7,
@@ -291,22 +324,25 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             auto Type = eventInfo.GetData<DxgKrnl_QueueSubmit_Type>(L"PacketType");
             auto SubmitSequence = eventInfo.GetData<uint32_t>(L"SubmitSequence");
 
-            if (Type == DxgKrnl_QueueSubmit_Type::MMIOFlip) {
+            if (Type == DxgKrnl_QueueSubmit_Type::MMIOFlip ||
+                Type == DxgKrnl_QueueSubmit_Type::Software) {
                 auto eventIter = mPendingPresentByThread.find(hdr.ThreadId);
                 if (eventIter == mPendingPresentByThread.end()) {
                     return;
                 }
 
+                eventIter->second->QueueSubmitSequence = SubmitSequence;
                 mFullscreenPresents.emplace(SubmitSequence, eventIter->second);
-
-                if (eventIter->second->TimeTaken != 0) {
-                    mPendingPresentByThread.erase(eventIter);
-                }
             }
             break;
         }
         case DxgKrnl_MMIOFlip:
         {
+            // An MMIOFlip event is emitted when an MMIOFlip packet is dequeued.
+            // This corresponds to all GPU work prior to the flip being completed
+            // (i.e. present "ready")
+            // It also is emitted when an independent flip PHT is dequed,
+            // and will tell us whether the present is immediate or vsync.
             enum DxgKrnl_MMIOFlip_Flags {
                 FlipImmediate = 0x2,
                 FlipOnNextVSync = 0x4
@@ -325,14 +361,19 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             if (Flags & DxgKrnl_MMIOFlip_Flags::FlipImmediate) {
                 eventIter->second->FinalState = PresentResult::Presented;
                 eventIter->second->ScreenTime = *(uint64_t*)&pEventRecord->EventHeader.TimeStamp;
-                CompletePresent(eventIter->second);
-                mFullscreenPresents.erase(eventIter);
+                if (eventIter->second->PresentMode == PresentMode::Fullscreen) {
+                    CompletePresent(eventIter->second);
+                } else {
+                    eventIter->second->PresentMode = PresentMode::ImmediateIndependentFlip;
+                }
             }
 
             break;
         }
         case DxgKrnl_VSyncDPC:
         {
+            // The VSyncDPC contains a field telling us what flipped to screen.
+            // This is the way to track completion of a fullscreen present.
             auto FlipFenceId = eventInfo.GetData<uint64_t>(L"FlipFenceId");
 
             uint32_t FlipSubmitSequence = (uint32_t)(FlipFenceId >> 32u);
@@ -340,23 +381,50 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             if (eventIter == mFullscreenPresents.end()) {
                 return;
             }
-
+            
             eventIter->second->ScreenTime = *(uint64_t*)&pEventRecord->EventHeader.TimeStamp;
             eventIter->second->FinalState = PresentResult::Presented;
-            CompletePresent(eventIter->second);
-
-            mFullscreenPresents.erase(eventIter);
+            if (eventIter->second->PresentMode == PresentMode::Fullscreen) {
+                CompletePresent(eventIter->second);
+            }
             break;
         }
-        case DxgKrnl_PresentHistoryDetailed:
+        case DxgKrnl_Present:
         {
+            // This event is emitted at the end of the kernel present, before returning.
+            // All other events have already been logged, but this one contains one
+            // extra piece of useful information: the hWnd that a present targeted,
+            // used to determine when presents are discarded instead of composed.
             auto eventIter = mPendingPresentByThread.find(hdr.ThreadId);
             if (eventIter == mPendingPresentByThread.end()) {
                 return;
             }
 
-            uint64_t TokenPtr = eventInfo.GetData<ptr_t>(L"Token");
-            mPresentHistoryByTokenPtr[TokenPtr] = eventIter->second;
+            auto hWnd = eventInfo.GetData<ptr_t>(L"hWindow");
+            eventIter->second->Hwnd = hWnd;
+
+            if (eventIter->second->TimeTaken != 0) {
+                mPendingPresentByThread.erase(eventIter);
+            }
+            break;
+        }
+        case DxgKrnl_PresentHistoryDetailed:
+        {
+            // This event is emitted during submission of a windowed present.
+            // In the case of flip model, it is used to find a key to watch for the
+            // event which triggers the "ready" state.
+            // In the case of blit model, it is used to distinguish between fs/windowed.
+            auto eventIter = mPendingPresentByThread.find(hdr.ThreadId);
+            if (eventIter == mPendingPresentByThread.end()) {
+                return;
+            }
+
+            if (eventIter->second->PresentMode == PresentMode::Fullscreen_Blit) {
+                eventIter->second->PresentMode = PresentMode::Windowed_Blit;
+            } else {
+                uint64_t TokenPtr = eventInfo.GetData<ptr_t>(L"Token");
+                mPresentHistoryByTokenPtr[TokenPtr] = eventIter->second;
+            }
 
             if (eventIter->second->TimeTaken != 0) {
                 mPendingPresentByThread.erase(eventIter);
@@ -375,6 +443,18 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             mPresentHistoryByTokenPtr.erase(eventIter);
             break;
         }
+        case DxgKrnl_Blit:
+        {
+            auto &eventDeque = mPendingPresentsByProcess[hdr.ProcessId];
+            auto eventPair = FindPendingPresent(eventDeque);
+
+            if (!eventPair.first) {
+                return;
+            }
+
+            eventPair.first->PresentMode = PresentMode::Fullscreen_Blit;
+            break;
+        }
     }
 }
 
@@ -387,6 +467,15 @@ void DxgiConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
     };
 
     auto& hdr = pEventRecord->EventHeader;
+    switch (hdr.EventDescriptor.Id) 
+    {
+    case Win32K_TokenCompositionSurfaceObject:
+    case Win32K_TokenStateChanged:
+        break;
+    default:
+        return;
+    }
+
     uint64_t EventTime = *(uint64_t*)&hdr.TimeStamp;
 
     auto FindPendingPresentByProcess = [EventTime](std::deque<std::shared_ptr<PresentEvent>> &eventDeque)
@@ -468,15 +557,29 @@ void DxgiConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
             switch (state)
             {
                 case TokenState::InFrame:
-                case TokenState::Confirmed:
                 {
-                    event.FinalState = PresentResult::Presented;
+                    if (event.Hwnd) {
+                        auto hWndIter = mPresentByWindow.find(event.Hwnd);
+                        if (hWndIter == mPresentByWindow.end()) {
+                            mPresentByWindow.emplace(event.Hwnd, eventIter->second);
+                        } else if (hWndIter->second != eventIter->second) {
+                            hWndIter->second->FinalState = PresentResult::Discarded;
+                            hWndIter->second = eventIter->second;
+                        }
+                    }
 
                     bool iFlip = eventInfo.GetData<BOOL>(L"IndependentFlip") != 0;
-                    if (iFlip) {
+                    if (iFlip && event.PresentMode == PresentMode::Composed_Flip) {
                         event.PresentMode = PresentMode::IndependentFlip;
                     }
 
+                    break;
+                }
+                case TokenState::Confirmed:
+                {
+                    if (event.FinalState == PresentResult::Unknown) {
+                        event.FinalState = PresentResult::Presented;
+                    }
                     break;
                 }
                 case TokenState::Retired:
@@ -570,10 +673,11 @@ void PresentMonEtw(PresentMonArgs args)
     }
 
     session.EnableProvider(DXGI_PROVIDER_GUID, TRACE_LEVEL_INFORMATION);
-    session.EnableProvider(DXGKRNL_PROVIDER_GUID, TRACE_LEVEL_INFORMATION);
-    session.EnableProvider(WIN32K_PROVIDER_GUID, TRACE_LEVEL_INFORMATION);
+    session.EnableProvider(DXGKRNL_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 1);
+    session.EnableProvider(WIN32K_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 0x1000);
 
     session.OpenTrace(&consumer);
+    uint32_t eventsLost, buffersLost;
 
     {
         // Launch the ETW producer thread
@@ -591,6 +695,9 @@ void PresentMonEtw(PresentMonArgs args)
                 consumer.DequeuePresents(presents);
 
                 PresentMon_Update(data, presents, session.PerfFreq());
+                if (session.AnythingLost(eventsLost, buffersLost)) {
+                    printf("Lost %u events, %u buffers.", eventsLost, buffersLost);
+                }
 
                 Sleep(100);
             }

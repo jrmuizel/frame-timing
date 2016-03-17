@@ -22,6 +22,8 @@ TraceSession::TraceSession(LPCTSTR szSessionName)
     , _pSessionProperties(0)
     , hSession(0)
     , _hTrace(0)
+    , _eventsLost(0)
+    , _buffersLost(0)
 {
 }
 
@@ -42,6 +44,9 @@ bool TraceSession::Start()
         _pSessionProperties->Wnode.ClientContext = 1;
         _pSessionProperties->LogFileMode = EVENT_TRACE_REAL_TIME_MODE;
         _pSessionProperties->LoggerNameOffset = sizeof(EVENT_TRACE_PROPERTIES);
+        _pSessionProperties->BufferSize = 0;
+        _pSessionProperties->MaximumBuffers = 100;
+        _pSessionProperties->MaximumBuffers = 200;
     }
 
     // Create the trace session.
@@ -97,6 +102,20 @@ bool TraceSession::Stop()
     _pSessionProperties = NULL;
 
     return (_status == ERROR_SUCCESS);
+}
+
+bool TraceSession::AnythingLost(uint32_t &events, uint32_t &buffers)
+{
+    _status = ControlTraceW(hSession, _szSessionName, _pSessionProperties, EVENT_TRACE_CONTROL_QUERY);
+    if (_status != ERROR_SUCCESS && _status != ERROR_MORE_DATA) {
+        return true;
+    }
+    _status = ERROR_SUCCESS;
+    events = _pSessionProperties->EventsLost - _eventsLost;
+    buffers = _pSessionProperties->RealTimeBuffersLost - _buffersLost;
+    _eventsLost = _pSessionProperties->EventsLost;
+    _buffersLost = _pSessionProperties->RealTimeBuffersLost;
+    return events > 0 || buffers > 0;
 }
 
 ULONG TraceSession::Status() const

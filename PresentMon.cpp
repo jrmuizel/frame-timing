@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <numeric>
 #include <ctime>
+#include <iterator>
 
 #include <windows.h>
 #include <psapi.h>
@@ -28,7 +29,8 @@
 #pragma comment(lib, "shlwapi.lib")
 
 enum {
-    MAX_HISTORY_LENGTH = 200,
+    MAX_HISTORY_TIME = 2000,
+    MAX_DISPLAYED_HISTORY_TIME = 2000,
     CHAIN_TIMEOUT_THRESHOLD_TICKS = 10000 // 10 sec
 };
 
@@ -76,6 +78,16 @@ const char* PresentModeToString(PresentMode mode)
     }
 }
 
+void PruneDeque(std::deque<PresentEvent> &presentHistory, uint64_t perfFreq, uint32_t msTimeDiff) {
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+
+    while (!presentHistory.empty() &&
+           ((double)(now.QuadPart - presentHistory.front().QpcTime) / perfFreq) * 1000 > msTimeDiff) {
+        presentHistory.pop_front();
+    }
+}
+
 void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perfFreq)
 {
     auto& proc = pm.mProcessMap[p.ProcessId];
@@ -93,10 +105,13 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
     }
 
     auto& chain = proc.mChainMap[p.SwapChainAddress];
-    if (chain.mPresentHistory.size() > MAX_HISTORY_LENGTH) {
-        chain.mPresentHistory.pop_front();
-    }
     chain.mPresentHistory.push_back(p);
+
+    if (p.FinalState == PresentResult::Presented) {
+        PruneDeque(chain.mDisplayedPresentHistory, perfFreq, MAX_DISPLAYED_HISTORY_TIME);
+        chain.mDisplayedPresentHistory.push_back(p);
+    }
+
     chain.mLastUpdateTicks = now;
     chain.mLastSyncInterval = p.SyncInterval;
     chain.mLastFlags = p.PresentFlags;
@@ -109,27 +124,39 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
             auto& prev = chain.mPresentHistory[len - 2];
             double deltaMilliseconds = 1000 * double(curr.QpcTime - prev.QpcTime) / perfFreq;
             double timeTakenMilliseconds = 1000 * double(curr.TimeTaken) / perfFreq;
-            fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%.3lf,%.3lf,%d,%d,%s\n",
-                proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, deltaMilliseconds, timeTakenMilliseconds, curr.SyncInterval, curr.PresentFlags, PresentModeToString(curr.PresentMode));
+            fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%.3lf,%.3lf,%d,%d,%s,%d\n",
+                proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, deltaMilliseconds, timeTakenMilliseconds, curr.SyncInterval, curr.PresentFlags, PresentModeToString(curr.PresentMode), curr.FinalState != PresentResult::Discarded);
         }
     }
 }
 
-static double ComputeFps(SwapChainData& stats, uint64_t qpcFreq)
+static double ComputeFps(std::deque<PresentEvent> const& presentHistory, uint64_t qpcFreq)
 {
     // TODO: better method
-    auto start = stats.mPresentHistory.front().QpcTime;
-    auto end = stats.mPresentHistory.back().QpcTime;
-    auto count = stats.mPresentHistory.size() - 1;
+    if (presentHistory.size() < 2) {
+        return 0.0;
+    }
+    auto start = presentHistory.front().QpcTime;
+    auto end = presentHistory.back().QpcTime;
+    auto count = presentHistory.size() - 1;
 
     double deltaT = double(end - start) / qpcFreq;
     return count / deltaT;
 }
 
+static double ComputeDisplayedFps(SwapChainData& stats, uint64_t qpcFreq)
+{
+    return ComputeFps(stats.mDisplayedPresentHistory, qpcFreq);
+}
+
+static double ComputeFps(SwapChainData& stats, uint64_t qpcFreq)
+{
+    return ComputeFps(stats.mPresentHistory, qpcFreq);
+}
+
 static double ComputeCpuFrameTime(SwapChainData& stats, uint64_t qpcFreq)
 {
-    if (stats.mPresentHistory.empty())
-    {
+    if (stats.mPresentHistory.size() < 2) {
         return 0.0;
     }
 
@@ -164,7 +191,7 @@ void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
     }
 
     if (pm.mOutputFile) {
-        fprintf(pm.mOutputFile, "module,pid,chain,delta,timeTaken,vsync,flags,mode\n");
+        fprintf(pm.mOutputFile, "module,pid,chain,delta,timeTaken,vsync,flags,mode,displayed\n");
     }
 }
 
@@ -192,10 +219,14 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
         display += FormatString("%s[%d]:\n", proc.second.mModuleName.c_str(),proc.first);
         for (auto& chain : proc.second.mChainMap)
         {
+            PruneDeque(chain.second.mPresentHistory, perfFreq, MAX_HISTORY_TIME);
+            PruneDeque(chain.second.mDisplayedPresentHistory, perfFreq, MAX_DISPLAYED_HISTORY_TIME);
+
             double fps = ComputeFps(chain.second, perfFreq);
+            double dispFps = ComputeDisplayedFps(chain.second, perfFreq);
             double cpuTime = ComputeCpuFrameTime(chain.second, perfFreq);
-            display += FormatString("\t%016llX: SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, %.2lf ms CPU) (%s)%s\n",
-                chain.first, chain.second.mLastSyncInterval, chain.second.mLastFlags, 1000.0/fps, fps, cpuTime * 1000.0,
+            display += FormatString("\t%016llX: SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, %.1lf displayed fps, %.2lf ms CPU) (%s)%s\n",
+                chain.first, chain.second.mLastSyncInterval, chain.second.mLastFlags, 1000.0/fps, fps, dispFps, cpuTime * 1000.0,
                 PresentModeToString(chain.second.mLastPresentMode),
                 (now - chain.second.mLastUpdateTicks) > 1000 ? " [STALE]" : "");
         }

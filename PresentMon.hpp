@@ -31,6 +31,8 @@ enum class PresentMode
     DirectFlip,
     IndependentFlip,
     ImmediateIndependentFlip,
+    Windowed_Blit,
+    Fullscreen_Blit,
 };
 enum class PresentResult
 {
@@ -55,6 +57,10 @@ struct PresentEvent {
     // Timestamp of "complete" state (data on screen or discarded)
     uint64_t ScreenTime = 0;
     PresentResult FinalState = PresentResult::Unknown;
+
+    // Additional transient state
+    uint32_t QueueSubmitSequence = 0;
+    uint64_t Hwnd = 0;
 };
 
 struct SwapChainData {
@@ -62,6 +68,7 @@ struct SwapChainData {
     uint32_t mLastSyncInterval = -1;
     uint32_t mLastFlags = -1;
     std::deque<PresentEvent> mPresentHistory;
+    std::deque<PresentEvent> mDisplayedPresentHistory;
     PresentMode mLastPresentMode = PresentMode::Unknown;
 };
 

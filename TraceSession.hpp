@@ -8,6 +8,7 @@
 #include <evntprov.h> // must be after windows.h
 #include <evntrace.h> // must be after windows.h
 #include <evntcons.h> // must be after windows.h
+#include <stdint.h>
 
 #undef OpenTrace
 
@@ -32,6 +33,8 @@ public:
     bool DisableProvider(const GUID& providerId);
     bool Stop();
 
+    bool AnythingLost(uint32_t &events, uint32_t &buffers);
+
     ULONG Status() const;
     LONGLONG PerfFreq() const;
 
@@ -42,4 +45,5 @@ private:
     TRACEHANDLE hSession;
     EVENT_TRACE_LOGFILEW _logFile;
     TRACEHANDLE _hTrace;
+    uint32_t _eventsLost, _buffersLost;
 };
