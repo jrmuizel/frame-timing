@@ -62,6 +62,7 @@ struct SwapChainData {
     uint32_t mLastSyncInterval = -1;
     uint32_t mLastFlags = -1;
     std::deque<PresentEvent> mPresentHistory;
+    PresentMode mLastPresentMode = PresentMode::Unknown;
 };
 
 struct ProcessInfo {

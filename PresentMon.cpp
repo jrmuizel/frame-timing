@@ -64,6 +64,18 @@ static void UpdateProcessInfo(ProcessInfo& info, uint64_t now, uint32_t thisPid)
     });
 }
 
+const char* PresentModeToString(PresentMode mode)
+{
+    switch (mode) {
+    case PresentMode::Fullscreen: return "Fullscreen";
+    case PresentMode::Composed_Flip: return "Windowed Flip";
+    case PresentMode::DirectFlip: return "DirectFlip";
+    case PresentMode::IndependentFlip: return "IndependentFlip";
+    case PresentMode::ImmediateIndependentFlip: return "Immediate iFlip";
+    default: return "Other";
+    }
+}
+
 void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perfFreq)
 {
     auto& proc = pm.mProcessMap[p.ProcessId];
@@ -88,6 +100,7 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
     chain.mLastUpdateTicks = now;
     chain.mLastSyncInterval = p.SyncInterval;
     chain.mLastFlags = p.PresentFlags;
+    chain.mLastPresentMode = p.PresentMode;
 
     if (pm.mOutputFile) {
         auto len = chain.mPresentHistory.size();
@@ -96,8 +109,8 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
             auto& prev = chain.mPresentHistory[len - 2];
             double deltaMilliseconds = 1000 * double(curr.QpcTime - prev.QpcTime) / perfFreq;
             double timeTakenMilliseconds = 1000 * double(curr.TimeTaken) / perfFreq;
-            fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%.3lf,%.3lf,%d,%d\n",
-                proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, deltaMilliseconds, timeTakenMilliseconds, curr.SyncInterval, curr.PresentFlags);
+            fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%.3lf,%.3lf,%d,%d,%s\n",
+                proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, deltaMilliseconds, timeTakenMilliseconds, curr.SyncInterval, curr.PresentFlags, PresentModeToString(curr.PresentMode));
         }
     }
 }
@@ -151,7 +164,7 @@ void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
     }
 
     if (pm.mOutputFile) {
-        fprintf(pm.mOutputFile, "module,pid,chain,delta,timeTaken,vsync,flags\n");
+        fprintf(pm.mOutputFile, "module,pid,chain,delta,timeTaken,vsync,flags,mode\n");
     }
 }
 
@@ -181,8 +194,9 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
         {
             double fps = ComputeFps(chain.second, perfFreq);
             double cpuTime = ComputeCpuFrameTime(chain.second, perfFreq);
-            display += FormatString("\t%016llX: SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, %.2lf ms CPU)%s\n",
+            display += FormatString("\t%016llX: SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, %.2lf ms CPU) (%s)%s\n",
                 chain.first, chain.second.mLastSyncInterval, chain.second.mLastFlags, 1000.0/fps, fps, cpuTime * 1000.0,
+                PresentModeToString(chain.second.mLastPresentMode),
                 (now - chain.second.mLastUpdateTicks) > 1000 ? " [STALE]" : "");
         }
     }
