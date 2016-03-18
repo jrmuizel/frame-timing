@@ -133,6 +133,9 @@ struct DxgiConsumer : ITraceConsumer
     std::map<uint32_t, std::deque<std::shared_ptr<PresentEvent>>> mWaitingForDWM;
     std::set<uint32_t> mWindowsBeingComposed;
 
+    // Legacy blit presents go down a very different path
+    std::map<uint64_t, std::shared_ptr<PresentEvent>> mLegacyBlitPresentMap;
+
     bool DequeuePresents(std::vector<std::shared_ptr<PresentEvent>>& outPresents)
     {
         if (mCompletedPresents.size())
@@ -256,7 +259,8 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
         DxgKrnl_VSyncDPC = 17,
         DxgKrnl_Present = 184,
         DxgKrnl_PresentHistoryDetailed = 215,
-        DxgKrnl_PresentHistory = 172,
+        DxgKrnl_SubmitPresentHistory = 171,
+        DxgKrnl_PropagatePresentHistory = 172,
         DxgKrnl_Blit = 166,
     };
 
@@ -270,7 +274,8 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
     case DxgKrnl_VSyncDPC:
     case DxgKrnl_Present:
     case DxgKrnl_PresentHistoryDetailed:
-    case DxgKrnl_PresentHistory:
+    case DxgKrnl_SubmitPresentHistory:
+    case DxgKrnl_PropagatePresentHistory:
     case DxgKrnl_Blit:
         break;
     default:
@@ -457,7 +462,6 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                         // This won't make it to screen, go ahead and complete it now
                         CompletePresent(eventPtr);
                     }
-
                 }
             } else {
                 eventIter->second->Hwnd = hWnd;
@@ -490,14 +494,29 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             }
             break;
         }
-        case DxgKrnl_PresentHistory:
+        case DxgKrnl_SubmitPresentHistory:
+        {
+            auto eventIter = mPendingPresentByThread.find(hdr.ThreadId);
+            if (eventIter == mPendingPresentByThread.end()) {
+                return;
+            }
+
+            if (eventIter->second->PresentMode == PresentMode::Fullscreen_Blit) {
+                auto TokenData = eventInfo.GetData<uint64_t>(L"TokenData");
+                mLegacyBlitPresentMap[TokenData] = eventIter->second;
+
+                eventIter->second->ReadyTime = EventTime;
+                eventIter->second->PresentMode = PresentMode::Legacy_Windowed_Blit;
+            }
+            break;
+        }
+        case DxgKrnl_PropagatePresentHistory:
         {
             uint64_t TokenPtr = eventInfo.GetPtr(L"Token");
             auto eventIter = mPresentHistoryByTokenPtr.find(TokenPtr);
             if (eventIter == mPresentHistoryByTokenPtr.end()) {
                 return;
             }
-
             eventIter->second->ReadyTime = EventTime;
 
             if (eventIter->second->FinalState == PresentResult::Discarded &&
@@ -686,6 +705,7 @@ void DxgiConsumer::OnDWMEvent(PEVENT_RECORD pEventRecord)
     enum {
         DWM_DwmUpdateWindow = 46,
         DWM_Schedule_Present_Start = 15,
+        DWM_FlipChain_Pending = 69,
     };
 
     auto& hdr = pEventRecord->EventHeader;
@@ -693,6 +713,7 @@ void DxgiConsumer::OnDWMEvent(PEVENT_RECORD pEventRecord)
     {
     case DWM_DwmUpdateWindow:
     case DWM_Schedule_Present_Start:
+    case DWM_FlipChain_Pending:
         break;
     default:
         return;
@@ -718,7 +739,8 @@ void DxgiConsumer::OnDWMEvent(PEVENT_RECORD pEventRecord)
             {
                 auto hWndIter = mPresentByWindow.find(hWnd);
                 if (hWndIter != mPresentByWindow.end()) {
-                    if (hWndIter->second->PresentMode != PresentMode::Windowed_Blit) {
+                    if (hWndIter->second->PresentMode != PresentMode::Windowed_Blit &&
+                        hWndIter->second->PresentMode != PresentMode::Legacy_Windowed_Blit) {
                         continue;
                     }
                     dwmDeque.emplace_back(hWndIter->second);
@@ -727,6 +749,33 @@ void DxgiConsumer::OnDWMEvent(PEVENT_RECORD pEventRecord)
                 }
             }
             mWindowsBeingComposed.clear();
+            break;
+        }
+        case DWM_FlipChain_Pending:
+        {
+            TraceEventInfo eventInfo(pEventRecord);
+            uint32_t flipChainId = (uint32_t)eventInfo.GetData<uint64_t>(L"ulFlipChain");
+            uint32_t serialNumber = (uint32_t)eventInfo.GetData<uint64_t>(L"ulSerialNumber");
+            uint64_t token = ((uint64_t)flipChainId << 32ull) | serialNumber;
+            auto flipIter = mLegacyBlitPresentMap.find(token);
+            if (flipIter == mLegacyBlitPresentMap.end()) {
+                return;
+            }
+
+            auto hWnd = (uint32_t)eventInfo.GetData<uint64_t>(L"hwnd");
+            auto hWndIter = mPresentByWindow.find(hWnd);
+            if (hWndIter == mPresentByWindow.end()) {
+                mPresentByWindow.emplace(hWnd, flipIter->second);
+            } else if (hWndIter->second != flipIter->second) {
+                auto eventPtr = hWndIter->second;
+                hWndIter->second = flipIter->second;
+
+                eventPtr->FinalState = PresentResult::Discarded;
+                CompletePresent(eventPtr);
+            }
+
+            mLegacyBlitPresentMap.erase(flipIter);
+            mWindowsBeingComposed.insert(hWnd);
             break;
         }
     }
@@ -786,7 +835,7 @@ void PresentMonEtw(PresentMonArgs args)
     session.EnableProvider(DXGI_PROVIDER_GUID, TRACE_LEVEL_INFORMATION);
     session.EnableProvider(DXGKRNL_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 1);
     session.EnableProvider(WIN32K_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 0x1000);
-    session.EnableProvider(DWM_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 1);
+    session.EnableProvider(DWM_PROVIDER_GUID, TRACE_LEVEL_RESERVED6);
 
     session.OpenTrace(&consumer);
     uint32_t eventsLost, buffersLost;

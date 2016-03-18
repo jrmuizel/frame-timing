@@ -76,6 +76,7 @@ const char* PresentModeToString(PresentMode mode)
     case PresentMode::ImmediateIndependentFlip: return "Immediate iFlip";
     case PresentMode::Fullscreen_Blit: return "Fullscreen Blit";
     case PresentMode::Windowed_Blit: return "Windowed Blit";
+    case PresentMode::Legacy_Windowed_Blit: return "VistaBlit";
     default: return "Other";
     }
 }

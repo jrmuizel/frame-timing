@@ -33,6 +33,7 @@ enum class PresentMode
     ImmediateIndependentFlip,
     Windowed_Blit,
     Fullscreen_Blit,
+    Legacy_Windowed_Blit,
 };
 enum class PresentResult
 {
