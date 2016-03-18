@@ -23,13 +23,17 @@
 #include <string>
 #include <thread>
 #include <tdh.h>
+#include <dxgi.h>
+#include <set>
 
 struct __declspec(uuid("{CA11C036-0102-4A2D-A6AD-F03CFED5D3C9}")) DXGI_PROVIDER_GUID_HOLDER;
 struct __declspec(uuid("{802ec45a-1e99-4b83-9920-87c98277ba9d}")) DXGKRNL_PROVIDER_GUID_HOLDER;
 struct __declspec(uuid("{8c416c79-d49b-4f01-a467-e56d3aa8234c}")) WIN32K_PROVIDER_GUID_HOLDER;
+struct __declspec(uuid("{9e9bba3c-2e38-40cb-99f4-9e8281425164}")) DWM_PROVIDER_GUID_HOLDER;
 static const auto DXGI_PROVIDER_GUID = __uuidof(DXGI_PROVIDER_GUID_HOLDER);
 static const auto DXGKRNL_PROVIDER_GUID = __uuidof(DXGKRNL_PROVIDER_GUID_HOLDER);
 static const auto WIN32K_PROVIDER_GUID = __uuidof(WIN32K_PROVIDER_GUID_HOLDER);
+static const auto DWM_PROVIDER_GUID = __uuidof(DWM_PROVIDER_GUID_HOLDER);
 
 extern bool g_Quit;
 
@@ -85,6 +89,15 @@ public:
         return local;
     }
 
+    uint64_t GetPtr(PCWSTR name) {
+        if (pEvent->EventHeader.Flags & EVENT_HEADER_FLAG_32_BIT_HEADER) {
+            return GetData<uint32_t>(name);
+        } else if (pEvent->EventHeader.Flags & EVENT_HEADER_FLAG_64_BIT_HEADER) {
+            return GetData<uint64_t>(name);
+        }
+        return 0;
+    }
+
 private:
     TRACE_EVENT_INFO* pInfo;
     EVENT_RECORD* pEvent;
@@ -116,6 +129,10 @@ struct DxgiConsumer : ITraceConsumer
     // Present by window, used for determining superceding presents
     std::map<uint64_t, std::shared_ptr<PresentEvent>> mPresentByWindow;
 
+    // Presents that will be completed by DWM's next present
+    std::map<uint32_t, std::deque<std::shared_ptr<PresentEvent>>> mWaitingForDWM;
+    std::set<uint32_t> mWindowsBeingComposed;
+
     bool DequeuePresents(std::vector<std::shared_ptr<PresentEvent>>& outPresents)
     {
         if (mCompletedPresents.size())
@@ -141,6 +158,12 @@ struct DxgiConsumer : ITraceConsumer
 private:
     void CompletePresent(std::shared_ptr<PresentEvent> p)
     {
+        for (auto& p2 : p->DependentPresents) {
+            p2->ScreenTime = p->ScreenTime;
+            CompletePresent(p2);
+        }
+        p->DependentPresents.clear();
+
         if (p->QueueSubmitSequence != 0) {
             mFullscreenPresents.erase(p->QueueSubmitSequence);
         }
@@ -153,91 +176,87 @@ private:
         LeaveCriticalSection(&mMutex);
     }
 
-    template <typename ptr_t>
     void OnDXGIEvent(_In_ PEVENT_RECORD pEventRecord);
-    template <typename ptr_t>
     void OnDXGKrnlEvent(_In_ PEVENT_RECORD pEventRecord);
-    template <typename ptr_t>
     void OnWin32kEvent(_In_ PEVENT_RECORD pEventRecord);
-
-    template <typename ptr_t>
-    void OnEventRecordBitnessAware(_In_ PEVENT_RECORD pEventRecord);
+    void OnDWMEvent(_In_ PEVENT_RECORD pEventRecord);
 };
 
-template <typename ptr_t>
 void DxgiConsumer::OnDXGIEvent(PEVENT_RECORD pEventRecord)
 {
     enum {
-        IDXGISwapChain_Present_Start = 178,
-        IDXGISwapChain_Present_Stop
+        DXGIPresent_Start = 42,
+        DXGIPresent_Stop,
     };
 
     auto& hdr = pEventRecord->EventHeader;
     uint64_t EventTime = *(uint64_t*)&hdr.TimeStamp;
-    if (hdr.EventDescriptor.Id == IDXGISwapChain_Present_Start) {
-        PresentEvent event;
-        event.ProcessId = hdr.ProcessId;
-        event.QpcTime = EventTime;
-        
-        struct IDXGISwapChain_Present_Start_Data {
-            ptr_t SwapChainAddress;
-            uint32_t SyncInterval;
-            uint32_t Flags;
-        };
-        if (pEventRecord->UserDataLength >= sizeof(IDXGISwapChain_Present_Start_Data)) {
-            auto data = (IDXGISwapChain_Present_Start_Data*)pEventRecord->UserData;
-            event.SwapChainAddress = data->SwapChainAddress;
-            event.SyncInterval = data->SyncInterval;
-            event.PresentFlags = data->Flags;
-        }
-        
-        mPendingPresentByThread[hdr.ThreadId] = std::make_shared<PresentEvent>(event);
-    }
-    else if (hdr.EventDescriptor.Id == IDXGISwapChain_Present_Stop)
+    switch (hdr.EventDescriptor.Id)
     {
-        auto eventIter = mPendingPresentByThread.find(hdr.ThreadId);
-        if (eventIter == mPendingPresentByThread.end()) {
-            return;
+        case DXGIPresent_Start:
+        {
+            PresentEvent event;
+            event.ProcessId = hdr.ProcessId;
+            event.QpcTime = EventTime;
+        
+            TraceEventInfo eventInfo(pEventRecord);
+            event.SwapChainAddress = eventInfo.GetPtr(L"pIDXGISwapChain");
+            event.SyncInterval = eventInfo.GetData<uint32_t>(L"SyncInterval");
+            event.PresentFlags = eventInfo.GetData<uint32_t>(L"Flags");
+        
+            // Ignore PRESENT_TEST: it's just to check if you're still fullscreen, doesn't actually do anything
+            if ((event.PresentFlags & DXGI_PRESENT_TEST) == 0) {
+                mPendingPresentByThread[hdr.ThreadId] = std::make_shared<PresentEvent>(event);
+            }
+            break;
         }
-        auto &event = *eventIter->second;
+        case DXGIPresent_Stop:
+        {
+            auto eventIter = mPendingPresentByThread.find(hdr.ThreadId);
+            if (eventIter == mPendingPresentByThread.end()) {
+                return;
+            }
+            auto &event = *eventIter->second;
 
-        uint64_t EndTime = EventTime;
-        assert(event.QpcTime < EndTime);
-        event.TimeTaken = EndTime - event.QpcTime;
+            uint64_t EndTime = EventTime;
+            assert(event.QpcTime < EndTime);
+            event.TimeTaken = EndTime - event.QpcTime;
 
-        if (event.PresentMode == PresentMode::Unknown) {
-            auto& eventDeque = mPendingPresentsByProcess[hdr.ProcessId];
-            eventDeque.push_back(eventIter->second);
+            if (event.PresentMode == PresentMode::Unknown) {
+                auto& eventDeque = mPendingPresentsByProcess[hdr.ProcessId];
+                eventDeque.push_back(eventIter->second);
 
 #if _DEBUG
-            auto& container = mPendingPresentsByProcess[hdr.ProcessId];
-            for (UINT i = 0; i < container.size() - 1; ++i)
-            {
-                assert(container[i]->QpcTime <= container[i + 1]->QpcTime);
-            }
+                auto& container = mPendingPresentsByProcess[hdr.ProcessId];
+                for (UINT i = 0; i < container.size() - 1; ++i)
+                {
+                    assert(container[i]->QpcTime <= container[i + 1]->QpcTime);
+                }
 #endif
 
-            const uint32_t cMaxPendingPresents = 20;
-            if (eventDeque.size() > cMaxPendingPresents)
-            {
-                CompletePresent(eventDeque.front());
-                eventDeque.pop_front();
+                const uint32_t cMaxPendingPresents = 20;
+                if (eventDeque.size() > cMaxPendingPresents)
+                {
+                    CompletePresent(eventDeque.front());
+                    eventDeque.pop_front();
+                }
             }
+            break;
         }
     }
 }
 
-template <typename ptr_t>
 void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
 {
     enum {
         DxgKrnl_Flip = 168,
         DxgKrnl_QueueSubmit = 178,
+        DxgKrnl_QueueComplete = 180,
         DxgKrnl_MMIOFlip = 116,
         DxgKrnl_VSyncDPC = 17,
         DxgKrnl_Present = 184,
         DxgKrnl_PresentHistoryDetailed = 215,
-        DxgKrnl_PresentHistory = 171,
+        DxgKrnl_PresentHistory = 172,
         DxgKrnl_Blit = 166,
     };
 
@@ -246,6 +265,7 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
     {
     case DxgKrnl_Flip:
     case DxgKrnl_QueueSubmit:
+    case DxgKrnl_QueueComplete:
     case DxgKrnl_MMIOFlip:
     case DxgKrnl_VSyncDPC:
     case DxgKrnl_Present:
@@ -310,6 +330,11 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                 eventDeque.erase(eventPair.second);
                 mPendingPresentByThread[hdr.ThreadId] = eventPair.first;
             }
+
+            auto dwmPendingPresentIter = mWaitingForDWM.find(hdr.ThreadId);
+            if (dwmPendingPresentIter != mWaitingForDWM.end()) {
+                std::swap(eventPair.first->DependentPresents, dwmPendingPresentIter->second);
+            }
             break;
         }
         case DxgKrnl_QueueSubmit:
@@ -323,9 +348,11 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             };
             auto Type = eventInfo.GetData<DxgKrnl_QueueSubmit_Type>(L"PacketType");
             auto SubmitSequence = eventInfo.GetData<uint32_t>(L"SubmitSequence");
+            bool Present = eventInfo.GetData<BOOL>(L"bPresent") != 0;
 
             if (Type == DxgKrnl_QueueSubmit_Type::MMIOFlip ||
-                Type == DxgKrnl_QueueSubmit_Type::Software) {
+                Type == DxgKrnl_QueueSubmit_Type::Software ||
+                Present) {
                 auto eventIter = mPendingPresentByThread.find(hdr.ThreadId);
                 if (eventIter == mPendingPresentByThread.end()) {
                     return;
@@ -333,6 +360,21 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
 
                 eventIter->second->QueueSubmitSequence = SubmitSequence;
                 mFullscreenPresents.emplace(SubmitSequence, eventIter->second);
+            }
+            break;
+        }
+        case DxgKrnl_QueueComplete:
+        {
+            auto SubmitSequence = eventInfo.GetData<uint32_t>(L"SubmitSequence");
+            auto eventIter = mFullscreenPresents.find(SubmitSequence);
+            if (eventIter == mFullscreenPresents.end()) {
+                return;
+            }
+
+            if (eventIter->second->PresentMode == PresentMode::Fullscreen_Blit) {
+                eventIter->second->ScreenTime = EventTime;
+                eventIter->second->FinalState = PresentResult::Presented;
+                CompletePresent(eventIter->second);
             }
             break;
         }
@@ -400,8 +442,26 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                 return;
             }
 
-            auto hWnd = eventInfo.GetData<ptr_t>(L"hWindow");
-            eventIter->second->Hwnd = hWnd;
+            auto hWnd = eventInfo.GetPtr(L"hWindow");
+
+            if (eventIter->second->PresentMode == PresentMode::Windowed_Blit) {
+                auto hWndIter = mPresentByWindow.find(hWnd);
+                if (hWndIter == mPresentByWindow.end()) {
+                    mPresentByWindow.emplace(hWnd, eventIter->second);
+                } else if (hWndIter->second != eventIter->second) {
+                    auto eventPtr = hWndIter->second;
+                    hWndIter->second = eventIter->second;
+
+                    eventPtr->FinalState = PresentResult::Discarded;
+                    if (eventPtr->ReadyTime != 0) {
+                        // This won't make it to screen, go ahead and complete it now
+                        CompletePresent(eventPtr);
+                    }
+
+                }
+            } else {
+                eventIter->second->Hwnd = hWnd;
+            }
 
             if (eventIter->second->TimeTaken != 0) {
                 mPendingPresentByThread.erase(eventIter);
@@ -421,10 +481,9 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
 
             if (eventIter->second->PresentMode == PresentMode::Fullscreen_Blit) {
                 eventIter->second->PresentMode = PresentMode::Windowed_Blit;
-            } else {
-                uint64_t TokenPtr = eventInfo.GetData<ptr_t>(L"Token");
-                mPresentHistoryByTokenPtr[TokenPtr] = eventIter->second;
             }
+            uint64_t TokenPtr = eventInfo.GetPtr(L"Token");
+            mPresentHistoryByTokenPtr[TokenPtr] = eventIter->second;
 
             if (eventIter->second->TimeTaken != 0) {
                 mPendingPresentByThread.erase(eventIter);
@@ -433,13 +492,20 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
         }
         case DxgKrnl_PresentHistory:
         {
-            uint64_t TokenPtr = eventInfo.GetData<ptr_t>(L"Token");
+            uint64_t TokenPtr = eventInfo.GetPtr(L"Token");
             auto eventIter = mPresentHistoryByTokenPtr.find(TokenPtr);
             if (eventIter == mPresentHistoryByTokenPtr.end()) {
                 return;
             }
 
             eventIter->second->ReadyTime = EventTime;
+
+            if (eventIter->second->FinalState == PresentResult::Discarded &&
+                eventIter->second->PresentMode == PresentMode::Windowed_Blit) {
+                // This won't make it to screen, go ahead and complete it now
+                CompletePresent(eventIter->second);
+            }
+
             mPresentHistoryByTokenPtr.erase(eventIter);
             break;
         }
@@ -453,12 +519,15 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             }
 
             eventPair.first->PresentMode = PresentMode::Fullscreen_Blit;
+            if (eventPair.second != eventDeque.end()) {
+                eventDeque.erase(eventPair.second);
+                mPendingPresentByThread[hdr.ThreadId] = eventPair.first;
+            }
             break;
         }
     }
 }
 
-template <typename ptr_t>
 void DxgiConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
 {
     enum {
@@ -529,7 +598,7 @@ void DxgiConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
                 mPendingPresentByThread[hdr.ThreadId] = eventPair.first;
             }
 
-            PresentHistoryTokenKey key(eventInfo.GetData<ptr_t>(L"pCompositionSurfaceObject"),
+            PresentHistoryTokenKey key(eventInfo.GetPtr(L"pCompositionSurfaceObject"),
                                        eventInfo.GetData<uint64_t>(L"PresentCount"),
                                        eventInfo.GetData<uint32_t>(L"SwapChainIndex"));
             mPresentHistoryTokens[key] = eventPair.first;
@@ -537,7 +606,7 @@ void DxgiConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
         }
         case Win32K_TokenStateChanged:
         {
-            PresentHistoryTokenKey key(eventInfo.GetData<ptr_t>(L"pCompositionSurfaceObject"),
+            PresentHistoryTokenKey key(eventInfo.GetPtr(L"pCompositionSurfaceObject"),
                                        eventInfo.GetData<uint32_t>(L"PresentCount"),
                                        eventInfo.GetData<uint32_t>(L"SwapChainIndex"));
             auto eventIter = mPresentHistoryTokens.find(key);
@@ -578,7 +647,13 @@ void DxgiConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
                 case TokenState::Confirmed:
                 {
                     if (event.FinalState == PresentResult::Unknown) {
-                        event.FinalState = PresentResult::Presented;
+                        if (event.PresentFlags & DXGI_PRESENT_DO_NOT_SEQUENCE) {
+                            // DO_NOT_SEQUENCE presents may get marked as confirmed,
+                            // if a frame was composed when this token was completed
+                            event.FinalState = PresentResult::Discarded;
+                        } else {
+                            event.FinalState = PresentResult::Presented;
+                        }
                     }
                     break;
                 }
@@ -596,10 +671,6 @@ void DxgiConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
                         event.FinalState = PresentResult::Discarded;
                     }
 
-                    if (event.PresentMode == PresentMode::IndependentFlip) {
-                        event.ScreenTime = EventTime;
-                    }
-
                     CompletePresent(sharedPtr);
 
                     break;
@@ -610,36 +681,76 @@ void DxgiConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
     }
 }
 
-template <typename ptr_t>
-void DxgiConsumer::OnEventRecordBitnessAware(_In_ PEVENT_RECORD pEventRecord)
+void DxgiConsumer::OnDWMEvent(PEVENT_RECORD pEventRecord)
+{
+    enum {
+        DWM_DwmUpdateWindow = 46,
+        DWM_Schedule_Present_Start = 15,
+    };
+
+    auto& hdr = pEventRecord->EventHeader;
+    switch (hdr.EventDescriptor.Id) 
+    {
+    case DWM_DwmUpdateWindow:
+    case DWM_Schedule_Present_Start:
+        break;
+    default:
+        return;
+    }
+
+    uint64_t EventTime = *(uint64_t*)&hdr.TimeStamp;
+
+    switch (hdr.EventDescriptor.Id)
+    {
+        case DWM_DwmUpdateWindow:
+        {
+            TraceEventInfo eventInfo(pEventRecord);
+            auto hWnd = (uint32_t)eventInfo.GetData<uint64_t>(L"hWnd");
+
+            // Piggyback on the next DWM present
+            mWindowsBeingComposed.insert(hWnd);
+            break;
+        }
+        case DWM_Schedule_Present_Start:
+        {
+            auto& dwmDeque = mWaitingForDWM[hdr.ThreadId];
+            for (auto hWnd : mWindowsBeingComposed)
+            {
+                auto hWndIter = mPresentByWindow.find(hWnd);
+                if (hWndIter != mPresentByWindow.end()) {
+                    if (hWndIter->second->PresentMode != PresentMode::Windowed_Blit) {
+                        continue;
+                    }
+                    dwmDeque.emplace_back(hWndIter->second);
+                    hWndIter->second->FinalState = PresentResult::Presented;
+                    mPresentByWindow.erase(hWndIter);
+                }
+            }
+            mWindowsBeingComposed.clear();
+            break;
+        }
+    }
+}
+
+void DxgiConsumer::OnEventRecord(PEVENT_RECORD pEventRecord)
 {
     auto& hdr = pEventRecord->EventHeader;
 
     if (hdr.ProviderId == DXGI_PROVIDER_GUID)
     {
-        OnDXGIEvent<ptr_t>(pEventRecord);
+        OnDXGIEvent(pEventRecord);
     }
     else if (hdr.ProviderId == DXGKRNL_PROVIDER_GUID)
     {
-        OnDXGKrnlEvent<ptr_t>(pEventRecord);
+        OnDXGKrnlEvent(pEventRecord);
     }
     else if (hdr.ProviderId == WIN32K_PROVIDER_GUID)
     {
-        OnWin32kEvent<ptr_t>(pEventRecord);
+        OnWin32kEvent(pEventRecord);
     }
-}
-
-
-void DxgiConsumer::OnEventRecord(PEVENT_RECORD pEventRecord)
-{
-    auto& hdr = pEventRecord->EventHeader;
-    if (hdr.Flags & EVENT_HEADER_FLAG_32_BIT_HEADER)
+    else if (hdr.ProviderId == DWM_PROVIDER_GUID)
     {
-        OnEventRecordBitnessAware<uint32_t>(pEventRecord);
-    }
-    else if (hdr.Flags & EVENT_HEADER_FLAG_64_BIT_HEADER)
-    {
-        OnEventRecordBitnessAware<uint64_t>(pEventRecord);
+        OnDWMEvent(pEventRecord);
     }
 }
 
@@ -675,6 +786,7 @@ void PresentMonEtw(PresentMonArgs args)
     session.EnableProvider(DXGI_PROVIDER_GUID, TRACE_LEVEL_INFORMATION);
     session.EnableProvider(DXGKRNL_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 1);
     session.EnableProvider(WIN32K_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 0x1000);
+    session.EnableProvider(DWM_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 1);
 
     session.OpenTrace(&consumer);
     uint32_t eventsLost, buffersLost;
@@ -712,6 +824,7 @@ void PresentMonEtw(PresentMonArgs args)
     session.DisableProvider(DXGI_PROVIDER_GUID);
     session.DisableProvider(DXGKRNL_PROVIDER_GUID);
     session.DisableProvider(WIN32K_PROVIDER_GUID);
+    session.DisableProvider(DWM_PROVIDER_GUID);
     session.Stop();
 }
 

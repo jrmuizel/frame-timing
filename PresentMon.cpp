@@ -74,6 +74,8 @@ const char* PresentModeToString(PresentMode mode)
     case PresentMode::DirectFlip: return "DirectFlip";
     case PresentMode::IndependentFlip: return "IndependentFlip";
     case PresentMode::ImmediateIndependentFlip: return "Immediate iFlip";
+    case PresentMode::Fullscreen_Blit: return "Fullscreen Blit";
+    case PresentMode::Windowed_Blit: return "Windowed Blit";
     default: return "Other";
     }
 }
@@ -86,6 +88,9 @@ void PruneDeque(std::deque<PresentEvent> &presentHistory, uint64_t perfFreq, uin
            ((double)(now.QuadPart - presentHistory.front().QpcTime) / perfFreq) * 1000 > msTimeDiff) {
         presentHistory.pop_front();
     }
+
+    std::sort(presentHistory.begin(), presentHistory.end(),
+              [](PresentEvent const& a, PresentEvent const& b) { return a.QpcTime < b.QpcTime; });
 }
 
 void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perfFreq)
@@ -152,6 +157,18 @@ static double ComputeDisplayedFps(SwapChainData& stats, uint64_t qpcFreq)
 static double ComputeFps(SwapChainData& stats, uint64_t qpcFreq)
 {
     return ComputeFps(stats.mPresentHistory, qpcFreq);
+}
+
+static double ComputeLatency(SwapChainData& stats, uint64_t qpcFreq)
+{
+    if (stats.mDisplayedPresentHistory.size() < 2) {
+        return 0.0;
+    }
+
+    uint64_t totalLatency = std::accumulate(stats.mDisplayedPresentHistory.begin(), stats.mDisplayedPresentHistory.end() - 1, 0ull,
+                                   [](uint64_t current, PresentEvent const& e) { return current + e.ScreenTime - e.QpcTime; });
+    double average = ((double)(totalLatency) / qpcFreq) / (stats.mDisplayedPresentHistory.size() - 1);
+    return average;
 }
 
 static double ComputeCpuFrameTime(SwapChainData& stats, uint64_t qpcFreq)
@@ -225,8 +242,9 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
             double fps = ComputeFps(chain.second, perfFreq);
             double dispFps = ComputeDisplayedFps(chain.second, perfFreq);
             double cpuTime = ComputeCpuFrameTime(chain.second, perfFreq);
-            display += FormatString("\t%016llX: SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, %.1lf displayed fps, %.2lf ms CPU) (%s)%s\n",
-                chain.first, chain.second.mLastSyncInterval, chain.second.mLastFlags, 1000.0/fps, fps, dispFps, cpuTime * 1000.0,
+            double latency = ComputeLatency(chain.second, perfFreq);
+            display += FormatString("\t%016llX: SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, %.1lf displayed fps, %.2lf ms CPU, %.2lf ms latency) (%s)%s\n",
+                chain.first, chain.second.mLastSyncInterval, chain.second.mLastFlags, 1000.0/fps, fps, dispFps, cpuTime * 1000.0, latency * 1000.0,
                 PresentModeToString(chain.second.mLastPresentMode),
                 (now - chain.second.mLastUpdateTicks) > 1000 ? " [STALE]" : "");
         }
