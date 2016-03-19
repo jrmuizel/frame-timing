@@ -35,10 +35,15 @@ enum class PresentMode
     Windowed_Blit,
     Fullscreen_Blit,
     Legacy_Windowed_Blit,
+    Composition_Buffer,
 };
 enum class PresentResult
 {
     Unknown, Presented, Discarded
+};
+enum class Runtime
+{
+    DXGI, D3D9, Other
 };
 struct PresentEvent {
     // Available from DXGI Present
@@ -49,6 +54,7 @@ struct PresentEvent {
     uint32_t ProcessId = 0;
 
     PresentMode PresentMode = PresentMode::Unknown;
+    Runtime Runtime = Runtime::Other;
 
     // Time spent in DXGI Present call
     uint64_t TimeTaken = 0;
@@ -68,6 +74,7 @@ struct PresentEvent {
 };
 
 struct SwapChainData {
+    Runtime mRuntime = Runtime::Other;
     uint64_t mLastUpdateTicks = 0;
     uint32_t mLastSyncInterval = -1;
     uint32_t mLastFlags = -1;

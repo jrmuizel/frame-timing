@@ -78,6 +78,16 @@ const char* PresentModeToString(PresentMode mode)
     case PresentMode::Fullscreen_Blit: return "Fullscreen Blit";
     case PresentMode::Windowed_Blit: return "Windowed Blit";
     case PresentMode::Legacy_Windowed_Blit: return "VistaBlit";
+    case PresentMode::Composition_Buffer: return "Composition Buffer";
+    default: return "Other";
+    }
+}
+
+const char* RuntimeToString(Runtime rt)
+{
+    switch (rt) {
+    case Runtime::DXGI: return "DXGI";
+    case Runtime::D3D9: return "D3D9";
     default: return "Other";
     }
 }
@@ -120,6 +130,7 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
     }
 
     chain.mLastUpdateTicks = now;
+    chain.mRuntime = p.Runtime;
     chain.mLastSyncInterval = p.SyncInterval;
     chain.mLastFlags = p.PresentFlags;
     chain.mLastPresentMode = p.PresentMode;
@@ -130,9 +141,13 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
             auto& curr = chain.mPresentHistory[len - 1];
             auto& prev = chain.mPresentHistory[len - 2];
             double deltaMilliseconds = 1000 * double(curr.QpcTime - prev.QpcTime) / perfFreq;
+            double deltaReady = curr.ReadyTime == 0 ? 0.0 : (1000 * double(curr.ReadyTime - curr.QpcTime) / perfFreq);
+            double deltaDisplayed = curr.ScreenTime == 0 ? 0.0 : (1000 * double(curr.ReadyTime - curr.QpcTime) / perfFreq);
             double timeTakenMilliseconds = 1000 * double(curr.TimeTaken) / perfFreq;
-            fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%.3lf,%.3lf,%d,%d,%s,%d\n",
-                proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, deltaMilliseconds, timeTakenMilliseconds, curr.SyncInterval, curr.PresentFlags, PresentModeToString(curr.PresentMode), curr.FinalState != PresentResult::Discarded);
+            fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%s,%.3lf,%.3lf,%d,%d,%s,%.3lf,%.3lf,%d\n",
+                proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime),
+                    deltaMilliseconds, timeTakenMilliseconds, curr.SyncInterval, curr.PresentFlags, PresentModeToString(curr.PresentMode),
+                    deltaReady, deltaDisplayed, curr.FinalState != PresentResult::Discarded);
         }
     }
 }
@@ -210,7 +225,7 @@ void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
     }
 
     if (pm.mOutputFile) {
-        fprintf(pm.mOutputFile, "module,pid,chain,delta,timeTaken,vsync,flags,mode,displayed\n");
+        fprintf(pm.mOutputFile, "module,pid,chain,runtime,delta,timeTaken,vsync,flags,mode,deltaReady,deltaDisplayed,displayed\n");
     }
 }
 
@@ -247,11 +262,11 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
             double latency = ComputeLatency(chain.second, perfFreq);
             std::string planeString = "";
             if (chain.second.mLastPresentMode == PresentMode::IndependentFlipMPO) {
-                planeString += " Plane";
+                planeString += " Plane ";
                 planeString += chain.second.mDisplayedPresentHistory.back().PlaneIndex;
             }
-            display += FormatString("\t%016llX: SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, %.1lf displayed fps, %.2lf ms CPU, %.2lf ms latency) (%s%s)%s\n",
-                chain.first, chain.second.mLastSyncInterval, chain.second.mLastFlags, 1000.0/fps, fps, dispFps, cpuTime * 1000.0, latency * 1000.0,
+            display += FormatString("\t%016llX (%s): SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, %.1lf displayed fps, %.2lf ms CPU, %.2lf ms latency) (%s%s)%s\n",
+                chain.first, RuntimeToString(chain.second.mRuntime), chain.second.mLastSyncInterval, chain.second.mLastFlags, 1000.0/fps, fps, dispFps, cpuTime * 1000.0, latency * 1000.0,
                 PresentModeToString(chain.second.mLastPresentMode),
                 planeString.c_str(),
                 (now - chain.second.mLastUpdateTicks) > 1000 ? " [STALE]" : "");
