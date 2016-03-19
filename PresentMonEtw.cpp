@@ -253,9 +253,11 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
 {
     enum {
         DxgKrnl_Flip = 168,
+        DxgKrnl_FlipMPO = 252,
         DxgKrnl_QueueSubmit = 178,
         DxgKrnl_QueueComplete = 180,
         DxgKrnl_MMIOFlip = 116,
+        DxgKrnl_MMIOFlipMPO = 259,
         DxgKrnl_VSyncDPC = 17,
         DxgKrnl_Present = 184,
         DxgKrnl_PresentHistoryDetailed = 215,
@@ -268,9 +270,11 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
     switch (hdr.EventDescriptor.Id) 
     {
     case DxgKrnl_Flip:
+    case DxgKrnl_FlipMPO:
     case DxgKrnl_QueueSubmit:
     case DxgKrnl_QueueComplete:
     case DxgKrnl_MMIOFlip:
+    case DxgKrnl_MMIOFlipMPO:
     case DxgKrnl_VSyncDPC:
     case DxgKrnl_Present:
     case DxgKrnl_PresentHistoryDetailed:
@@ -319,6 +323,7 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
     switch (hdr.EventDescriptor.Id)
     {
         case DxgKrnl_Flip:
+        case DxgKrnl_FlipMPO:
         {
             // A flip event is emitted during fullscreen present submission.
             // Afterwards, expect an MMIOFlip packet on the same thread, used
@@ -327,6 +332,11 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             auto eventPair = FindPendingPresent(eventDeque);
 
             if (!eventPair.first) {
+                return;
+            }
+
+            if (eventPair.first->PresentMode != PresentMode::Unknown) {
+                // For MPO, N events may be issued, but we only care about the first
                 return;
             }
             
@@ -413,6 +423,30 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                 } else {
                     eventIter->second->PresentMode = PresentMode::ImmediateIndependentFlip;
                 }
+            }
+
+            break;
+        }
+        case DxgKrnl_MMIOFlipMPO:
+        {
+            // See above for more info about this packet.
+            auto FlipFenceId = eventInfo.GetData<uint64_t>(L"FlipSubmitSequence");
+            uint32_t FlipSubmitSequence = (uint32_t)(FlipFenceId >> 32u);
+
+            auto eventIter = mFullscreenPresents.find(FlipSubmitSequence);
+            if (eventIter == mFullscreenPresents.end()) {
+                return;
+            }
+
+            // Avoid double-marking a single present packet coming from the MPO API
+            if (eventIter->second->ReadyTime == 0) {
+                eventIter->second->ReadyTime = EventTime;
+                eventIter->second->PlaneIndex = eventInfo.GetData<uint32_t>(L"LayerIndex");
+            }
+
+            if (eventIter->second->PresentMode == PresentMode::IndependentFlip ||
+                eventIter->second->PresentMode == PresentMode::Composed_Flip) {
+                eventIter->second->PresentMode = PresentMode::IndependentFlipMPO;
             }
 
             break;

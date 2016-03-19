@@ -74,6 +74,7 @@ const char* PresentModeToString(PresentMode mode)
     case PresentMode::DirectFlip: return "DirectFlip";
     case PresentMode::IndependentFlip: return "IndependentFlip";
     case PresentMode::ImmediateIndependentFlip: return "Immediate iFlip";
+    case PresentMode::IndependentFlipMPO: return "iFlip MPO";
     case PresentMode::Fullscreen_Blit: return "Fullscreen Blit";
     case PresentMode::Windowed_Blit: return "Windowed Blit";
     case PresentMode::Legacy_Windowed_Blit: return "VistaBlit";
@@ -244,9 +245,15 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
             double dispFps = ComputeDisplayedFps(chain.second, perfFreq);
             double cpuTime = ComputeCpuFrameTime(chain.second, perfFreq);
             double latency = ComputeLatency(chain.second, perfFreq);
-            display += FormatString("\t%016llX: SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, %.1lf displayed fps, %.2lf ms CPU, %.2lf ms latency) (%s)%s\n",
+            std::string planeString = "";
+            if (chain.second.mLastPresentMode == PresentMode::IndependentFlipMPO) {
+                planeString += " Plane";
+                planeString += chain.second.mDisplayedPresentHistory.back().PlaneIndex;
+            }
+            display += FormatString("\t%016llX: SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, %.1lf displayed fps, %.2lf ms CPU, %.2lf ms latency) (%s%s)%s\n",
                 chain.first, chain.second.mLastSyncInterval, chain.second.mLastFlags, 1000.0/fps, fps, dispFps, cpuTime * 1000.0, latency * 1000.0,
                 PresentModeToString(chain.second.mLastPresentMode),
+                planeString.c_str(),
                 (now - chain.second.mLastUpdateTicks) > 1000 ? " [STALE]" : "");
         }
     }

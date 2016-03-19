@@ -31,6 +31,7 @@ enum class PresentMode
     DirectFlip,
     IndependentFlip,
     ImmediateIndependentFlip,
+    IndependentFlipMPO,
     Windowed_Blit,
     Fullscreen_Blit,
     Legacy_Windowed_Blit,
@@ -58,6 +59,7 @@ struct PresentEvent {
     // Timestamp of "complete" state (data on screen or discarded)
     uint64_t ScreenTime = 0;
     PresentResult FinalState = PresentResult::Unknown;
+    uint32_t PlaneIndex = 0;
 
     // Additional transient state
     uint32_t QueueSubmitSequence = 0;
