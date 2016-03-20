@@ -57,8 +57,7 @@ bool TraceSession::Start()
 
 bool TraceSession::EnableProvider(const GUID& providerId, UCHAR level, ULONGLONG anyKeyword, ULONGLONG allKeyword)
 {
-    ENABLE_TRACE_PARAMETERS params = {ENABLE_TRACE_PARAMETERS_VERSION_2, EVENT_ENABLE_PROPERTY_SID};
-    _status = EnableTraceEx2(hSession, &providerId, EVENT_CONTROL_CODE_ENABLE_PROVIDER, level, anyKeyword, allKeyword, 0, &params);
+    _status = EnableTraceEx2(hSession, &providerId, EVENT_CONTROL_CODE_ENABLE_PROVIDER, level, anyKeyword, allKeyword, 0, NULL);
     return (_status == ERROR_SUCCESS);
 }
 

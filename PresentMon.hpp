@@ -22,6 +22,7 @@
 #include <map>
 #include <deque>
 #include <memory>
+#include <cassert>
 
 enum class PresentMode
 {
@@ -49,7 +50,7 @@ struct PresentEvent {
     // Available from DXGI Present
     uint64_t QpcTime = 0;
     uint64_t SwapChainAddress = 0;
-    uint32_t SyncInterval = 0;
+    int32_t SyncInterval = -1;
     uint32_t PresentFlags = 0;
     uint32_t ProcessId = 0;
 
@@ -71,6 +72,10 @@ struct PresentEvent {
     uint32_t QueueSubmitSequence = 0;
     uint64_t Hwnd = 0;
     std::deque<std::shared_ptr<PresentEvent>> DependentPresents;
+#if _DEBUG
+    bool Completed = false;
+    ~PresentEvent() { assert(Completed); }
+#endif
 };
 
 struct SwapChainData {
