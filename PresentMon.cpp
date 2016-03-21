@@ -47,7 +47,7 @@ static void UpdateProcessInfo(ProcessInfo& info, uint64_t now, uint32_t thisPid)
     if (now - info.mLastRefreshTicks > 1000) {
         info.mLastRefreshTicks = now;
         char path[MAX_PATH] = "<error>";
-        HANDLE h = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, thisPid);
+        HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, thisPid);
         if (h) {
             GetModuleFileNameExA(h, NULL, path, sizeof(path) - 1);
             std::string name = PathFindFileNameA(path);
