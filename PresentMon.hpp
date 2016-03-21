@@ -24,6 +24,8 @@
 #include <memory>
 #include <cassert>
 
+extern bool g_Quit;
+
 enum class PresentMode
 {
     Unknown,
@@ -74,7 +76,7 @@ struct PresentEvent {
     std::deque<std::shared_ptr<PresentEvent>> DependentPresents;
 #if _DEBUG
     bool Completed = false;
-    ~PresentEvent() { assert(Completed); }
+    ~PresentEvent() { assert(Completed || g_Quit); }
 #endif
 };
 
