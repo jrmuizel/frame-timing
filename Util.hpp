@@ -19,7 +19,7 @@
 #include <string>
 
 std::string FormatString(const char *fmt, ...);
-void ClearConsole();
+void SetConsoleText(const char *text);
 
 bool HaveAdministratorPrivileges(void);
 void RestartAsAdministrator(int argc, char **argv);

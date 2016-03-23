@@ -55,6 +55,7 @@ int main(int argc, char ** argv)
 
     int waitpid = -1;
     PresentMonArgs args;
+    std::string title_string = "PresentMon";
 
     args.mTargetProcessName = "*";
 
@@ -66,6 +67,7 @@ int main(int argc, char ** argv)
             if (!strcmp(argv[i], "-waitpid"))
             {
                 waitpid = atoi(argv[++i]);
+                continue;
             }
             else if (!strcmp(argv[i], "-process_name"))
             {
@@ -87,6 +89,9 @@ int main(int argc, char ** argv)
                 args.mOutputFileName = "*";
             }
         }
+
+        title_string += ' ';
+        title_string += argv[i];
     }
 
     if (waitpid >= 0) {
@@ -104,6 +109,7 @@ int main(int argc, char ** argv)
     }
 
     SetConsoleCtrlHandler(HandlerRoutine, TRUE);
+    SetConsoleTitleA(title_string.c_str());
 
     // Run PM in a separate thread so we can join it in the CtrlHandler (can't join the main thread)
     std::thread pm(PresentMonEtw, args);

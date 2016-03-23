@@ -274,8 +274,7 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
     }
 
     // refresh the console
-    ClearConsole();
-    printf(display.c_str());
+    SetConsoleText(display.c_str());
 }
 
 void PresentMon_Shutdown(PresentMonData& pm)
