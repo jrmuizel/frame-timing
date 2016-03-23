@@ -81,7 +81,6 @@ int main(int argc, char ** argv)
             }
         }
         // 1-component args
-        else
         {
             if (!strcmp(argv[i], "-no_csv"))
             {

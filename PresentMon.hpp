@@ -21,20 +21,73 @@
 #include <string>
 #include <map>
 #include <deque>
+#include <memory>
+#include <cassert>
 
+extern bool g_Quit;
+
+enum class PresentMode
+{
+    Unknown,
+    Fullscreen,
+    Composed_Flip,
+    DirectFlip,
+    IndependentFlip,
+    ImmediateIndependentFlip,
+    IndependentFlipMPO,
+    Windowed_Blit,
+    Fullscreen_Blit,
+    Legacy_Windowed_Blit,
+    Composition_Buffer,
+};
+enum class PresentResult
+{
+    Unknown, Presented, Discarded
+};
+enum class Runtime
+{
+    DXGI, D3D9, Other
+};
 struct PresentEvent {
-    uint64_t QpcTime;
-    uint64_t SwapChainAddress;
-    uint32_t SyncInterval;
-    uint32_t PresentFlags;
-    uint32_t ProcessId;
+    // Available from DXGI Present
+    uint64_t QpcTime = 0;
+    uint64_t SwapChainAddress = 0;
+    int32_t SyncInterval = -1;
+    uint32_t PresentFlags = 0;
+    uint32_t ProcessId = 0;
+
+    PresentMode PresentMode = PresentMode::Unknown;
+    Runtime Runtime = Runtime::Other;
+
+    // Time spent in DXGI Present call
+    uint64_t TimeTaken = 0;
+
+    // Timestamp of "ready" state (GPU work completed)
+    uint64_t ReadyTime = 0;
+
+    // Timestamp of "complete" state (data on screen or discarded)
+    uint64_t ScreenTime = 0;
+    PresentResult FinalState = PresentResult::Unknown;
+    uint32_t PlaneIndex = 0;
+
+    // Additional transient state
+    uint32_t QueueSubmitSequence = 0;
+    uint64_t Hwnd = 0;
+    std::deque<std::shared_ptr<PresentEvent>> DependentPresents;
+#if _DEBUG
+    bool Completed = false;
+    ~PresentEvent() { assert(Completed || g_Quit); }
+#endif
 };
 
 struct SwapChainData {
+    Runtime mRuntime = Runtime::Other;
     uint64_t mLastUpdateTicks = 0;
     uint32_t mLastSyncInterval = -1;
     uint32_t mLastFlags = -1;
     std::deque<PresentEvent> mPresentHistory;
+    std::deque<PresentEvent> mDisplayedPresentHistory;
+    PresentMode mLastPresentMode = PresentMode::Unknown;
 };
 
 struct ProcessInfo {
@@ -58,6 +111,6 @@ struct PresentMonData {
 void PresentMonEtw(PresentMonArgs args);
 
 void PresentMon_Init(const PresentMonArgs& args, PresentMonData& data);
-void PresentMon_Update(PresentMonData& data, std::vector<PresentEvent> presents, uint64_t perfFreq);
+void PresentMon_Update(PresentMonData& data, std::vector<std::shared_ptr<PresentEvent>> presents, uint64_t perfFreq);
 void PresentMon_Shutdown(PresentMonData& data);
 
