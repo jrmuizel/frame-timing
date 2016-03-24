@@ -959,6 +959,8 @@ static void EtwProcessingThread(TraceSession *session)
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
 
     session->Process();
+
+    g_Quit = true;
 }
 
 static GUID GuidFromString(const wchar_t *guidString)
@@ -971,10 +973,14 @@ static GUID GuidFromString(const wchar_t *guidString)
 
 void PresentMonEtw(PresentMonArgs args)
 {
-    TraceSession session(L"PresentMon");
+    std::wstring fileName(args.mEtlFileName ? strlen(args.mEtlFileName) : 0, L'\0');
+    if (args.mEtlFileName) {
+        mbstowcs(&fileName[0], args.mEtlFileName, strlen(args.mEtlFileName));
+    }
+    TraceSession session(L"PresentMon", args.mEtlFileName ? fileName.c_str() : nullptr);
     DxgiConsumer consumer;
 
-    if (!session.Start()) {
+    if (!args.mInputOnly && !session.Start()) {
         if (session.Status() == ERROR_ALREADY_EXISTS) {
             if (!session.Stop() || !session.Start()) {
                 printf("ETW session error. Quitting.\n");

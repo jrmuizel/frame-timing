@@ -99,7 +99,9 @@ struct ProcessInfo {
 struct PresentMonArgs {
     const char *mOutputFileName = nullptr;
     const char *mTargetProcessName = nullptr;
+    const char *mEtlFileName = nullptr;
     int mTargetPid = 0;
+    bool mInputOnly = false;
 };
 
 struct PresentMonData {

@@ -21,7 +21,7 @@ class TraceSession
 {
 
 public:
-    TraceSession(LPCTSTR szSessionName);
+    TraceSession(LPCTSTR szSessionName, LPCTSTR szFileName);
     ~TraceSession();
 
 public:
@@ -39,11 +39,12 @@ public:
     LONGLONG PerfFreq() const;
 
 private:
-    LPTSTR _szSessionName;
+    LPTSTR _szSessionName, _szFileName;
     ULONG _status;
     EVENT_TRACE_PROPERTIES* _pSessionProperties;
     TRACEHANDLE hSession;
     EVENT_TRACE_LOGFILEW _logFile;
     TRACEHANDLE _hTrace;
     uint32_t _eventsLost, _buffersLost;
+    bool _started;
 };

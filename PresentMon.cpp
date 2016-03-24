@@ -94,11 +94,8 @@ const char* RuntimeToString(Runtime rt)
 }
 
 void PruneDeque(std::deque<PresentEvent> &presentHistory, uint64_t perfFreq, uint32_t msTimeDiff) {
-    LARGE_INTEGER now;
-    QueryPerformanceCounter(&now);
-
     while (!presentHistory.empty() &&
-           ((double)(now.QuadPart - presentHistory.front().QpcTime) / perfFreq) * 1000 > msTimeDiff) {
+           ((double)(presentHistory.back().QpcTime - presentHistory.front().QpcTime) / perfFreq) * 1000 > msTimeDiff) {
         presentHistory.pop_front();
     }
 
