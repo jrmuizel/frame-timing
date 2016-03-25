@@ -424,6 +424,8 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                 eventIter->second->SyncInterval = eventInfo.GetData<uint32_t>(L"FlipInterval");
             }
 
+            eventIter->second->MMIO = eventInfo.GetData<BOOL>(L"MMIOFlip") != 0;
+
             // If this is the DWM thread, piggyback these pending presents on our fullscreen present
             if (hdr.ThreadId == DwmPresentThreadId) {
                 std::swap(eventIter->second->DependentPresents, mPresentsWaitingForDWM);
@@ -470,7 +472,8 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
 
             auto pEvent = eventIter->second;
 
-            if (pEvent->PresentMode == PresentMode::Fullscreen_Blit) {
+            if (pEvent->PresentMode == PresentMode::Fullscreen_Blit ||
+                (pEvent->PresentMode == PresentMode::Fullscreen && !pEvent->MMIO)) {
                 pEvent->ScreenTime = pEvent->ReadyTime = EventTime;
                 pEvent->FinalState = PresentResult::Presented;
 
@@ -595,7 +598,8 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             // For all other events, just remember the hWnd, we might need it later
             eventIter->second->Hwnd = hWnd;
 
-            if (eventIter->second->PresentMode == PresentMode::Fullscreen_Blit &&
+            if ((eventIter->second->PresentMode == PresentMode::Fullscreen_Blit || 
+                 (eventIter->second->PresentMode == PresentMode::Fullscreen && !eventIter->second->MMIO))&&
                 eventIter->second->ScreenTime != 0) {
                 // This is a fullscreen blit where all work associated was already done, so it's on-screen
                 // It was deferred to here because there was no way to be sure it was really fullscreen until now
