@@ -215,12 +215,14 @@ private:
     void CompletePresent(std::shared_ptr<PresentEvent> p)
     {
 #if _DEBUG
+        assert(!p->Completed);
         p->Completed = true;
 #endif
 
         // Complete all other presents that were riding along with this one (i.e. this one came from DWM)
         for (auto& p2 : p->DependentPresents) {
             p2->ScreenTime = p->ScreenTime;
+            p2->FinalState = PresentResult::Presented;
             CompletePresent(p2);
         }
         p->DependentPresents.clear();
@@ -231,7 +233,7 @@ private:
         }
         if (p->Hwnd != 0) {
             auto hWndIter = mPresentByWindow.find(p->Hwnd);
-            if (hWndIter->second == p) {
+            if (hWndIter != mPresentByWindow.end() && hWndIter->second == p) {
                 mPresentByWindow.erase(hWndIter);
             }
         }
@@ -467,16 +469,17 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             }
 
             auto pEvent = eventIter->second;
-            //if (pEvent->PresentMode != PresentMode::Fullscreen &&
-            //    pEvent->PresentMode != PresentMode::IndependentFlip) {
-            //    mPresentsBySubmitSequence.erase(eventIter);
-            //    pEvent->QueueSubmitSequence = 0;
-            //}
 
             if (pEvent->PresentMode == PresentMode::Fullscreen_Blit) {
                 pEvent->ScreenTime = pEvent->ReadyTime = EventTime;
                 pEvent->FinalState = PresentResult::Presented;
-                CompletePresent(pEvent);
+
+                // Sometimes, the queue packets associated with a present will complete before the DxgKrnl present event is fired
+                // In this case, for blit presents, we have no way to differentiate between fullscreen and windowed blits
+                // So, defer the completion of this present until we know all events have been fired
+                if (pEvent->Hwnd != 0) {
+                    CompletePresent(pEvent);
+                }
             }
             break;
         }
@@ -588,12 +591,19 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                         CompletePresent(eventPtr);
                     }
                 }
-            } else {
-                // For all other events, just remember the hWnd, we might need it later
-                eventIter->second->Hwnd = hWnd;
+            }
+            // For all other events, just remember the hWnd, we might need it later
+            eventIter->second->Hwnd = hWnd;
+
+            if (eventIter->second->PresentMode == PresentMode::Fullscreen_Blit &&
+                eventIter->second->ScreenTime != 0) {
+                // This is a fullscreen blit where all work associated was already done, so it's on-screen
+                // It was deferred to here because there was no way to be sure it was really fullscreen until now
+                CompletePresent(eventIter->second);
             }
 
             if (eventIter->second->TimeTaken != 0 || eventIter->second->Runtime == Runtime::Other) {
+                eventIter->second->TimeTaken = EventTime - eventIter->second->QpcTime;
                 mPresentByThreadId.erase(eventIter);
             }
             break;
@@ -611,6 +621,10 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
 
             if (eventIter->second->PresentMode == PresentMode::Fullscreen_Blit) {
                 eventIter->second->PresentMode = PresentMode::Windowed_Blit;
+                // Overwrite some fields that may have been filled out while we thought it was fullscreen
+                assert(!eventIter->second->Completed);
+                eventIter->second->ReadyTime = eventIter->second->ScreenTime = 0;
+                eventIter->second->FinalState = PresentResult::Unknown;
             }
             uint64_t TokenPtr = eventInfo.GetPtr(L"Token");
             mDxgKrnlPresentHistoryTokens[TokenPtr] = eventIter->second;
@@ -768,6 +782,9 @@ void DxgiConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
                             event.FinalState = PresentResult::Presented;
                         }
                     }
+                    if (event.Hwnd) {
+                        mPresentByWindow.erase(event.Hwnd);
+                    }
                     break;
                 }
                 case TokenState::Retired:
@@ -782,7 +799,7 @@ void DxgiConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
                     auto sharedPtr = eventIter->second;
                     mWin32KPresentHistoryTokens.erase(eventIter);
 
-                    if (event.FinalState == PresentResult::Unknown) {
+                    if (event.FinalState == PresentResult::Unknown || event.ScreenTime == 0) {
                         event.FinalState = PresentResult::Discarded;
                     }
 

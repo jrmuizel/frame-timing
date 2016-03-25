@@ -136,5 +136,5 @@ int main(int argc, char ** argv)
     {
         Sleep(100);
     }
-    pm.join();
+    exit(0);
 }
