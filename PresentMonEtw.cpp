@@ -215,12 +215,14 @@ private:
     void CompletePresent(std::shared_ptr<PresentEvent> p)
     {
 #if _DEBUG
+        assert(!p->Completed);
         p->Completed = true;
 #endif
 
         // Complete all other presents that were riding along with this one (i.e. this one came from DWM)
         for (auto& p2 : p->DependentPresents) {
             p2->ScreenTime = p->ScreenTime;
+            p2->FinalState = PresentResult::Presented;
             CompletePresent(p2);
         }
         p->DependentPresents.clear();
@@ -231,7 +233,7 @@ private:
         }
         if (p->Hwnd != 0) {
             auto hWndIter = mPresentByWindow.find(p->Hwnd);
-            if (hWndIter->second == p) {
+            if (hWndIter != mPresentByWindow.end() && hWndIter->second == p) {
                 mPresentByWindow.erase(hWndIter);
             }
         }
@@ -422,6 +424,8 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                 eventIter->second->SyncInterval = eventInfo.GetData<uint32_t>(L"FlipInterval");
             }
 
+            eventIter->second->MMIO = eventInfo.GetData<BOOL>(L"MMIOFlip") != 0;
+
             // If this is the DWM thread, piggyback these pending presents on our fullscreen present
             if (hdr.ThreadId == DwmPresentThreadId) {
                 std::swap(eventIter->second->DependentPresents, mPresentsWaitingForDWM);
@@ -467,16 +471,18 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             }
 
             auto pEvent = eventIter->second;
-            //if (pEvent->PresentMode != PresentMode::Fullscreen &&
-            //    pEvent->PresentMode != PresentMode::IndependentFlip) {
-            //    mPresentsBySubmitSequence.erase(eventIter);
-            //    pEvent->QueueSubmitSequence = 0;
-            //}
 
-            if (pEvent->PresentMode == PresentMode::Fullscreen_Blit) {
+            if (pEvent->PresentMode == PresentMode::Fullscreen_Blit ||
+                (pEvent->PresentMode == PresentMode::Fullscreen && !pEvent->MMIO)) {
                 pEvent->ScreenTime = pEvent->ReadyTime = EventTime;
                 pEvent->FinalState = PresentResult::Presented;
-                CompletePresent(pEvent);
+
+                // Sometimes, the queue packets associated with a present will complete before the DxgKrnl present event is fired
+                // In this case, for blit presents, we have no way to differentiate between fullscreen and windowed blits
+                // So, defer the completion of this present until we know all events have been fired
+                if (pEvent->Hwnd != 0) {
+                    CompletePresent(pEvent);
+                }
             }
             break;
         }
@@ -588,12 +594,22 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                         CompletePresent(eventPtr);
                     }
                 }
-            } else {
-                // For all other events, just remember the hWnd, we might need it later
-                eventIter->second->Hwnd = hWnd;
+            }
+            // For all other events, just remember the hWnd, we might need it later
+            eventIter->second->Hwnd = hWnd;
+
+            if ((eventIter->second->PresentMode == PresentMode::Fullscreen_Blit || 
+                 (eventIter->second->PresentMode == PresentMode::Fullscreen && !eventIter->second->MMIO))&&
+                eventIter->second->ScreenTime != 0) {
+                // This is a fullscreen blit where all work associated was already done, so it's on-screen
+                // It was deferred to here because there was no way to be sure it was really fullscreen until now
+                CompletePresent(eventIter->second);
             }
 
             if (eventIter->second->TimeTaken != 0 || eventIter->second->Runtime == Runtime::Other) {
+                if (eventIter->second->TimeTaken == 0) {
+                    eventIter->second->TimeTaken = EventTime - eventIter->second->QpcTime;
+                }
                 mPresentByThreadId.erase(eventIter);
             }
             break;
@@ -611,6 +627,10 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
 
             if (eventIter->second->PresentMode == PresentMode::Fullscreen_Blit) {
                 eventIter->second->PresentMode = PresentMode::Windowed_Blit;
+                // Overwrite some fields that may have been filled out while we thought it was fullscreen
+                assert(!eventIter->second->Completed);
+                eventIter->second->ReadyTime = eventIter->second->ScreenTime = 0;
+                eventIter->second->FinalState = PresentResult::Unknown;
             }
             uint64_t TokenPtr = eventInfo.GetPtr(L"Token");
             mDxgKrnlPresentHistoryTokens[TokenPtr] = eventIter->second;
@@ -768,6 +788,9 @@ void DxgiConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
                             event.FinalState = PresentResult::Presented;
                         }
                     }
+                    if (event.Hwnd) {
+                        mPresentByWindow.erase(event.Hwnd);
+                    }
                     break;
                 }
                 case TokenState::Retired:
@@ -782,7 +805,7 @@ void DxgiConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
                     auto sharedPtr = eventIter->second;
                     mWin32KPresentHistoryTokens.erase(eventIter);
 
-                    if (event.FinalState == PresentResult::Unknown) {
+                    if (event.FinalState == PresentResult::Unknown || event.ScreenTime == 0) {
                         event.FinalState = PresentResult::Discarded;
                     }
 
@@ -959,6 +982,8 @@ static void EtwProcessingThread(TraceSession *session)
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
 
     session->Process();
+
+    g_Quit = true;
 }
 
 static GUID GuidFromString(const wchar_t *guidString)
@@ -971,10 +996,14 @@ static GUID GuidFromString(const wchar_t *guidString)
 
 void PresentMonEtw(PresentMonArgs args)
 {
-    TraceSession session(L"PresentMon");
+    std::wstring fileName(args.mEtlFileName ? strlen(args.mEtlFileName) : 0, L'\0');
+    if (args.mEtlFileName) {
+        mbstowcs(&fileName[0], args.mEtlFileName, strlen(args.mEtlFileName));
+    }
+    TraceSession session(L"PresentMon", args.mEtlFileName ? fileName.c_str() : nullptr);
     DxgiConsumer consumer;
 
-    if (!session.Start()) {
+    if (!args.mInputOnly && !session.Start()) {
         if (session.Status() == ERROR_ALREADY_EXISTS) {
             if (!session.Stop() || !session.Start()) {
                 printf("ETW session error. Quitting.\n");

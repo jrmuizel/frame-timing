@@ -74,6 +74,7 @@ struct PresentEvent {
     uint32_t QueueSubmitSequence = 0;
     uint64_t Hwnd = 0;
     std::deque<std::shared_ptr<PresentEvent>> DependentPresents;
+    bool MMIO = false;
 #if _DEBUG
     bool Completed = false;
     ~PresentEvent() { assert(Completed || g_Quit); }
@@ -99,7 +100,9 @@ struct ProcessInfo {
 struct PresentMonArgs {
     const char *mOutputFileName = nullptr;
     const char *mTargetProcessName = nullptr;
+    const char *mEtlFileName = nullptr;
     int mTargetPid = 0;
+    bool mInputOnly = false;
 };
 
 struct PresentMonData {

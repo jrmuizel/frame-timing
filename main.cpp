@@ -36,20 +36,25 @@ BOOL WINAPI HandlerRoutine(
     return TRUE;
 }
 
+void printHelp()
+{
+    printf(
+        "command line options:\n"
+        " -captureall: record ALL processes (default).\n"
+        " -process_name [exe name]: record specific process.\n"
+        " -process_id [integer]: record specific process ID.\n"
+        " -output_file [path]: override the default output path.\n"
+        " -no_csv: do not create any output file.\n"
+        );
+}
+
 int main(int argc, char ** argv)
 {
     --argc;
     ++argv;
 
     if (argc == 0) {
-        printf(
-            "command line options:\n"
-            " -captureall: record ALL processes (default).\n"
-            " -process_name [exe name]: record specific process.\n"
-            " -process_id [integer]: record specific process ID.\n"
-            " -output_file [path]: override the default output path.\n"
-            " -no_csv: do not create any output file.\n"
-            );
+        printHelp();
         return 0;
     }
 
@@ -81,12 +86,25 @@ int main(int argc, char ** argv)
             {
                 args.mOutputFileName = argv[++i];
             }
+            else if (!strcmp(argv[i], "-etl_file"))
+            {
+                args.mEtlFileName = argv[++i];
+            }
         }
         // 1-component args
         {
             if (!strcmp(argv[i], "-no_csv"))
             {
                 args.mOutputFileName = "*";
+            }
+            else if (!strcmp(argv[i], "-?") || !strcmp(argv[i], "-help"))
+            {
+                printHelp();
+                return 0;
+            }
+            else if (!strcmp(argv[i], "-input_etl"))
+            {
+                args.mInputOnly = true;
             }
         }
 
@@ -114,5 +132,9 @@ int main(int argc, char ** argv)
     // Run PM in a separate thread so we can join it in the CtrlHandler (can't join the main thread)
     std::thread pm(PresentMonEtw, args);
     g_PresentMonThread = &pm;
-    Sleep(INFINITE);
+    while (!g_Quit)
+    {
+        Sleep(100);
+    }
+    exit(0);
 }
