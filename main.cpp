@@ -46,8 +46,11 @@ void printHelp()
         " -process_name [exe name]: record specific process.\n"
         " -process_id [integer]: record specific process ID.\n"
         " -output_file [path]: override the default output path.\n"
+        " -etl_file [path]: consume events from an ETL file instead of real-time.\n"
+        " -delay [seconds]: wait before starting to consume events (allowing time for alt+tab)\n"
+        " -timed [seconds]: stop listening and exit after a set amount of time\n"
         " -no_csv: do not create any output file.\n"
-        " -etl_file: consume events from an ETL file instead of real-time.\n"
+        " -scroll_toggle: only record events while scroll lock is enabled.\n"
         );
 }
 
@@ -93,12 +96,24 @@ int main(int argc, char ** argv)
             {
                 args.mEtlFileName = argv[++i];
             }
+            else if (!strcmp(argv[i], "-delay"))
+            {
+                args.mDelay = atoi(argv[++i]);
+            }
+            else if (!strcmp(argv[i], "-timed"))
+            {
+                args.mTimer = atoi(argv[++i]);
+            }
         }
         // 1-component args
         {
             if (!strcmp(argv[i], "-no_csv"))
             {
                 args.mOutputFileName = "*";
+            }
+            else if (!strcmp(argv[i], "-scroll_toggle"))
+            {
+                args.mScrollLockToggle = true;
             }
             else if (!strcmp(argv[i], "-?") || !strcmp(argv[i], "-help"))
             {

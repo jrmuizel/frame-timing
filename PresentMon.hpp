@@ -102,6 +102,9 @@ struct PresentMonArgs {
     const char *mTargetProcessName = nullptr;
     const char *mEtlFileName = nullptr;
     int mTargetPid = 0;
+    int mDelay = 0;
+    int mTimer = 0;
+    bool mScrollLockToggle = false;
 };
 
 struct PresentMonData {

@@ -442,12 +442,16 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             }
             
             eventIter->second->PresentMode = PresentMode::Fullscreen;
-            if (eventIter->second->Runtime != Runtime::DXGI) {
-                // Only DXGI gives us the sync interval in the runtime present start event
-                eventIter->second->SyncInterval = eventInfo.GetData<uint32_t>(L"FlipInterval");
-            }
+            if (hdr.EventDescriptor.Id == DxgKrnl_Flip) {
+                if (eventIter->second->Runtime != Runtime::DXGI) {
+                    // Only DXGI gives us the sync interval in the runtime present start event
+                    eventIter->second->SyncInterval = eventInfo.GetData<uint32_t>(L"FlipInterval");
+                }
 
-            eventIter->second->MMIO = eventInfo.GetData<BOOL>(L"MMIOFlip") != 0;
+                eventIter->second->MMIO = eventInfo.GetData<BOOL>(L"MMIOFlip") != 0;
+            } else {
+                eventIter->second->MMIO = true; // All MPO flips are MMIO
+            }
 
             // If this is the DWM thread, piggyback these pending presents on our fullscreen present
             if (hdr.ThreadId == DwmPresentThreadId) {
@@ -1053,6 +1057,11 @@ static GUID GuidFromString(const wchar_t *guidString)
 
 void PresentMonEtw(PresentMonArgs args)
 {
+    Sleep(args.mDelay * 1000);
+    if (g_Quit) {
+        return;
+    }
+
     std::wstring fileName(args.mEtlFileName ? strlen(args.mEtlFileName) : 0, L'\0');
     if (args.mEtlFileName) {
         mbstowcs(&fileName[0], args.mEtlFileName, strlen(args.mEtlFileName));
@@ -1087,6 +1096,7 @@ void PresentMonEtw(PresentMonArgs args)
             PresentMonData data;
 
             PresentMon_Init(args, data);
+            uint64_t start_time = GetTickCount64();
 
             while (!g_Quit)
             {
@@ -1098,7 +1108,11 @@ void PresentMonEtw(PresentMonArgs args)
                     consumer.GetProcessEvents(newProcesses, deadProcesses);
                     PresentMon_UpdateNewProcesses(data, newProcesses);
                 }
+
                 consumer.DequeuePresents(presents);
+                if (args.mScrollLockToggle && (GetKeyState(VK_SCROLL) & 1) == 0) {
+                    presents.clear();
+                }
 
                 PresentMon_Update(data, presents, session.PerfFreq());
                 if (session.AnythingLost(eventsLost, buffersLost)) {
@@ -1109,7 +1123,7 @@ void PresentMonEtw(PresentMonArgs args)
                     PresentMon_UpdateDeadProcesses(data, deadProcesses);
                 }
 
-                if (g_FileComplete) {
+                if (g_FileComplete || (args.mTimer > 0 && GetTickCount64() - start_time > args.mTimer * 1000)) {
                     g_Quit = true;
                 }
 
