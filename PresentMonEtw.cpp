@@ -607,7 +607,9 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             }
 
             if (eventIter->second->TimeTaken != 0 || eventIter->second->Runtime == Runtime::Other) {
-                eventIter->second->TimeTaken = EventTime - eventIter->second->QpcTime;
+                if (eventIter->second->TimeTaken == 0) {
+                    eventIter->second->TimeTaken = EventTime - eventIter->second->QpcTime;
+                }
                 mPresentByThreadId.erase(eventIter);
             }
             break;
