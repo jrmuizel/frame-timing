@@ -43,7 +43,7 @@ static void map_erase_if(Map& m, F pred)
         m.erase(i++);
 }
 
-static void UpdateProcessInfo(ProcessInfo& info, uint64_t now, uint32_t thisPid)
+static void UpdateProcessInfo_Realtime(ProcessInfo& info, uint64_t now, uint32_t thisPid)
 {
     if (now - info.mLastRefreshTicks > 1000) {
         info.mLastRefreshTicks = now;
@@ -103,8 +103,8 @@ void PruneDeque(std::deque<PresentEvent> &presentHistory, uint64_t perfFreq, uin
 void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perfFreq)
 {
     auto& proc = pm.mProcessMap[p.ProcessId];
-    if (!proc.mLastRefreshTicks) {
-        UpdateProcessInfo(proc, now, p.ProcessId);
+    if (!proc.mLastRefreshTicks && !pm.mArgs->mEtlFileName) {
+        UpdateProcessInfo_Realtime(proc, now, p.ProcessId);
     }
 
     if (pm.mArgs->mTargetProcessName && strcmp(pm.mArgs->mTargetProcessName, "*") &&
@@ -245,6 +245,20 @@ void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
     }
 }
 
+void PresentMon_UpdateNewProcesses(PresentMonData& pm, std::map<uint32_t, ProcessInfo>& newProcesses)
+{
+    for (auto processPair : newProcesses) {
+        pm.mProcessMap[processPair.first] = processPair.second;
+    }
+}
+
+void PresentMon_UpdateDeadProcesses(PresentMonData& pm, std::vector<uint32_t>& deadProcesses)
+{
+    for (auto pid : deadProcesses) {
+        pm.mProcessMap.erase(pid);
+    }
+}
+
 void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEvent>> presents, uint64_t perfFreq)
 {
     std::string display;
@@ -259,7 +273,9 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
     // update all processes
     for (auto& proc : pm.mProcessMap)
     {
-        UpdateProcessInfo(proc.second, now, proc.first);
+        if (!pm.mArgs->mEtlFileName) {
+            UpdateProcessInfo_Realtime(proc.second, now, proc.first);
+        }
         if (proc.second.mModuleName.empty() ||
             proc.second.mChainMap.empty())
         {

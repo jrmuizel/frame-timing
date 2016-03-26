@@ -102,7 +102,6 @@ struct PresentMonArgs {
     const char *mTargetProcessName = nullptr;
     const char *mEtlFileName = nullptr;
     int mTargetPid = 0;
-    bool mInputOnly = false;
 };
 
 struct PresentMonData {
@@ -114,6 +113,8 @@ struct PresentMonData {
 void PresentMonEtw(PresentMonArgs args);
 
 void PresentMon_Init(const PresentMonArgs& args, PresentMonData& data);
+void PresentMon_UpdateNewProcesses(PresentMonData& data, std::map<uint32_t, ProcessInfo>& processes);
 void PresentMon_Update(PresentMonData& data, std::vector<std::shared_ptr<PresentEvent>> presents, uint64_t perfFreq);
+void PresentMon_UpdateDeadProcesses(PresentMonData& data, std::vector<uint32_t>& processIds);
 void PresentMon_Shutdown(PresentMonData& data);
 

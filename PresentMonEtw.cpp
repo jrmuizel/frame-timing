@@ -27,17 +27,20 @@
 #include <set>
 #include <d3d9.h>
 #include <algorithm>
+#include <mutex>
 
 struct __declspec(uuid("{CA11C036-0102-4A2D-A6AD-F03CFED5D3C9}")) DXGI_PROVIDER_GUID_HOLDER;
 struct __declspec(uuid("{802ec45a-1e99-4b83-9920-87c98277ba9d}")) DXGKRNL_PROVIDER_GUID_HOLDER;
 struct __declspec(uuid("{8c416c79-d49b-4f01-a467-e56d3aa8234c}")) WIN32K_PROVIDER_GUID_HOLDER;
 struct __declspec(uuid("{9e9bba3c-2e38-40cb-99f4-9e8281425164}")) DWM_PROVIDER_GUID_HOLDER;
 struct __declspec(uuid("{783ACA0A-790E-4d7f-8451-AA850511C6B9}")) D3D9_PROVIDER_GUID_HOLDER;
+struct __declspec(uuid("{3d6fa8d0-fe05-11d0-9dda-00c04fd7ba7c}")) NT_PROCESS_EVENT_GUID_HOLDER;
 static const auto DXGI_PROVIDER_GUID = __uuidof(DXGI_PROVIDER_GUID_HOLDER);
 static const auto DXGKRNL_PROVIDER_GUID = __uuidof(DXGKRNL_PROVIDER_GUID_HOLDER);
 static const auto WIN32K_PROVIDER_GUID = __uuidof(WIN32K_PROVIDER_GUID_HOLDER);
 static const auto DWM_PROVIDER_GUID = __uuidof(DWM_PROVIDER_GUID_HOLDER);
 static const auto D3D9_PROVIDER_GUID = __uuidof(D3D9_PROVIDER_GUID_HOLDER);
+static const auto NT_PROCESS_EVENT_GUID = __uuidof(NT_PROCESS_EVENT_GUID_HOLDER);
 
 class TraceEventInfo
 {
@@ -84,6 +87,18 @@ public:
         }
     }
 
+    uint32_t GetDataSize(PCWSTR name) {
+        PROPERTY_DATA_DESCRIPTOR descriptor;
+        descriptor.ArrayIndex = 0;
+        descriptor.PropertyName = reinterpret_cast<unsigned long long>(name);
+        ULONG size = 0;
+        auto result = TdhGetPropertySize(pEvent, 0, nullptr, 1, &descriptor, &size);
+        if (result != ERROR_SUCCESS) {
+            throw std::exception("Unexpected error from TdhGetPropertySize.", result);
+        }
+        return size;
+    }
+
     template <typename T>
     T GetData(PCWSTR name) {
         T local;
@@ -105,9 +120,14 @@ private:
     EVENT_RECORD* pEvent;
 };
 
+template <typename mutex_t> std::unique_lock<mutex_t> scoped_lock(mutex_t &m)
+{
+    return std::unique_lock<mutex_t>(m);
+}
+
 struct DxgiConsumer : ITraceConsumer
 {
-    CRITICAL_SECTION mMutex;
+    std::mutex mMutex;
     // A set of presents that are "completed":
     // They progressed as far as they can through the pipeline before being either discarded or hitting the screen.
     // These will be handed off to the consumer thread.
@@ -189,23 +209,26 @@ struct DxgiConsumer : ITraceConsumer
     // Yet another unique way of tracking present history tokens, this time from DxgKrnl -> DWM, only for legacy blit
     std::map<uint64_t, std::shared_ptr<PresentEvent>> mPresentsByLegacyBlitToken;
 
+    std::mutex mProcessMutex;
+    std::map<uint32_t, ProcessInfo> mNewProcessesFromETW;
+    std::vector<uint32_t> mDeadProcessIds;
+
     bool DequeuePresents(std::vector<std::shared_ptr<PresentEvent>>& outPresents)
     {
         if (mCompletedPresents.size())
         {
-            EnterCriticalSection(&mMutex);
+            auto lock = scoped_lock(mMutex);
             outPresents.swap(mCompletedPresents);
-            LeaveCriticalSection(&mMutex);
             return !outPresents.empty();
         }
         return false;
     }
 
-    DxgiConsumer() {
-        InitializeCriticalSection(&mMutex);
-    }
-    ~DxgiConsumer() {
-        DeleteCriticalSection(&mMutex);
+    void GetProcessEvents(decltype(mNewProcessesFromETW)& outNewProcesses, decltype(mDeadProcessIds)& outDeadProcesses)
+    {
+        auto lock = scoped_lock(mProcessMutex);
+        outNewProcesses.swap(mNewProcessesFromETW);
+        outDeadProcesses.swap(mDeadProcessIds);
     }
 
     virtual void OnEventRecord(_In_ PEVENT_RECORD pEventRecord);
@@ -238,9 +261,8 @@ private:
             }
         }
 
-        EnterCriticalSection(&mMutex);
+        auto lock = scoped_lock(mMutex);
         mCompletedPresents.push_back(p);
-        LeaveCriticalSection(&mMutex);
     }
 
     decltype(mPresentByThreadId.begin()) FindOrCreatePresent(_In_ PEVENT_RECORD pEventRecord)
@@ -318,6 +340,7 @@ private:
     void OnWin32kEvent(_In_ PEVENT_RECORD pEventRecord);
     void OnDWMEvent(_In_ PEVENT_RECORD pEventRecord);
     void OnD3D9Event(_In_ PEVENT_RECORD pEventRecord);
+    void OnNTProcessEvent(_In_ PEVENT_RECORD pEventRecord);
 };
 
 void DxgiConsumer::OnDXGIEvent(PEVENT_RECORD pEventRecord)
@@ -951,6 +974,34 @@ void DxgiConsumer::OnD3D9Event(PEVENT_RECORD pEventRecord)
     }
 }
 
+void DxgiConsumer::OnNTProcessEvent(PEVENT_RECORD pEventRecord)
+{
+    TraceEventInfo eventInfo(pEventRecord);
+    auto pid = eventInfo.GetData<uint32_t>(L"ProcessId");
+    auto lock = scoped_lock(mProcessMutex);
+    switch (pEventRecord->EventHeader.EventDescriptor.Opcode)
+    {
+        case EVENT_TRACE_TYPE_START:
+        case EVENT_TRACE_TYPE_DC_START:
+        {
+            ProcessInfo process;
+            auto nameSize = eventInfo.GetDataSize(L"ImageFileName");
+            process.mModuleName.resize(nameSize, '\0');
+            eventInfo.GetData(L"ImageFileName", (byte*)process.mModuleName.data(), nameSize);
+
+            mNewProcessesFromETW.insert_or_assign(pid, std::move(process));
+            break;
+        }
+        case EVENT_TRACE_TYPE_END:
+        case EVENT_TRACE_TYPE_DC_END:
+        {
+            mDeadProcessIds.emplace_back(pid);
+            break;
+        }
+    }
+
+}
+
 void DxgiConsumer::OnEventRecord(PEVENT_RECORD pEventRecord)
 {
     auto& hdr = pEventRecord->EventHeader;
@@ -975,15 +1026,21 @@ void DxgiConsumer::OnEventRecord(PEVENT_RECORD pEventRecord)
     {
         OnD3D9Event(pEventRecord);
     }
+    else if (hdr.ProviderId == NT_PROCESS_EVENT_GUID)
+    {
+        OnNTProcessEvent(pEventRecord);
+    }
 }
 
+static bool g_FileComplete = false;
 static void EtwProcessingThread(TraceSession *session)
 {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
 
     session->Process();
 
-    g_Quit = true;
+    // Guarantees that the PM thread does one more loop to pick up any last events before setting g_Quit
+    g_FileComplete = true;
 }
 
 static GUID GuidFromString(const wchar_t *guidString)
@@ -1003,7 +1060,7 @@ void PresentMonEtw(PresentMonArgs args)
     TraceSession session(L"PresentMon", args.mEtlFileName ? fileName.c_str() : nullptr);
     DxgiConsumer consumer;
 
-    if (!args.mInputOnly && !session.Start()) {
+    if (!args.mEtlFileName && !session.Start()) {
         if (session.Status() == ERROR_ALREADY_EXISTS) {
             if (!session.Stop() || !session.Start()) {
                 printf("ETW session error. Quitting.\n");
@@ -1034,11 +1091,26 @@ void PresentMonEtw(PresentMonArgs args)
             while (!g_Quit)
             {
                 std::vector<std::shared_ptr<PresentEvent>> presents;
+                std::map<uint32_t, ProcessInfo> newProcesses;
+                std::vector<uint32_t> deadProcesses;
+
+                if (args.mEtlFileName) {
+                    consumer.GetProcessEvents(newProcesses, deadProcesses);
+                    PresentMon_UpdateNewProcesses(data, newProcesses);
+                }
                 consumer.DequeuePresents(presents);
 
                 PresentMon_Update(data, presents, session.PerfFreq());
                 if (session.AnythingLost(eventsLost, buffersLost)) {
                     printf("Lost %u events, %u buffers.", eventsLost, buffersLost);
+                }
+
+                if (args.mEtlFileName) {
+                    PresentMon_UpdateDeadProcesses(data, deadProcesses);
+                }
+
+                if (g_FileComplete) {
+                    g_Quit = true;
                 }
 
                 Sleep(100);
