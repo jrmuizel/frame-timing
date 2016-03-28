@@ -70,16 +70,15 @@ static void UpdateProcessInfo_Realtime(ProcessInfo& info, uint64_t now, uint32_t
 const char* PresentModeToString(PresentMode mode)
 {
     switch (mode) {
-    case PresentMode::Fullscreen: return "Fullscreen";
-    case PresentMode::Composed_Flip: return "Windowed Flip";
-    case PresentMode::DirectFlip: return "DirectFlip";
-    case PresentMode::IndependentFlip: return "IndependentFlip";
-    case PresentMode::ImmediateIndependentFlip: return "Immediate iFlip";
-    case PresentMode::IndependentFlipMPO: return "iFlip MPO";
-    case PresentMode::Fullscreen_Blit: return "Fullscreen Blit";
-    case PresentMode::Windowed_Blit: return "Windowed Blit";
-    case PresentMode::Legacy_Windowed_Blit: return "VistaBlit";
-    case PresentMode::Composition_Buffer: return "Composition Buffer";
+    case PresentMode::Hardware_Legacy_Flip: return "Hardware: Legacy Flip";
+    case PresentMode::Hardware_Legacy_Copy_To_Front_Buffer: return "Hardware: Legacy Copy to front buffer";
+    case PresentMode::Hardware_Direct_Flip: return "Hardware: Direct Flip";
+    case PresentMode::Hardware_Independent_Flip: return "Hardware: Independent Flip";
+    case PresentMode::Composed_Flip: return "Composed: Flip";
+    case PresentMode::Composed_Copy_GPU_GDI: return "Composed: Copy with GPU GDI";
+    case PresentMode::Composed_Copy_CPU_GDI: return "Composed: Copy with CPU GDI";
+    case PresentMode::Composed_Composition_Atlas: return "Composed: Composition Atlas";
+    case PresentMode::Hardware_Composed_Independent_Flip: return "Hardware Composed: Independent Flip";
     default: return "Other";
     }
 }
@@ -166,6 +165,7 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
     chain.mLastSyncInterval = p.SyncInterval;
     chain.mLastFlags = p.PresentFlags;
     chain.mLastPresentMode = p.PresentMode;
+    chain.mLastPlane = p.PlaneIndex;
 }
 
 static double ComputeFps(std::deque<PresentEvent> const& presentHistory, uint64_t qpcFreq)
@@ -290,8 +290,8 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
             double cpuTime = ComputeCpuFrameTime(chain.second, perfFreq);
             double latency = ComputeLatency(chain.second, perfFreq);
             std::ostringstream planeString;
-            if (chain.second.mLastPresentMode == PresentMode::IndependentFlipMPO) {
-                planeString << " Plane " << chain.second.mDisplayedPresentHistory.back().PlaneIndex;
+            if (chain.second.mLastPresentMode == PresentMode::Hardware_Composed_Independent_Flip) {
+                planeString << ": Plane " << chain.second.mLastPlane;
             }
             display += FormatString("\t%016llX (%s): SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, %.1lf displayed fps, %.2lf ms CPU, %.2lf ms latency) (%s%s)%s\n",
                 chain.first, RuntimeToString(chain.second.mRuntime), chain.second.mLastSyncInterval, chain.second.mLastFlags, 1000.0/fps, fps, dispFps, cpuTime * 1000.0, latency * 1000.0,

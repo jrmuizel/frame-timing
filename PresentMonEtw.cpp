@@ -134,36 +134,34 @@ struct DxgiConsumer : ITraceConsumer
     std::vector<std::shared_ptr<PresentEvent>> mCompletedPresents;
 
     // A high-level description of the sequence of events for each present type, ignoring runtime end:
-    // Fullscreen:
+    // Hardware Legacy Flip:
     //   Runtime PresentStart -> Flip (by thread/process, for classification) -> QueueSubmit (by thread, for submit sequence) ->
     //    MMIOFlip (by submit sequence, for ready time and immediate flags) [-> VSyncDPC (by submit sequence, for screen time)]
-    // Composed_Flip,
+    // Composed Flip (FLIP_SEQUENTIAL, FLIP_DISCARD, FlipEx),
     //   Runtime PresentStart -> TokenCompositionSurfaceObject (by thread/process, for classification and token key) ->
     //    PresentHistoryDetailed (by thread, for token ptr) -> QueueSubmit (by thread, for submit sequence) ->
     //    PropagatePresentHistory (by token ptr, for ready time) and TokenStateChanged (by token key, for discard status and screen time)
-    // DirectFlip,
+    // Hardware Direct Flip,
     //   N/A, not currently uniquely detectable (follows the same path as composed_flip)
-    // IndependentFlip,
-    //   Follows composed flip, TokenStateChanged indicates IndependentFlip -> MMIOFlip (by submit sequence, for immediate flags) ->
-    //   VSyncDPC (by submit sequence, for screen time)
-    // ImmediateIndependentFlip,
-    //   Identical to above, except MMIOFlip indicates immediate and screen time
-    // IndependentFlipMPO,
+    // Hardware Independent Flip,
+    //   Follows composed flip, TokenStateChanged indicates IndependentFlip -> MMIOFlip (by submit sequence, for immediate flags) [->
+    //   VSyncDPC (by submit sequence, for screen time)]
+    // Hardware Composed Independent Flip,
     //   Identical to IndependentFlip, but MMIOFlipMPO is received instead
-    // Windowed_Blit,
+    // Composed Copy with GPU GDI (a.k.a. Win7 Blit),
     //   Runtime PresentStart -> Blt (by thread/process, for classification) -> PresentHistoryDetailed (by thread, for token ptr and classification) ->
     //    DxgKrnl Present (by thread, for hWnd) -> PropagatePresentHistory (by token ptr, for ready time) ->
     //    DWM UpdateWindow (by hWnd, marks hWnd active for composition) -> DWM Present (consumes most recent present per hWnd, marks DWM thread ID) ->
     //    A fullscreen present is issued by DWM, and when it completes, this present is on screen
-    // Fullscreen_Blit,
+    // Hardware Copy to front buffer,
     //   Runtime PresentStart -> Blt (by thread/process, for classification) -> QueueSubmit (by thread, for submit sequence) ->
     //    QueueComplete (by submit sequence, indicates ready and screen time)
     //    Distinction between FS and windowed blt is done by LACK of other events
-    // Legacy_Windowed_Blit (a.k.a. Vista Blit),
+    // Composed Copy with CPU GDI (a.k.a. Vista Blit),
     //   Runtime PresentStart -> Blt (by thread/process, for classification) -> SubmitPresentHistory (by thread, for token ptr, legacy blit token, and classification) ->
     //    PropagatePresentHsitory (by token ptr, for ready time) -> DWM FlipChain (by legacy blit token, for hWnd and marks hWnd active for composition) ->
     //    Follows the Windowed_Blit path for tracking to screen
-    // Composition_Buffer,
+    // Composed Composition Atlas (DirectComposition),
     //   SubmitPresentHistory (use model field for classification, get token ptr) -> PropagatePresentHistory (by token ptr) ->
     //    Assume DWM will compose this buffer on next present (missing InFrame event), follow windowed blit paths to screen time
 
@@ -441,7 +439,7 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                 return;
             }
             
-            eventIter->second->PresentMode = PresentMode::Fullscreen;
+            eventIter->second->PresentMode = PresentMode::Hardware_Legacy_Flip;
             if (hdr.EventDescriptor.Id == DxgKrnl_Flip) {
                 if (eventIter->second->Runtime != Runtime::DXGI) {
                     // Only DXGI gives us the sync interval in the runtime present start event
@@ -499,8 +497,8 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
 
             auto pEvent = eventIter->second;
 
-            if (pEvent->PresentMode == PresentMode::Fullscreen_Blit ||
-                (pEvent->PresentMode == PresentMode::Fullscreen && !pEvent->MMIO)) {
+            if (pEvent->PresentMode == PresentMode::Hardware_Legacy_Copy_To_Front_Buffer ||
+                (pEvent->PresentMode == PresentMode::Hardware_Legacy_Flip && !pEvent->MMIO)) {
                 pEvent->ScreenTime = pEvent->ReadyTime = EventTime;
                 pEvent->FinalState = PresentResult::Presented;
 
@@ -538,11 +536,11 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             if (Flags & DxgKrnl_MMIOFlip_Flags::FlipImmediate) {
                 eventIter->second->FinalState = PresentResult::Presented;
                 eventIter->second->ScreenTime = *(uint64_t*)&pEventRecord->EventHeader.TimeStamp;
-                if (eventIter->second->PresentMode == PresentMode::Fullscreen) {
+                if (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Flip) {
                     CompletePresent(eventIter->second);
                 } else {
                     // We'll let the Win32K token discard event trigger the Complete for this one
-                    eventIter->second->PresentMode = PresentMode::ImmediateIndependentFlip;
+                    eventIter->second->SupportsTearing = true;
                 }
             }
 
@@ -566,9 +564,8 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                 eventIter->second->PlaneIndex = eventInfo.GetData<uint32_t>(L"LayerIndex");
             }
 
-            if (eventIter->second->PresentMode == PresentMode::IndependentFlip ||
-                eventIter->second->PresentMode == PresentMode::Composed_Flip) {
-                eventIter->second->PresentMode = PresentMode::IndependentFlipMPO;
+            if (eventIter->second->PresentMode == PresentMode::Hardware_Independent_Flip) {
+                eventIter->second->PresentMode = PresentMode::Hardware_Composed_Independent_Flip;
             }
 
             break;
@@ -587,7 +584,7 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             
             eventIter->second->ScreenTime = EventTime;
             eventIter->second->FinalState = PresentResult::Presented;
-            if (eventIter->second->PresentMode == PresentMode::Fullscreen) {
+            if (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Flip) {
                 CompletePresent(eventIter->second);
             }
             break;
@@ -605,7 +602,7 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
 
             auto hWnd = eventInfo.GetPtr(L"hWindow");
 
-            if (eventIter->second->PresentMode == PresentMode::Windowed_Blit) {
+            if (eventIter->second->PresentMode == PresentMode::Composed_Copy_GPU_GDI) {
                 // Manipulate the map here
                 // When DWM is ready to present, we'll query for the most recent blt targeting this window and take it out of the map
                 auto hWndIter = mPresentByWindow.find(hWnd);
@@ -625,8 +622,8 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             // For all other events, just remember the hWnd, we might need it later
             eventIter->second->Hwnd = hWnd;
 
-            if ((eventIter->second->PresentMode == PresentMode::Fullscreen_Blit || 
-                 (eventIter->second->PresentMode == PresentMode::Fullscreen && !eventIter->second->MMIO))&&
+            if ((eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Copy_To_Front_Buffer || 
+                 (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Flip && !eventIter->second->MMIO)) &&
                 eventIter->second->ScreenTime != 0) {
                 // This is a fullscreen blit where all work associated was already done, so it's on-screen
                 // It was deferred to here because there was no way to be sure it was really fullscreen until now
@@ -652,8 +649,8 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                 return;
             }
 
-            if (eventIter->second->PresentMode == PresentMode::Fullscreen_Blit) {
-                eventIter->second->PresentMode = PresentMode::Windowed_Blit;
+            if (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Copy_To_Front_Buffer) {
+                eventIter->second->PresentMode = PresentMode::Composed_Copy_GPU_GDI;
                 // Overwrite some fields that may have been filled out while we thought it was fullscreen
                 assert(!eventIter->second->Completed);
                 eventIter->second->ReadyTime = eventIter->second->ScreenTime = 0;
@@ -669,12 +666,12 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             // It gives us up to two different types of keys to correlate further.
             auto eventIter = FindOrCreatePresent(pEventRecord);
 
-            if (eventIter->second->PresentMode == PresentMode::Fullscreen_Blit) {
+            if (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Copy_To_Front_Buffer) {
                 auto TokenData = eventInfo.GetData<uint64_t>(L"TokenData");
                 mPresentsByLegacyBlitToken[TokenData] = eventIter->second;
 
                 eventIter->second->ReadyTime = EventTime;
-                eventIter->second->PresentMode = PresentMode::Legacy_Windowed_Blit;
+                eventIter->second->PresentMode = PresentMode::Composed_Copy_CPU_GDI;
             } else if (eventIter->second->PresentMode == PresentMode::Unknown) {
                 enum class TokenModel {
                     Composition = 7,
@@ -682,14 +679,14 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
 
                 auto Model = eventInfo.GetData<TokenModel>(L"Model");
                 if (Model == TokenModel::Composition) {
-                    eventIter->second->PresentMode = PresentMode::Composition_Buffer;
+                    eventIter->second->PresentMode = PresentMode::Composed_Composition_Atlas;
                     uint64_t TokenPtr = eventInfo.GetPtr(L"Token");
                     mDxgKrnlPresentHistoryTokens[TokenPtr] = eventIter->second;
                 }
             }
 
             if (eventIter->second->Runtime == Runtime::Other ||
-                eventIter->second->PresentMode == PresentMode::Composition_Buffer)
+                eventIter->second->PresentMode == PresentMode::Composed_Composition_Atlas)
             {
                 // We're not expecting any other events from this thread (no DxgKrnl Present or EndPresent runtime event)
                 mPresentByThreadId.erase(eventIter);
@@ -707,10 +704,10 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             eventIter->second->ReadyTime = EventTime;
 
             if (eventIter->second->FinalState == PresentResult::Discarded &&
-                eventIter->second->PresentMode == PresentMode::Windowed_Blit) {
+                eventIter->second->PresentMode == PresentMode::Composed_Copy_GPU_GDI) {
                 // This won't make it to screen, go ahead and complete it now
                 CompletePresent(eventIter->second);
-            } else if (eventIter->second->PresentMode == PresentMode::Composition_Buffer) {
+            } else if (eventIter->second->PresentMode == PresentMode::Composed_Composition_Atlas) {
                 mPresentsWaitingForDWM.emplace_back(eventIter->second);
             }
 
@@ -721,7 +718,7 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
         {
             auto eventIter = FindOrCreatePresent(pEventRecord);
 
-            eventIter->second->PresentMode = PresentMode::Fullscreen_Blit;
+            eventIter->second->PresentMode = PresentMode::Hardware_Legacy_Copy_To_Front_Buffer;
             break;
         }
     }
@@ -754,6 +751,7 @@ void DxgiConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
         {
             auto eventIter = FindOrCreatePresent(pEventRecord);
             eventIter->second->PresentMode = PresentMode::Composed_Flip;
+            eventIter->second->SupportsTearing = false;
 
             Win32KPresentHistoryTokenKey key(eventInfo.GetPtr(L"pCompositionSurfaceObject"),
                                              eventInfo.GetData<uint64_t>(L"PresentCount"),
@@ -797,7 +795,7 @@ void DxgiConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
 
                     bool iFlip = eventInfo.GetData<BOOL>(L"IndependentFlip") != 0;
                     if (iFlip && event.PresentMode == PresentMode::Composed_Flip) {
-                        event.PresentMode = PresentMode::IndependentFlip;
+                        event.PresentMode = PresentMode::Hardware_Independent_Flip;
                     }
 
                     break;
@@ -890,8 +888,8 @@ void DxgiConsumer::OnDWMEvent(PEVENT_RECORD pEventRecord)
                 // Pickup the most recent present from a given window
                 auto hWndIter = mPresentByWindow.find(hWnd);
                 if (hWndIter != mPresentByWindow.end()) {
-                    if (hWndIter->second->PresentMode != PresentMode::Windowed_Blit &&
-                        hWndIter->second->PresentMode != PresentMode::Legacy_Windowed_Blit) {
+                    if (hWndIter->second->PresentMode != PresentMode::Composed_Copy_GPU_GDI &&
+                        hWndIter->second->PresentMode != PresentMode::Composed_Copy_CPU_GDI) {
                         continue;
                     }
                     mPresentsWaitingForDWM.emplace_back(hWndIter->second);
