@@ -75,8 +75,8 @@ struct PresentEvent {
     uint64_t Hwnd = 0;
     std::deque<std::shared_ptr<PresentEvent>> DependentPresents;
     bool MMIO = false;
-#if _DEBUG
     bool Completed = false;
+#if _DEBUG
     ~PresentEvent() { assert(Completed || g_Quit); }
 #endif
 };

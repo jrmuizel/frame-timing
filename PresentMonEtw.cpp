@@ -167,16 +167,14 @@ struct DxgiConsumer : ITraceConsumer
     //   SubmitPresentHistory (use model field for classification, get token ptr) -> PropagatePresentHistory (by token ptr) ->
     //    Assume DWM will compose this buffer on next present (missing InFrame event), follow windowed blit paths to screen time
 
+    // For each process, stores each present started. Used to ensure that the consumer thread only sees presents in the were submitted.
+    std::map<uint32_t, std::map<uint64_t, std::shared_ptr<PresentEvent>>> mPresentsByProcess;
+
     // Presents in the process of being submitted
     // The first map contains a single present that is currently in-between a set of expected events on the same thread:
     //   (e.g. DXGI_Present_Start/DXGI_Present_Stop, or Flip/QueueSubmit)
-    // The second map contains a queue of presents currently pending for a process
-    //   These presents have been "batched" and will be submitted by a driver worker thread
-    //   The assumption is that they will be submitted to kernel in the same order they were submitted to DXGI,
-    //   but this might not hold true especially if there are multiple D3D devices in play
     // Used for mapping from runtime events to future events, and thread map used extensively for correlating kernel events
     std::map<uint32_t, std::shared_ptr<PresentEvent>> mPresentByThreadId;
-    std::map<uint32_t, std::deque<std::shared_ptr<PresentEvent>>> mPresentsByProcess;
 
     // Maps from queue packet submit sequence
     // Used for Flip -> MMIOFlip -> VSyncDPC for FS, for PresentHistoryToken -> MMIOFlip -> VSyncDPC for iFlip,
@@ -237,10 +235,8 @@ struct DxgiConsumer : ITraceConsumer
 private:
     void CompletePresent(std::shared_ptr<PresentEvent> p)
     {
-#if _DEBUG
         assert(!p->Completed);
-        p->Completed = true;
-#endif
+        assert(p->FinalState != PresentResult::Unknown);
 
         // Complete all other presents that were riding along with this one (i.e. this one came from DWM)
         for (auto& p2 : p->DependentPresents) {
@@ -261,8 +257,28 @@ private:
             }
         }
 
-        auto lock = scoped_lock(mMutex);
-        mCompletedPresents.push_back(p);
+        auto& processMap = mPresentsByProcess[p->ProcessId];
+        auto processIter = processMap.begin();
+        assert(!processIter->second->Completed); // It wouldn't be here anymore if it was
+        auto thisPresent = processMap.find(p->QpcTime);
+
+        const uint32_t cMaxPendingUnknownPresents = 20;
+        while(std::distance(processIter, thisPresent) > cMaxPendingUnknownPresents &&
+              processIter->second->PresentMode == PresentMode::Unknown) {
+            CompletePresent(processIter->second);
+            processIter = processMap.begin();
+        }
+        
+        p->Completed = true;
+        if (processIter->second == p) {
+            auto lock = scoped_lock(mMutex);
+            while (processIter != processMap.end() && processIter->second->Completed) {
+                mCompletedPresents.push_back(processIter->second);
+                processMap.erase(processIter);
+                processIter = processMap.begin();
+            }
+        }
+
     }
 
     decltype(mPresentByThreadId.begin()) FindOrCreatePresent(_In_ PEVENT_RECORD pEventRecord)
@@ -274,20 +290,21 @@ private:
         }
 
         // No such luck, check for batched presents
-        auto& processDeque = mPresentsByProcess[pEventRecord->EventHeader.ProcessId];
+        auto& processMap = mPresentsByProcess[pEventRecord->EventHeader.ProcessId];
+        auto processIter = std::find_if(processMap.begin(), processMap.end(),
+                                        [](auto processIter){return processIter.second->PresentMode == PresentMode::Unknown;});
         uint64_t EventTime = *(uint64_t*)&pEventRecord->EventHeader.TimeStamp;
-        if (processDeque.empty()) {
+        if (processIter == processMap.end()) {
             // This likely didn't originate from a runtime whose events we're tracking (DXGI/D3D9)
             // Could be composition buffers, or maybe another runtime (e.g. GL)
             auto newEvent = std::make_shared<PresentEvent>();
             newEvent->QpcTime = EventTime;
             newEvent->ProcessId = pEventRecord->EventHeader.ProcessId;
+            processMap.emplace(EventTime, newEvent);
             eventIter = mPresentByThreadId.emplace(pEventRecord->EventHeader.ThreadId, newEvent).first;
         } else {
             // Assume batched presents are popped off the front of the driver queue by process in order, do the same here
-            assert(processDeque.front()->QpcTime < EventTime);
-            eventIter = mPresentByThreadId.emplace(pEventRecord->EventHeader.ThreadId, processDeque.front()).first;
-            processDeque.pop_front();
+            eventIter = mPresentByThreadId.emplace(pEventRecord->EventHeader.ThreadId, processIter->second).first;
         }
 
         return eventIter;
@@ -305,34 +322,6 @@ private:
 
         assert(event.QpcTime < EndTime);
         event.TimeTaken = EndTime - event.QpcTime;
-
-        // PresentMode unknown means we didn't get any other events between the start and stop events which would help us classify
-        // That either means the driver is batching it, or the present was dropped (e.g. DoNotWait would've waited)
-        if (event.PresentMode == PresentMode::Unknown) {
-            if (AllowPresentBatching) {
-                auto& eventDeque = mPresentsByProcess[hdr.ProcessId];
-                eventDeque.push_back(eventIter->second);
-
-#if _DEBUG
-                auto& container = mPresentsByProcess[hdr.ProcessId];
-                for (UINT i = 0; i < container.size() - 1; ++i)
-                {
-                    assert(container[i]->QpcTime <= container[i + 1]->QpcTime);
-                }
-#endif
-
-                // We'll give the driver some time to submit this present
-                // In a batching scenario, the deque should grow to a steady state, and then we'll start popping off the front during FindOrCreatePresent above
-                const uint32_t cMaxPendingPresents = 20;
-                if (eventDeque.size() > cMaxPendingPresents)
-                {
-                    CompletePresent(eventDeque.front());
-                    eventDeque.pop_front();
-                }
-            } else {
-                CompletePresent(eventIter->second);
-            }
-        }
     }
 
     void OnDXGIEvent(_In_ PEVENT_RECORD pEventRecord);
@@ -348,6 +337,8 @@ void DxgiConsumer::OnDXGIEvent(PEVENT_RECORD pEventRecord)
     enum {
         DXGIPresent_Start = 42,
         DXGIPresent_Stop,
+        DXGIPresentMPO_Start = 55,
+        DXGIPresentMPO_Stop = 56,
     };
 
     auto& hdr = pEventRecord->EventHeader;
@@ -355,6 +346,7 @@ void DxgiConsumer::OnDXGIEvent(PEVENT_RECORD pEventRecord)
     switch (hdr.EventDescriptor.Id)
     {
         case DXGIPresent_Start:
+        case DXGIPresentMPO_Start:
         {
             PresentEvent event;
             event.ProcessId = hdr.ProcessId;
@@ -368,7 +360,11 @@ void DxgiConsumer::OnDXGIEvent(PEVENT_RECORD pEventRecord)
         
             // Ignore PRESENT_TEST: it's just to check if you're still fullscreen, doesn't actually do anything
             if ((event.PresentFlags & DXGI_PRESENT_TEST) == 0) {
-                mPresentByThreadId[hdr.ThreadId] = std::make_shared<PresentEvent>(event);
+                auto pEvent = std::make_shared<PresentEvent>(event);
+                mPresentByThreadId[hdr.ThreadId] = pEvent;
+
+                auto& processMap = mPresentsByProcess[hdr.ProcessId];
+                processMap.emplace(EventTime, pEvent);
             }
 
 #if _DEBUG
@@ -377,6 +373,7 @@ void DxgiConsumer::OnDXGIEvent(PEVENT_RECORD pEventRecord)
             break;
         }
         case DXGIPresent_Stop:
+        case DXGIPresentMPO_Stop:
         {
             RuntimePresentStop(pEventRecord);
             break;
@@ -963,7 +960,10 @@ void DxgiConsumer::OnD3D9Event(PEVENT_RECORD pEventRecord)
             event.SyncInterval = (D3D9Flags & D3DPRESENT_FORCEIMMEDIATE) ? 0 : event.SyncInterval;
             event.Runtime = Runtime::D3D9;
         
-            mPresentByThreadId[hdr.ThreadId] = std::make_shared<PresentEvent>(event);
+            auto pEvent = std::make_shared<PresentEvent>(event);
+            mPresentByThreadId[hdr.ThreadId] = pEvent;
+            auto& processMap = mPresentsByProcess[hdr.ProcessId];
+            processMap.emplace(EventTime, pEvent);
 
 #if _DEBUG
             event.Completed = true;

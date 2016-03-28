@@ -120,46 +120,29 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
 
     if (p.FinalState == PresentResult::Presented) {
         chain.mDisplayedPresentHistory.push_back(p);
-
-        auto len = chain.mPresentHistory.size();
-        auto index = len - 1;
-        if (len == 0) {
-            chain.mPresentHistory.push_back(p);
-            index = len++;
-        } else {
-            for (; index >= 0; --index) {
-                if (index == 0 || chain.mPresentHistory[index].QpcTime < p.QpcTime) {
-                    ++index;
-                    chain.mPresentHistory.insert(chain.mPresentHistory.begin() + index, p);
-                    assert(chain.mPresentHistory[index].QpcTime == p.QpcTime);
-                    break;
-                }
-            }
-            ++len;
-        }
-        
-        if (pm.mOutputFile) {
-            for (; index < len; ++index) {
-                if (index > 0) {
-                    auto& curr = chain.mPresentHistory[index];
-                    auto& prev = chain.mPresentHistory[index - 1];
-                    double deltaMilliseconds = 1000 * double(curr.QpcTime - prev.QpcTime) / perfFreq;
-                    double deltaReady = curr.ReadyTime == 0 ? 0.0 : (1000 * double(curr.ReadyTime - curr.QpcTime) / perfFreq);
-                    double deltaDisplayed = curr.ScreenTime == 0 ? 0.0 : (1000 * double(curr.ScreenTime - curr.QpcTime) / perfFreq);
-                    double timeTakenMilliseconds = 1000 * double(curr.TimeTaken) / perfFreq;
-                    fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%s,%.3lf,%.3lf,%d,%d,%s,%.3lf,%.3lf,%d\n",
-                        proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime),
-                            deltaMilliseconds, timeTakenMilliseconds, curr.SyncInterval, curr.PresentFlags, PresentModeToString(curr.PresentMode),
-                            deltaReady, deltaDisplayed, curr.FinalState != PresentResult::Discarded);
-                }
-            }
-        }
-
-        PruneDeque(chain.mDisplayedPresentHistory, perfFreq, MAX_DISPLAYED_HISTORY_TIME);
-        PruneDeque(chain.mPresentHistory, perfFreq, MAX_HISTORY_TIME);
-    } else {
-        chain.mPresentHistory.push_back(p);
     }
+    chain.mPresentHistory.push_back(p);
+    assert(std::is_sorted(chain.mPresentHistory.begin(), chain.mPresentHistory.end(),
+                          [](auto a, auto b){ return a.QpcTime < b.QpcTime; }));
+        
+    if (pm.mOutputFile) {
+        auto len = chain.mPresentHistory.size();
+        if (len > 1) {
+            auto& curr = chain.mPresentHistory[len - 1];
+            auto& prev = chain.mPresentHistory[len - 2];
+            double deltaMilliseconds = 1000 * double(curr.QpcTime - prev.QpcTime) / perfFreq;
+            double deltaReady = curr.ReadyTime == 0 ? 0.0 : (1000 * double(curr.ReadyTime - curr.QpcTime) / perfFreq);
+            double deltaDisplayed = curr.ScreenTime == 0 ? 0.0 : (1000 * double(curr.ScreenTime - curr.QpcTime) / perfFreq);
+            double timeTakenMilliseconds = 1000 * double(curr.TimeTaken) / perfFreq;
+            fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%s,%.3lf,%.3lf,%d,%d,%s,%.3lf,%.3lf,%d\n",
+                proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime),
+                    deltaMilliseconds, timeTakenMilliseconds, curr.SyncInterval, curr.PresentFlags, PresentModeToString(curr.PresentMode),
+                    deltaReady, deltaDisplayed, curr.FinalState == PresentResult::Presented);
+        }
+    }
+
+    PruneDeque(chain.mDisplayedPresentHistory, perfFreq, MAX_DISPLAYED_HISTORY_TIME);
+    PruneDeque(chain.mPresentHistory, perfFreq, MAX_HISTORY_TIME);
 
     chain.mLastUpdateTicks = now;
     chain.mRuntime = p.Runtime;
