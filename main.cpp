@@ -41,16 +41,23 @@ BOOL WINAPI HandlerRoutine(
 void printHelp()
 {
     printf(
-        "command line options:\n"
+        "Command line options:\n"
         " -captureall: record ALL processes (default).\n"
         " -process_name [exe name]: record specific process.\n"
         " -process_id [integer]: record specific process ID.\n"
         " -output_file [path]: override the default output path.\n"
         " -etl_file [path]: consume events from an ETL file instead of real-time.\n"
-        " -delay [seconds]: wait before starting to consume events (allowing time for alt+tab).\n"
+        " -delay [seconds]: wait before starting to consume events.\n"
         " -timed [seconds]: stop listening and exit after a set amount of time.\n"
         " -no_csv: do not create any output file.\n"
         " -scroll_toggle: only record events while scroll lock is enabled.\n"
+        );
+    printf("\nCSV columns explained (self explanatory columns omitted):\n"
+        "  delta: time between this Present() API call and the previous one.\n"
+        "  timeTaken: time spent inside the Present() API call.\n"
+        "  deltaReady: time between present start and GPU work completion.\n"
+        "  deltaDisplayed: time between present start and frame display.\n"
+        "  displayed: boolean indicator. 1 = displayed, 0 = dropped.\n"
         );
 }
 
