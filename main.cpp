@@ -20,19 +20,21 @@
 
 #include "PresentMon.hpp"
 #include "Util.hpp"
+#include <mutex>
 
 bool g_Quit = false;
 static std::thread *g_PresentMonThread;
+static std::mutex *g_ExitMutex;
 
 BOOL WINAPI HandlerRoutine(
     _In_ DWORD dwCtrlType
     )
 {
+    std::lock_guard<std::mutex> lock(*g_ExitMutex);
     g_Quit = true;
     if (g_PresentMonThread) {
         g_PresentMonThread->join();
     }
-    exit(0);
     return TRUE;
 }
 
@@ -44,7 +46,11 @@ void printHelp()
         " -process_name [exe name]: record specific process.\n"
         " -process_id [integer]: record specific process ID.\n"
         " -output_file [path]: override the default output path.\n"
+        " -etl_file [path]: consume events from an ETL file instead of real-time.\n"
+        " -delay [seconds]: wait before starting to consume events (allowing time for alt+tab)\n"
+        " -timed [seconds]: stop listening and exit after a set amount of time\n"
         " -no_csv: do not create any output file.\n"
+        " -scroll_toggle: only record events while scroll lock is enabled.\n"
         );
 }
 
@@ -90,6 +96,14 @@ int main(int argc, char ** argv)
             {
                 args.mEtlFileName = argv[++i];
             }
+            else if (!strcmp(argv[i], "-delay"))
+            {
+                args.mDelay = atoi(argv[++i]);
+            }
+            else if (!strcmp(argv[i], "-timed"))
+            {
+                args.mTimer = atoi(argv[++i]);
+            }
         }
         // 1-component args
         {
@@ -97,14 +111,14 @@ int main(int argc, char ** argv)
             {
                 args.mOutputFileName = "*";
             }
+            else if (!strcmp(argv[i], "-scroll_toggle"))
+            {
+                args.mScrollLockToggle = true;
+            }
             else if (!strcmp(argv[i], "-?") || !strcmp(argv[i], "-help"))
             {
                 printHelp();
                 return 0;
-            }
-            else if (!strcmp(argv[i], "-input_etl"))
-            {
-                args.mInputOnly = true;
             }
         }
 
@@ -129,6 +143,9 @@ int main(int argc, char ** argv)
     SetConsoleCtrlHandler(HandlerRoutine, TRUE);
     SetConsoleTitleA(title_string.c_str());
 
+    std::mutex exit_mutex;
+    g_ExitMutex = &exit_mutex;
+
     // Run PM in a separate thread so we can join it in the CtrlHandler (can't join the main thread)
     std::thread pm(PresentMonEtw, args);
     g_PresentMonThread = &pm;
@@ -136,5 +153,12 @@ int main(int argc, char ** argv)
     {
         Sleep(100);
     }
-    exit(0);
+
+    // Wait for tracing to finish, to ensure the PM thread closes the session correctly
+    // Prevent races on joining the PM thread between the control handler and the main thread
+    std::lock_guard<std::mutex> lock(exit_mutex);
+    if (g_PresentMonThread->joinable()) {
+        g_PresentMonThread->join();
+    }
+    return 0;
 }

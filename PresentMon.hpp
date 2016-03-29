@@ -29,16 +29,15 @@ extern bool g_Quit;
 enum class PresentMode
 {
     Unknown,
-    Fullscreen,
+    Hardware_Legacy_Flip,
+    Hardware_Legacy_Copy_To_Front_Buffer,
+    Hardware_Direct_Flip,
+    Hardware_Independent_Flip,
     Composed_Flip,
-    DirectFlip,
-    IndependentFlip,
-    ImmediateIndependentFlip,
-    IndependentFlipMPO,
-    Windowed_Blit,
-    Fullscreen_Blit,
-    Legacy_Windowed_Blit,
-    Composition_Buffer,
+    Composed_Copy_GPU_GDI,
+    Composed_Copy_CPU_GDI,
+    Composed_Composition_Atlas,
+    Hardware_Composed_Independent_Flip,
 };
 enum class PresentResult
 {
@@ -57,6 +56,9 @@ struct PresentEvent {
     uint32_t ProcessId = 0;
 
     PresentMode PresentMode = PresentMode::Unknown;
+    bool SupportsTearing = true;
+    bool MMIO = false;
+
     Runtime Runtime = Runtime::Other;
 
     // Time spent in DXGI Present call
@@ -74,7 +76,6 @@ struct PresentEvent {
     uint32_t QueueSubmitSequence = 0;
     uint64_t Hwnd = 0;
     std::deque<std::shared_ptr<PresentEvent>> DependentPresents;
-    bool MMIO = false;
 #if _DEBUG
     bool Completed = false;
     ~PresentEvent() { assert(Completed || g_Quit); }
@@ -89,6 +90,7 @@ struct SwapChainData {
     std::deque<PresentEvent> mPresentHistory;
     std::deque<PresentEvent> mDisplayedPresentHistory;
     PresentMode mLastPresentMode = PresentMode::Unknown;
+    uint32_t mLastPlane = 0;
 };
 
 struct ProcessInfo {
@@ -102,7 +104,9 @@ struct PresentMonArgs {
     const char *mTargetProcessName = nullptr;
     const char *mEtlFileName = nullptr;
     int mTargetPid = 0;
-    bool mInputOnly = false;
+    int mDelay = 0;
+    int mTimer = 0;
+    bool mScrollLockToggle = false;
 };
 
 struct PresentMonData {
@@ -114,6 +118,8 @@ struct PresentMonData {
 void PresentMonEtw(PresentMonArgs args);
 
 void PresentMon_Init(const PresentMonArgs& args, PresentMonData& data);
+void PresentMon_UpdateNewProcesses(PresentMonData& data, std::map<uint32_t, ProcessInfo>& processes);
 void PresentMon_Update(PresentMonData& data, std::vector<std::shared_ptr<PresentEvent>> presents, uint64_t perfFreq);
+void PresentMon_UpdateDeadProcesses(PresentMonData& data, std::vector<uint32_t>& processIds);
 void PresentMon_Shutdown(PresentMonData& data);
 
