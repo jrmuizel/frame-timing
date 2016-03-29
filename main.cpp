@@ -14,6 +14,8 @@
 // responsibility to update it.
 //--------------------------------------------------------------------------------------
 
+#define BUILDNUM 100
+
 #include <windows.h>
 #include <thread>
 #include <cstdio>
@@ -40,8 +42,10 @@ BOOL WINAPI HandlerRoutine(
 
 void printHelp()
 {
+    printf("PresentMon Build %d\n",
+        BUILDNUM);
     printf(
-        "Command line options:\n"
+        "\nCommand line options:\n"
         " -captureall: record ALL processes (default).\n"
         " -process_name [exe name]: record specific process.\n"
         " -process_id [integer]: record specific process ID.\n"
