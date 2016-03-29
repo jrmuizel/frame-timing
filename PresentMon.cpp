@@ -24,7 +24,6 @@
 #include <windows.h>
 #include <psapi.h>
 #include <shlwapi.h>
-#include <sstream>
 
 #pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "shlwapi.lib")
@@ -278,14 +277,14 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
             double dispFps = ComputeDisplayedFps(chain.second, perfFreq);
             double cpuTime = ComputeCpuFrameTime(chain.second, perfFreq);
             double latency = ComputeLatency(chain.second, perfFreq);
-            std::ostringstream planeString;
+            std::string planeString;
             if (chain.second.mLastPresentMode == PresentMode::Hardware_Composed_Independent_Flip) {
-                planeString << ": Plane " << chain.second.mLastPlane;
+                planeString = FormatString(": Plane %d", chain.second.mLastPlane);
             }
             display += FormatString("\t%016llX (%s): SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, %.1lf displayed fps, %.2lf ms CPU, %.2lf ms latency) (%s%s)%s\n",
                 chain.first, RuntimeToString(chain.second.mRuntime), chain.second.mLastSyncInterval, chain.second.mLastFlags, 1000.0/fps, fps, dispFps, cpuTime * 1000.0, latency * 1000.0,
                 PresentModeToString(chain.second.mLastPresentMode),
-                planeString.str().c_str(),
+                planeString.c_str(),
                 (now - chain.second.mLastUpdateTicks) > 1000 ? " [STALE]" : "");
         }
     }
