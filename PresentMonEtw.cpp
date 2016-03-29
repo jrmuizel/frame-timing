@@ -1000,7 +1000,7 @@ void DxgiConsumer::OnD3D9Event(PEVENT_RECORD pEventRecord)
         case D3D9PresentStop:
         {
             auto result = eventInfo.GetData<uint32_t>(L"Result");
-            bool AllowBatching = SUCCEEDED(result) && result != S_PRESENT_MODE_CHANGED && result != S_PRESENT_OCCLUDED;
+            bool AllowBatching = SUCCEEDED(result) && result != S_PRESENT_OCCLUDED;
             RuntimePresentStop(pEventRecord, AllowBatching);
             break;
         }
