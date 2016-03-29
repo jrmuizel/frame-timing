@@ -165,8 +165,12 @@ struct DxgiConsumer : ITraceConsumer
     //   SubmitPresentHistory (use model field for classification, get token ptr) -> PropagatePresentHistory (by token ptr) ->
     //    Assume DWM will compose this buffer on next present (missing InFrame event), follow windowed blit paths to screen time
 
-    // For each process, stores each present started. Used to ensure that the consumer thread only sees presents in the were submitted.
+    // For each process, stores each present started. Used for present batching
     std::map<uint32_t, std::map<uint64_t, std::shared_ptr<PresentEvent>>> mPresentsByProcess;
+
+    // For each (process, swapchain) pair, stores each present started. Used to ensure consumer sees presents targeting the same swapchain in the order they were submitted.
+    typedef std::tuple<uint32_t, uint64_t> ProcessAndSwapChainKey;
+    std::map<ProcessAndSwapChainKey, std::deque<std::shared_ptr<PresentEvent>>> mPresentsByProcessAndSwapChain;
 
     // Presents in the process of being submitted
     // The first map contains a single present that is currently in-between a set of expected events on the same thread:
@@ -234,7 +238,7 @@ private:
     void CompletePresent(std::shared_ptr<PresentEvent> p)
     {
         assert(!p->Completed);
-        assert(p->FinalState != PresentResult::Unknown);
+        //assert(p->FinalState != PresentResult::Unknown);
 
         // Complete all other presents that were riding along with this one (i.e. this one came from DWM)
         for (auto& p2 : p->DependentPresents) {
@@ -254,26 +258,27 @@ private:
                 mPresentByWindow.erase(hWndIter);
             }
         }
-
         auto& processMap = mPresentsByProcess[p->ProcessId];
-        auto processIter = processMap.begin();
-        assert(!processIter->second->Completed); // It wouldn't be here anymore if it was
-        auto thisPresent = processMap.find(p->QpcTime);
+        processMap.erase(p->QpcTime);
 
-        const uint32_t cMaxPendingUnknownPresents = 20;
-        while(std::distance(processIter, thisPresent) > cMaxPendingUnknownPresents &&
-              processIter->second->PresentMode == PresentMode::Unknown) {
-            CompletePresent(processIter->second);
-            processIter = processMap.begin();
+        auto& presentDeque = mPresentsByProcessAndSwapChain[std::make_tuple(p->ProcessId, p->SwapChainAddress)];
+        auto presentIter = presentDeque.begin();
+        assert(!presentIter->get()->Completed); // It wouldn't be here anymore if it was
+
+        if (p->FinalState == PresentResult::Presented) {
+            while(*presentIter != p) {
+                CompletePresent(*presentIter);
+                presentIter = presentDeque.begin();
+            }
         }
         
         p->Completed = true;
-        if (processIter->second == p) {
+        if (*presentIter == p) {
             auto lock = scoped_lock(mMutex);
-            while (processIter != processMap.end() && processIter->second->Completed) {
-                mCompletedPresents.push_back(processIter->second);
-                processMap.erase(processIter);
-                processIter = processMap.begin();
+            while (presentIter != presentDeque.end() && presentIter->get()->Completed) {
+                mCompletedPresents.push_back(*presentIter);
+                presentDeque.pop_front();
+                presentIter = presentDeque.begin();
             }
         }
 
@@ -299,13 +304,39 @@ private:
             newEvent->QpcTime = EventTime;
             newEvent->ProcessId = pEventRecord->EventHeader.ProcessId;
             processMap.emplace(EventTime, newEvent);
+
+            auto& processSwapChainDeque = mPresentsByProcessAndSwapChain[std::make_tuple(pEventRecord->EventHeader.ProcessId, 0ull)];
+            processSwapChainDeque.emplace_back(newEvent);
+
             eventIter = mPresentByThreadId.emplace(pEventRecord->EventHeader.ThreadId, newEvent).first;
         } else {
             // Assume batched presents are popped off the front of the driver queue by process in order, do the same here
             eventIter = mPresentByThreadId.emplace(pEventRecord->EventHeader.ThreadId, processIter->second).first;
+            processMap.erase(processIter);
         }
 
         return eventIter;
+    }
+
+    void RuntimePresentStart(_In_ PEVENT_RECORD pEventRecord, PresentEvent &event)
+    {
+        auto& hdr = pEventRecord->EventHeader;
+        uint64_t EventTime = *(uint64_t*)&hdr.TimeStamp;
+        event.ProcessId = hdr.ProcessId;
+        event.QpcTime = EventTime;
+        event.RuntimeThread = hdr.ThreadId;
+        
+        // Ignore PRESENT_TEST: it's just to check if you're still fullscreen, doesn't actually do anything
+        if ((event.PresentFlags & DXGI_PRESENT_TEST) == 0) {
+            auto pEvent = std::make_shared<PresentEvent>(event);
+            mPresentByThreadId[hdr.ThreadId] = pEvent;
+
+            auto& processMap = mPresentsByProcess[hdr.ProcessId];
+            processMap.emplace(EventTime, pEvent);
+
+            auto& processSwapChainDeque = mPresentsByProcessAndSwapChain[std::make_tuple(hdr.ProcessId, event.SwapChainAddress)];
+            processSwapChainDeque.emplace_back(pEvent);
+        }
     }
 
     void RuntimePresentStop(_In_ PEVENT_RECORD pEventRecord, bool AllowPresentBatching = true)
@@ -320,6 +351,12 @@ private:
 
         assert(event.QpcTime < EndTime);
         event.TimeTaken = EndTime - event.QpcTime;
+        
+        if (!AllowPresentBatching) {
+            event.FinalState = PresentResult::Discarded;
+            CompletePresent(eventIter->second);
+        }
+        mPresentByThreadId.erase(eventIter);
     }
 
     void OnDXGIEvent(_In_ PEVENT_RECORD pEventRecord);
@@ -340,30 +377,20 @@ void DxgiConsumer::OnDXGIEvent(PEVENT_RECORD pEventRecord)
     };
 
     auto& hdr = pEventRecord->EventHeader;
-    uint64_t EventTime = *(uint64_t*)&hdr.TimeStamp;
+    TraceEventInfo eventInfo(pEventRecord);
     switch (hdr.EventDescriptor.Id)
     {
         case DXGIPresent_Start:
         case DXGIPresentMPO_Start:
         {
             PresentEvent event;
-            event.ProcessId = hdr.ProcessId;
-            event.QpcTime = EventTime;
-        
-            TraceEventInfo eventInfo(pEventRecord);
             event.SwapChainAddress = eventInfo.GetPtr(L"pIDXGISwapChain");
             event.SyncInterval = eventInfo.GetData<uint32_t>(L"SyncInterval");
             event.PresentFlags = eventInfo.GetData<uint32_t>(L"Flags");
             event.Runtime = Runtime::DXGI;
-        
-            // Ignore PRESENT_TEST: it's just to check if you're still fullscreen, doesn't actually do anything
-            if ((event.PresentFlags & DXGI_PRESENT_TEST) == 0) {
-                auto pEvent = std::make_shared<PresentEvent>(event);
-                mPresentByThreadId[hdr.ThreadId] = pEvent;
+            event.RuntimeThread = hdr.ThreadId;
 
-                auto& processMap = mPresentsByProcess[hdr.ProcessId];
-                processMap.emplace(EventTime, pEvent);
-            }
+            RuntimePresentStart(pEventRecord, event);
 
 #if _DEBUG
             event.Completed = true;
@@ -373,7 +400,9 @@ void DxgiConsumer::OnDXGIEvent(PEVENT_RECORD pEventRecord)
         case DXGIPresent_Stop:
         case DXGIPresentMPO_Stop:
         {
-            RuntimePresentStop(pEventRecord);
+            auto result = eventInfo.GetData<uint32_t>(L"Result");
+            bool AllowBatching = SUCCEEDED(result) && result != DXGI_STATUS_OCCLUDED && result != DXGI_STATUS_MODE_CHANGE_IN_PROGRESS && result != DXGI_STATUS_NO_DESKTOP_ACCESS;
+            RuntimePresentStop(pEventRecord, AllowBatching);
             break;
         }
     }
@@ -631,7 +660,7 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                 CompletePresent(eventIter->second);
             }
 
-            if (eventIter->second->TimeTaken != 0 || eventIter->second->Runtime == Runtime::Other) {
+            if (eventIter->second->RuntimeThread != hdr.ThreadId) {
                 if (eventIter->second->TimeTaken == 0) {
                     eventIter->second->TimeTaken = EventTime - eventIter->second->QpcTime;
                 }
@@ -946,16 +975,12 @@ void DxgiConsumer::OnD3D9Event(PEVENT_RECORD pEventRecord)
     };
 
     auto& hdr = pEventRecord->EventHeader;
-    uint64_t EventTime = *(uint64_t*)&hdr.TimeStamp;
+    TraceEventInfo eventInfo(pEventRecord);
     switch (hdr.EventDescriptor.Id)
     {
         case D3D9PresentStart:
         {
             PresentEvent event;
-            event.ProcessId = hdr.ProcessId;
-            event.QpcTime = EventTime;
-        
-            TraceEventInfo eventInfo(pEventRecord);
             event.SwapChainAddress = eventInfo.GetPtr(L"pSwapchain");
             uint32_t D3D9Flags = eventInfo.GetData<uint32_t>(L"Flags");
             event.PresentFlags =
@@ -965,10 +990,7 @@ void DxgiConsumer::OnD3D9Event(PEVENT_RECORD pEventRecord)
             event.SyncInterval = (D3D9Flags & D3DPRESENT_FORCEIMMEDIATE) ? 0 : event.SyncInterval;
             event.Runtime = Runtime::D3D9;
         
-            auto pEvent = std::make_shared<PresentEvent>(event);
-            mPresentByThreadId[hdr.ThreadId] = pEvent;
-            auto& processMap = mPresentsByProcess[hdr.ProcessId];
-            processMap.emplace(EventTime, pEvent);
+            RuntimePresentStart(pEventRecord, event);
 
 #if _DEBUG
             event.Completed = true;
@@ -977,7 +999,9 @@ void DxgiConsumer::OnD3D9Event(PEVENT_RECORD pEventRecord)
         }
         case D3D9PresentStop:
         {
-            RuntimePresentStop(pEventRecord);
+            auto result = eventInfo.GetData<uint32_t>(L"Result");
+            bool AllowBatching = SUCCEEDED(result) && result != S_PRESENT_MODE_CHANGED && result != S_PRESENT_OCCLUDED;
+            RuntimePresentStop(pEventRecord, AllowBatching);
             break;
         }
     }

@@ -74,6 +74,7 @@ struct PresentEvent {
 
     // Additional transient state
     uint32_t QueueSubmitSequence = 0;
+    uint32_t RuntimeThread = 0;
     uint64_t Hwnd = 0;
     std::deque<std::shared_ptr<PresentEvent>> DependentPresents;
     bool Completed = false;

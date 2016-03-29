@@ -122,7 +122,7 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
     }
     chain.mPresentHistory.push_back(p);
     assert(std::is_sorted(chain.mPresentHistory.begin(), chain.mPresentHistory.end(),
-                          [](auto a, auto b){ return a.QpcTime < b.QpcTime; }));
+                          [](auto const& a, auto const& b){ return a.QpcTime < b.QpcTime; }));
         
     if (pm.mOutputFile) {
         auto len = chain.mPresentHistory.size();
