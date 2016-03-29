@@ -532,6 +532,9 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             }
 
             eventIter->second->ReadyTime = EventTime;
+            if (eventIter->second->PresentMode == PresentMode::Composed_Flip) {
+                eventIter->second->PresentMode = PresentMode::Hardware_Independent_Flip;
+            }
 
             if (Flags & DxgKrnl_MMIOFlip_Flags::FlipImmediate) {
                 eventIter->second->FinalState = PresentResult::Presented;
@@ -564,7 +567,8 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                 eventIter->second->PlaneIndex = eventInfo.GetData<uint32_t>(L"LayerIndex");
             }
 
-            if (eventIter->second->PresentMode == PresentMode::Hardware_Independent_Flip) {
+            if (eventIter->second->PresentMode == PresentMode::Hardware_Independent_Flip ||
+                eventIter->second->PresentMode == PresentMode::Composed_Flip) {
                 eventIter->second->PresentMode = PresentMode::Hardware_Composed_Independent_Flip;
             }
 
@@ -701,7 +705,10 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             if (eventIter == mDxgKrnlPresentHistoryTokens.end()) {
                 return;
             }
-            eventIter->second->ReadyTime = EventTime;
+
+            auto& ReadyTime = eventIter->second->ReadyTime;
+            ReadyTime = (ReadyTime == 0 ?
+                         EventTime : min(ReadyTime, EventTime));
 
             if (eventIter->second->FinalState == PresentResult::Discarded &&
                 eventIter->second->PresentMode == PresentMode::Composed_Copy_GPU_GDI) {
