@@ -76,6 +76,9 @@ struct PresentEvent {
     uint32_t QueueSubmitSequence = 0;
     uint64_t Hwnd = 0;
     std::deque<std::shared_ptr<PresentEvent>> DependentPresents;
+
+    bool logged = false;
+
 #if _DEBUG
     bool Completed = false;
     ~PresentEvent() { assert(Completed || g_Quit); }
