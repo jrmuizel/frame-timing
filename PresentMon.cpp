@@ -168,9 +168,8 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
     chain.mLastPlane = p.PlaneIndex;
 }
 
-static double ComputeFps(std::deque<PresentEvent> const& presentHistory, uint64_t qpcFreq)
+static double ComputeFps(const std::deque<PresentEvent>& presentHistory, uint64_t qpcFreq)
 {
-    // TODO: better method
     if (presentHistory.size() < 2) {
         return 0.0;
     }
@@ -259,7 +258,7 @@ void PresentMon_UpdateDeadProcesses(PresentMonData& pm, std::vector<uint32_t>& d
     }
 }
 
-void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEvent>> presents, uint64_t perfFreq)
+void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEvent>>& presents, uint64_t perfFreq)
 {
     std::string display;
     uint64_t now = GetTickCount64();

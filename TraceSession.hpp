@@ -21,7 +21,7 @@ class TraceSession
 {
 
 public:
-    TraceSession(LPCTSTR szSessionName, LPCTSTR szFileName);
+    TraceSession(const wchar_t* szSessionName, const wchar_t* szFileName);
     ~TraceSession();
 
 public:
@@ -42,7 +42,7 @@ private:
     LPTSTR _szSessionName, _szFileName;
     ULONG _status;
     EVENT_TRACE_PROPERTIES* _pSessionProperties;
-    TRACEHANDLE hSession;
+    TRACEHANDLE _hSession;
     EVENT_TRACE_LOGFILEW _logFile;
     TRACEHANDLE _hTrace;
     uint32_t _eventsLost, _buffersLost;
