@@ -116,11 +116,11 @@ struct PresentMonData {
     std::map<uint32_t, ProcessInfo> mProcessMap;
 };
 
-void PresentMonEtw(PresentMonArgs args);
+void PresentMonEtw(const PresentMonArgs& args);
 
 void PresentMon_Init(const PresentMonArgs& args, PresentMonData& data);
 void PresentMon_UpdateNewProcesses(PresentMonData& data, std::map<uint32_t, ProcessInfo>& processes);
-void PresentMon_Update(PresentMonData& data, std::vector<std::shared_ptr<PresentEvent>> presents, uint64_t perfFreq);
+void PresentMon_Update(PresentMonData& data, std::vector<std::shared_ptr<PresentEvent>>& presents, uint64_t perfFreq);
 void PresentMon_UpdateDeadProcesses(PresentMonData& data, std::vector<uint32_t>& processIds);
 void PresentMon_Shutdown(PresentMonData& data);
 

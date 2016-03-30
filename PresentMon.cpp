@@ -24,7 +24,6 @@
 #include <windows.h>
 #include <psapi.h>
 #include <shlwapi.h>
-#include <sstream>
 
 #pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "shlwapi.lib")
@@ -39,8 +38,9 @@ template <typename Map, typename F>
 static void map_erase_if(Map& m, F pred)
 {
     typename Map::iterator i = m.begin();
-    while ((i = std::find_if(i, m.end(), pred)) != m.end())
+    while ((i = std::find_if(i, m.end(), pred)) != m.end()) {
         m.erase(i++);
+    }
 }
 
 static void UpdateProcessInfo_Realtime(ProcessInfo& info, uint64_t now, uint32_t thisPid)
@@ -117,7 +117,8 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
 
     auto& chain = proc.mChainMap[p.SwapChainAddress];
 
-    if (p.FinalState == PresentResult::Presented) {
+    if (p.FinalState == PresentResult::Presented)
+    {
         chain.mDisplayedPresentHistory.push_back(p);
     }
     chain.mPresentHistory.push_back(p);
@@ -129,19 +130,19 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
         if (len > 1) {
             auto& curr = chain.mPresentHistory[len - 1];
             auto& prev = chain.mPresentHistory[len - 2];
-            double deltaMilliseconds = 1000 * double(curr.QpcTime - prev.QpcTime) / perfFreq;
-            double deltaReady = curr.ReadyTime == 0 ? 0.0 : (1000 * double(curr.ReadyTime - curr.QpcTime) / perfFreq);
-            double deltaDisplayed = curr.ScreenTime == 0 ? 0.0 : (1000 * double(curr.ScreenTime - curr.QpcTime) / perfFreq);
-            double timeTakenMilliseconds = 1000 * double(curr.TimeTaken) / perfFreq;
-            fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%s,%.3lf,%.3lf,%d,%d,%s,%.3lf,%.3lf,%d\n",
-                proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime),
-                    deltaMilliseconds, timeTakenMilliseconds, curr.SyncInterval, curr.PresentFlags, PresentModeToString(curr.PresentMode),
+                    double deltaMilliseconds = 1000 * double(curr.QpcTime - prev.QpcTime) / perfFreq;
+                    double deltaReady = curr.ReadyTime == 0 ? 0.0 : (1000 * double(curr.ReadyTime - curr.QpcTime) / perfFreq);
+                    double deltaDisplayed = curr.ScreenTime == 0 ? 0.0 : (1000 * double(curr.ScreenTime - curr.QpcTime) / perfFreq);
+                    double timeTakenMilliseconds = 1000 * double(curr.TimeTaken) / perfFreq;
+                    fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%s,%.3lf,%.3lf,%d,%d,%s,%.3lf,%.3lf,%d\n",
+                        proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime),
+                            deltaMilliseconds, timeTakenMilliseconds, curr.SyncInterval, curr.PresentFlags, PresentModeToString(curr.PresentMode),
                     deltaReady, deltaDisplayed, curr.FinalState == PresentResult::Presented);
         }
     }
 
-    PruneDeque(chain.mDisplayedPresentHistory, perfFreq, MAX_DISPLAYED_HISTORY_TIME);
-    PruneDeque(chain.mPresentHistory, perfFreq, MAX_HISTORY_TIME);
+        PruneDeque(chain.mDisplayedPresentHistory, perfFreq, MAX_DISPLAYED_HISTORY_TIME);
+        PruneDeque(chain.mPresentHistory, perfFreq, MAX_HISTORY_TIME);
 
     chain.mLastUpdateTicks = now;
     chain.mRuntime = p.Runtime;
@@ -151,9 +152,8 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
     chain.mLastPlane = p.PlaneIndex;
 }
 
-static double ComputeFps(std::deque<PresentEvent> const& presentHistory, uint64_t qpcFreq)
+static double ComputeFps(const std::deque<PresentEvent>& presentHistory, uint64_t qpcFreq)
 {
-    // TODO: better method
     if (presentHistory.size() < 2) {
         return 0.0;
     }
@@ -242,7 +242,7 @@ void PresentMon_UpdateDeadProcesses(PresentMonData& pm, std::vector<uint32_t>& d
     }
 }
 
-void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEvent>> presents, uint64_t perfFreq)
+void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEvent>>& presents, uint64_t perfFreq)
 {
     std::string display;
     uint64_t now = GetTickCount64();
@@ -272,14 +272,14 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
             double dispFps = ComputeDisplayedFps(chain.second, perfFreq);
             double cpuTime = ComputeCpuFrameTime(chain.second, perfFreq);
             double latency = ComputeLatency(chain.second, perfFreq);
-            std::ostringstream planeString;
+            std::string planeString;
             if (chain.second.mLastPresentMode == PresentMode::Hardware_Composed_Independent_Flip) {
-                planeString << ": Plane " << chain.second.mLastPlane;
+                planeString = FormatString(": Plane %d", chain.second.mLastPlane);
             }
             display += FormatString("\t%016llX (%s): SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, %.1lf displayed fps, %.2lf ms CPU, %.2lf ms latency) (%s%s)%s\n",
                 chain.first, RuntimeToString(chain.second.mRuntime), chain.second.mLastSyncInterval, chain.second.mLastFlags, 1000.0/fps, fps, dispFps, cpuTime * 1000.0, latency * 1000.0,
                 PresentModeToString(chain.second.mLastPresentMode),
-                planeString.str().c_str(),
+                planeString.c_str(),
                 (now - chain.second.mLastUpdateTicks) > 1000 ? " [STALE]" : "");
         }
     }
