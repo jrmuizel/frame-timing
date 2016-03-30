@@ -57,11 +57,12 @@ void printHelp()
         " -scroll_toggle: only record events while scroll lock is enabled.\n"
         );
     printf("\nCSV columns explained (self explanatory columns omitted):\n"
-        "  delta: time between this Present() API call and the previous one.\n"
-        "  timeTaken: time spent inside the Present() API call.\n"
-        "  deltaReady: time between present start and GPU work completion.\n"
-        "  deltaDisplayed: time between present start and frame display.\n"
-        "  displayed: boolean indicator. 1 = displayed, 0 = dropped.\n"
+        "  Dropped: boolean indicator. 1 = dropped, 0 = displayed.\n"
+        "  MsBetweenPresents: time between this Present() API call and the previous one.\n"
+        "  MsBetweenDisplayChange: time between when this frame was displayed, and previous was displayed.\n"
+        "  MsInPresentAPI: time spent inside the Present() API call.\n"
+        "  MsUntilRenderComplete: time between present start and GPU work completion.\n"
+        "  MsUntilDisplayed: time between present start and frame display.\n"
         );
 }
 

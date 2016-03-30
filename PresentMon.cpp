@@ -127,22 +127,31 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
         
     if (pm.mOutputFile) {
         auto len = chain.mPresentHistory.size();
+        auto displayedLen = chain.mDisplayedPresentHistory.size();
         if (len > 1) {
             auto& curr = chain.mPresentHistory[len - 1];
             auto& prev = chain.mPresentHistory[len - 2];
-                    double deltaMilliseconds = 1000 * double(curr.QpcTime - prev.QpcTime) / perfFreq;
-                    double deltaReady = curr.ReadyTime == 0 ? 0.0 : (1000 * double(curr.ReadyTime - curr.QpcTime) / perfFreq);
-                    double deltaDisplayed = curr.ScreenTime == 0 ? 0.0 : (1000 * double(curr.ScreenTime - curr.QpcTime) / perfFreq);
-                    double timeTakenMilliseconds = 1000 * double(curr.TimeTaken) / perfFreq;
-                    fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%s,%.3lf,%.3lf,%d,%d,%s,%.3lf,%.3lf,%d\n",
-                        proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime),
-                            deltaMilliseconds, timeTakenMilliseconds, curr.SyncInterval, curr.PresentFlags, PresentModeToString(curr.PresentMode),
-                    deltaReady, deltaDisplayed, curr.FinalState == PresentResult::Presented);
+            double deltaMilliseconds = 1000 * double(curr.QpcTime - prev.QpcTime) / perfFreq;
+            double deltaReady = curr.ReadyTime == 0 ? 0.0 : (1000 * double(curr.ReadyTime - curr.QpcTime) / perfFreq);
+            double deltaDisplayed = curr.FinalState == PresentResult::Presented ? (1000 * double(curr.ScreenTime - curr.QpcTime) / perfFreq) : 0.0;
+            double timeTakenMilliseconds = 1000 * double(curr.TimeTaken) / perfFreq;
+
+            double timeSincePreviousDisplayed = 0.0;
+            if (curr.FinalState == PresentResult::Presented && displayedLen > 1) {
+                assert(chain.mDisplayedPresentHistory[displayedLen - 1].QpcTime == curr.QpcTime);
+                auto& prevDisplayed = chain.mDisplayedPresentHistory[displayedLen - 2];
+                timeSincePreviousDisplayed = 1000 * double(curr.ScreenTime - prevDisplayed.ScreenTime) / perfFreq;
+            }
+
+            fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%s,%d,%d,%d,%s,%d,%.3lf,%.3lf,%.3lf,%.3lf,%.3lf\n",
+                proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime),
+                    curr.SyncInterval, curr.SupportsTearing, curr.PresentFlags, PresentModeToString(curr.PresentMode), curr.FinalState != PresentResult::Presented,
+                    deltaMilliseconds, timeSincePreviousDisplayed, timeTakenMilliseconds, deltaReady, deltaDisplayed);
         }
     }
 
-        PruneDeque(chain.mDisplayedPresentHistory, perfFreq, MAX_DISPLAYED_HISTORY_TIME);
-        PruneDeque(chain.mPresentHistory, perfFreq, MAX_HISTORY_TIME);
+    PruneDeque(chain.mDisplayedPresentHistory, perfFreq, MAX_DISPLAYED_HISTORY_TIME);
+    PruneDeque(chain.mPresentHistory, perfFreq, MAX_HISTORY_TIME);
 
     chain.mLastUpdateTicks = now;
     chain.mRuntime = p.Runtime;
@@ -224,7 +233,8 @@ void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
     }
 
     if (pm.mOutputFile) {
-        fprintf(pm.mOutputFile, "module,pid,chain,runtime,delta,timeTaken,vsync,flags,mode,deltaReady,deltaDisplayed,displayed\n");
+        fprintf(pm.mOutputFile, "Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,AllowsTearing,PresentFlags,PresentMode,Dropped,"
+                                "MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\n");
     }
 }
 

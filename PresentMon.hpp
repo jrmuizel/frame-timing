@@ -56,7 +56,7 @@ struct PresentEvent {
     uint32_t ProcessId = 0;
 
     PresentMode PresentMode = PresentMode::Unknown;
-    bool SupportsTearing = true;
+    bool SupportsTearing = false;
     bool MMIO = false;
 
     Runtime Runtime = Runtime::Other;

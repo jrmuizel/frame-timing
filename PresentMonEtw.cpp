@@ -565,11 +565,9 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             if (Flags & DxgKrnl_MMIOFlip_Flags::FlipImmediate) {
                 eventIter->second->FinalState = PresentResult::Presented;
                 eventIter->second->ScreenTime = *(uint64_t*)&pEventRecord->EventHeader.TimeStamp;
+                eventIter->second->SupportsTearing = true;
                 if (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Flip) {
                     CompletePresent(eventIter->second);
-                } else {
-                    // We'll let the Win32K token discard event trigger the Complete for this one
-                    eventIter->second->SupportsTearing = true;
                 }
             }
 
@@ -681,6 +679,7 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
 
             if (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Copy_To_Front_Buffer) {
                 eventIter->second->PresentMode = PresentMode::Composed_Copy_GPU_GDI;
+                eventIter->second->SupportsTearing = false;
                 // Overwrite some fields that may have been filled out while we thought it was fullscreen
                 assert(!eventIter->second->Completed);
                 eventIter->second->ReadyTime = eventIter->second->ScreenTime = 0;
@@ -702,6 +701,7 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
 
                 eventIter->second->ReadyTime = EventTime;
                 eventIter->second->PresentMode = PresentMode::Composed_Copy_CPU_GDI;
+                eventIter->second->SupportsTearing = false;
             } else if (eventIter->second->PresentMode == PresentMode::Unknown) {
                 enum class TokenModel {
                     Composition = 7,
@@ -752,6 +752,7 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             auto eventIter = FindOrCreatePresent(pEventRecord);
 
             eventIter->second->PresentMode = PresentMode::Hardware_Legacy_Copy_To_Front_Buffer;
+            eventIter->second->SupportsTearing = true;
             break;
         }
     }
@@ -784,7 +785,6 @@ void PMTraceConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
         {
             auto eventIter = FindOrCreatePresent(pEventRecord);
             eventIter->second->PresentMode = PresentMode::Composed_Flip;
-            eventIter->second->SupportsTearing = false;
 
             Win32KPresentHistoryTokenKey key(eventInfo.GetPtr(L"pCompositionSurfaceObject"),
                                              eventInfo.GetData<uint64_t>(L"PresentCount"),
