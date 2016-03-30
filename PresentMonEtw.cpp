@@ -125,7 +125,7 @@ template <typename mutex_t> std::unique_lock<mutex_t> scoped_lock(mutex_t &m)
     return std::unique_lock<mutex_t>(m);
 }
 
-struct DxgiConsumer : ITraceConsumer
+struct PMTraceConsumer : ITraceConsumer
 {
     std::mutex mMutex;
     // A set of presents that are "completed":
@@ -341,7 +341,7 @@ private:
     void OnNTProcessEvent(_In_ PEVENT_RECORD pEventRecord);
 };
 
-void DxgiConsumer::OnDXGIEvent(PEVENT_RECORD pEventRecord)
+void PMTraceConsumer::OnDXGIEvent(PEVENT_RECORD pEventRecord)
 {
     enum {
         DXGIPresent_Start = 42,
@@ -382,7 +382,7 @@ void DxgiConsumer::OnDXGIEvent(PEVENT_RECORD pEventRecord)
     }
 }
 
-void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
+void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
 {
     enum {
         DxgKrnl_Flip = 168,
@@ -724,7 +724,7 @@ void DxgiConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
     }
 }
 
-void DxgiConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
+void PMTraceConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
 {
     enum {
         Win32K_TokenCompositionSurfaceObject = 201,
@@ -843,7 +843,7 @@ void DxgiConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
     }
 }
 
-void DxgiConsumer::OnDWMEvent(PEVENT_RECORD pEventRecord)
+void PMTraceConsumer::OnDWMEvent(PEVENT_RECORD pEventRecord)
 {
     enum {
         DWM_DwmUpdateWindow = 46,
@@ -934,7 +934,7 @@ void DxgiConsumer::OnDWMEvent(PEVENT_RECORD pEventRecord)
     }
 }
 
-void DxgiConsumer::OnD3D9Event(PEVENT_RECORD pEventRecord)
+void PMTraceConsumer::OnD3D9Event(PEVENT_RECORD pEventRecord)
 {
     enum {
         D3D9PresentStart = 1,
@@ -976,7 +976,7 @@ void DxgiConsumer::OnD3D9Event(PEVENT_RECORD pEventRecord)
     }
 }
 
-void DxgiConsumer::OnNTProcessEvent(PEVENT_RECORD pEventRecord)
+void PMTraceConsumer::OnNTProcessEvent(PEVENT_RECORD pEventRecord)
 {
     TraceEventInfo eventInfo(pEventRecord);
     auto pid = eventInfo.GetData<uint32_t>(L"ProcessId");
@@ -1004,7 +1004,7 @@ void DxgiConsumer::OnNTProcessEvent(PEVENT_RECORD pEventRecord)
 
 }
 
-void DxgiConsumer::OnEventRecord(PEVENT_RECORD pEventRecord)
+void PMTraceConsumer::OnEventRecord(PEVENT_RECORD pEventRecord)
 {
     auto& hdr = pEventRecord->EventHeader;
 
@@ -1045,27 +1045,17 @@ static void EtwProcessingThread(TraceSession *session)
     g_FileComplete = true;
 }
 
-static GUID GuidFromString(const wchar_t *guidString)
-{
-    GUID g;
-    auto hr = CLSIDFromString(guidString, &g);
-    assert(SUCCEEDED(hr));
-    return g;
-}
-
-void PresentMonEtw(PresentMonArgs args)
+void PresentMonEtw(const PresentMonArgs& args)
 {
     Sleep(args.mDelay * 1000);
     if (g_Quit) {
         return;
     }
 
-    std::wstring fileName(args.mEtlFileName ? strlen(args.mEtlFileName) : 0, L'\0');
-    if (args.mEtlFileName) {
-        mbstowcs(&fileName[0], args.mEtlFileName, strlen(args.mEtlFileName));
-    }
-    TraceSession session(L"PresentMon", args.mEtlFileName ? fileName.c_str() : nullptr);
-    DxgiConsumer consumer;
+    std::wstring fileName(args.mEtlFileName, args.mEtlFileName +
+        (args.mEtlFileName ? strlen(args.mEtlFileName) : 0));
+    TraceSession session(L"PresentMon", !fileName.empty() ? fileName.c_str() : nullptr);
+    PMTraceConsumer consumer;
 
     if (!args.mEtlFileName && !session.Start()) {
         if (session.Status() == ERROR_ALREADY_EXISTS) {
@@ -1096,11 +1086,15 @@ void PresentMonEtw(PresentMonArgs args)
             PresentMon_Init(args, data);
             uint64_t start_time = GetTickCount64();
 
+            std::vector<std::shared_ptr<PresentEvent>> presents;
+            std::map<uint32_t, ProcessInfo> newProcesses;
+            std::vector<uint32_t> deadProcesses;
+
             while (!g_Quit)
             {
-                std::vector<std::shared_ptr<PresentEvent>> presents;
-                std::map<uint32_t, ProcessInfo> newProcesses;
-                std::vector<uint32_t> deadProcesses;
+                presents.clear();
+                newProcesses.clear();
+                deadProcesses.clear();
 
                 if (args.mEtlFileName) {
                     consumer.GetProcessEvents(newProcesses, deadProcesses);
