@@ -14,7 +14,7 @@
 // responsibility to update it.
 //--------------------------------------------------------------------------------------
 
-#define BUILDNUM 100
+#define BUILDNUM 101
 
 #include <windows.h>
 #include <thread>
