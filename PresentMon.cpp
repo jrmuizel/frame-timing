@@ -38,8 +38,23 @@ template <typename Map, typename F>
 static void map_erase_if(Map& m, F pred)
 {
     typename Map::iterator i = m.begin();
-    while ((i = std::find_if(i, m.end(), pred)) != m.end())
+    while ((i = std::find_if(i, m.end(), pred)) != m.end()) {
         m.erase(i++);
+    }
+}
+
+// linear scan from the back end searching for the insert point
+template<class T, class Pred>
+static void linear_sorted_insert_from_back(std::deque<T>& v, const T& item, Pred less)
+{
+    for (auto it = v.rbegin(); it != v.rend(); ++it) {
+        // (item >= *it) ==> insert after *it
+        if (!less(item, *it)) {
+            v.insert(it.base(), item);
+            return;
+        }
+    }
+    v.push_front(item);
 }
 
 static void UpdateProcessInfo_Realtime(ProcessInfo& info, uint64_t now, uint32_t thisPid)
@@ -118,11 +133,10 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
 
     if (p.FinalState == PresentResult::Presented)
     {
-        // FIXME: ensure that presents are always sorted before being passed here,
-        // or add logic to handle that case here.
-        assert(chain.mPresentHistory.empty() || chain.mPresentHistory.back().QpcTime < p.QpcTime);
-
-        chain.mPresentHistory.push_back(p);
+        // FIXME: need a comment about why "PresentResult::Presented" results can appear
+        // out of sequence compared to previously recieved non presented results.
+        linear_sorted_insert_from_back(chain.mPresentHistory, p,
+            [](const PresentEvent& a, const PresentEvent& b) { return a.QpcTime < b.QpcTime; });
         chain.mDisplayedPresentHistory.push_back(p);
 
         auto numPresents = chain.mPresentHistory.size();
