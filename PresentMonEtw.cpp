@@ -618,6 +618,10 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
         }
         case DxgKrnl_Present:
         {
+            enum class DxgKrnl_Present_Flags {
+                RedirectedBlt = 0x00010000,
+            };
+
             // This event is emitted at the end of the kernel present, before returning.
             // All other events have already been logged, but this one contains one
             // extra piece of useful information: the hWnd that a present targeted,
@@ -628,23 +632,19 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             }
 
             auto hWnd = eventInfo.GetPtr(L"hWindow");
+            auto Flags = eventInfo.GetData<uint32_t>(L"Flags");
+            if ((Flags & (uint32_t)DxgKrnl_Present_Flags::RedirectedBlt) != 0 &&
+                eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Copy_To_Front_Buffer) {
+                // The present history token got dropped for some reason. Discard this present.
+                eventIter->second->PresentMode = PresentMode::Unknown;
+                eventIter->second->FinalState = PresentResult::Discarded;
+                CompletePresent(eventIter->second);
+            }
 
             if (eventIter->second->PresentMode == PresentMode::Composed_Copy_GPU_GDI) {
                 // Manipulate the map here
                 // When DWM is ready to present, we'll query for the most recent blt targeting this window and take it out of the map
-                auto hWndIter = mPresentByWindow.find(hWnd);
-                if (hWndIter == mPresentByWindow.end()) {
-                    mPresentByWindow.emplace(hWnd, eventIter->second);
-                } else if (hWndIter->second != eventIter->second) {
-                    auto eventPtr = hWndIter->second;
-                    hWndIter->second = eventIter->second;
-
-                    eventPtr->FinalState = PresentResult::Discarded;
-                    if (eventPtr->ReadyTime != 0) {
-                        // This won't make it to screen, go ahead and complete it now
-                        CompletePresent(eventPtr);
-                    }
-                }
+                mPresentByWindow[hWnd] = eventIter->second;
             }
             // For all other events, just remember the hWnd, we might need it later
             eventIter->second->Hwnd = hWnd;
@@ -735,11 +735,7 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             ReadyTime = (ReadyTime == 0 ?
                          EventTime : min(ReadyTime, EventTime));
 
-            if (eventIter->second->FinalState == PresentResult::Discarded &&
-                eventIter->second->PresentMode == PresentMode::Composed_Copy_GPU_GDI) {
-                // This won't make it to screen, go ahead and complete it now
-                CompletePresent(eventIter->second);
-            } else if (eventIter->second->PresentMode == PresentMode::Composed_Composition_Atlas) {
+            if (eventIter->second->PresentMode == PresentMode::Composed_Composition_Atlas) {
                 mPresentsWaitingForDWM.emplace_back(eventIter->second);
             }
 
@@ -925,7 +921,6 @@ void PMTraceConsumer::OnDWMEvent(PEVENT_RECORD pEventRecord)
                         continue;
                     }
                     mPresentsWaitingForDWM.emplace_back(hWndIter->second);
-                    hWndIter->second->FinalState = PresentResult::Presented;
                     mPresentByWindow.erase(hWndIter);
                 }
             }
@@ -948,16 +943,7 @@ void PMTraceConsumer::OnDWMEvent(PEVENT_RECORD pEventRecord)
 
             // Watch for multiple legacy blits completing against the same window
             auto hWnd = (uint32_t)eventInfo.GetData<uint64_t>(L"hwnd");
-            auto hWndIter = mPresentByWindow.find(hWnd);
-            if (hWndIter == mPresentByWindow.end()) {
-                mPresentByWindow.emplace(hWnd, flipIter->second);
-            } else if (hWndIter->second != flipIter->second) {
-                auto eventPtr = hWndIter->second;
-                hWndIter->second = flipIter->second;
-
-                eventPtr->FinalState = PresentResult::Discarded;
-                CompletePresent(eventPtr);
-            }
+            mPresentByWindow[hWnd] = flipIter->second;
 
             mPresentsByLegacyBlitToken.erase(flipIter);
             mWindowsBeingComposed.insert(hWnd);
