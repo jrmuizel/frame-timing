@@ -30,8 +30,8 @@
 
 enum {
     MAX_HISTORY_TIME = 2000,
-    MAX_DISPLAYED_HISTORY_TIME = 2000,
-    CHAIN_TIMEOUT_THRESHOLD_TICKS = 10000 // 10 sec
+    CHAIN_TIMEOUT_THRESHOLD_TICKS = 10000, // 10 sec
+    MAX_PRESENTS_IN_DEQUE = 60*(MAX_HISTORY_TIME/1000)
 };
 
 template <typename Map, typename F>
@@ -92,9 +92,10 @@ const char* RuntimeToString(Runtime rt)
     }
 }
 
-void PruneDeque(std::deque<PresentEvent> &presentHistory, uint64_t perfFreq, uint32_t msTimeDiff) {
+void PruneDeque(std::deque<PresentEvent> &presentHistory, uint64_t perfFreq, uint32_t msTimeDiff, uint32_t maxHistLen) {
     while (!presentHistory.empty() &&
-           ((double)(presentHistory.back().QpcTime - presentHistory.front().QpcTime) / perfFreq) * 1000 > msTimeDiff) {
+        (presentHistory.size() > maxHistLen ||
+           ((double)(presentHistory.back().QpcTime - presentHistory.front().QpcTime) / perfFreq) * 1000 > msTimeDiff)) {
         presentHistory.pop_front();
     }
 }
@@ -121,11 +122,13 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
     {
         chain.mDisplayedPresentHistory.push_back(p);
     }
+    if (!chain.mPresentHistory.empty())
+    {
+        assert(chain.mPresentHistory.back().QpcTime <= p.QpcTime);
+    }
     chain.mPresentHistory.push_back(p);
-    assert(std::is_sorted(chain.mPresentHistory.begin(), chain.mPresentHistory.end(),
-                          [](auto const& a, auto const& b){ return a.QpcTime < b.QpcTime; }));
-        
-    if (pm.mOutputFile) {
+
+    if (pm.mOutputFile && (p.FinalState == PresentResult::Presented || !pm.mArgs->mExcludeDropped)) {
         auto len = chain.mPresentHistory.size();
         auto displayedLen = chain.mDisplayedPresentHistory.size();
         if (len > 1) {
@@ -143,15 +146,16 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
                 timeSincePreviousDisplayed = 1000 * double(curr.ScreenTime - prevDisplayed.ScreenTime) / perfFreq;
             }
 
-            fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%s,%d,%d,%d,%s,%d,%.3lf,%.3lf,%.3lf,%.3lf,%.3lf\n",
+            double timeInSeconds = (double)(int64_t)(p.QpcTime - pm.mStartupQpcTime) / perfFreq;
+            fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%s,%d,%d,%d,%s,%d,%.6lf,%.3lf,%.3lf,%.3lf,%.3lf,%.3lf\n",
                 proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime),
                     curr.SyncInterval, curr.SupportsTearing, curr.PresentFlags, PresentModeToString(curr.PresentMode), curr.FinalState != PresentResult::Presented,
-                    deltaMilliseconds, timeSincePreviousDisplayed, timeTakenMilliseconds, deltaReady, deltaDisplayed);
+                timeInSeconds, deltaMilliseconds, timeSincePreviousDisplayed, timeTakenMilliseconds, deltaReady, deltaDisplayed);
         }
     }
 
-    PruneDeque(chain.mDisplayedPresentHistory, perfFreq, MAX_DISPLAYED_HISTORY_TIME);
-    PruneDeque(chain.mPresentHistory, perfFreq, MAX_HISTORY_TIME);
+    PruneDeque(chain.mDisplayedPresentHistory, perfFreq, MAX_HISTORY_TIME, MAX_PRESENTS_IN_DEQUE);
+    PruneDeque(chain.mPresentHistory, perfFreq, MAX_HISTORY_TIME, MAX_PRESENTS_IN_DEQUE);
 
     chain.mLastUpdateTicks = now;
     chain.mRuntime = p.Runtime;
@@ -214,6 +218,8 @@ void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
 {
     pm.mArgs = &args;
 
+    QueryPerformanceCounter((PLARGE_INTEGER)&pm.mStartupQpcTime);
+
     if (args.mOutputFileName) {
         fopen_s(&pm.mOutputFile, args.mOutputFileName, "w");
     } else if (args.mTargetProcessName) {
@@ -233,7 +239,7 @@ void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
     }
 
     if (pm.mOutputFile) {
-        fprintf(pm.mOutputFile, "Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,AllowsTearing,PresentFlags,PresentMode,Dropped,"
+        fprintf(pm.mOutputFile, "Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,AllowsTearing,PresentFlags,PresentMode,Dropped,TimeInSeconds,"
                                 "MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\n");
     }
 }

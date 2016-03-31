@@ -54,6 +54,7 @@ void printHelp()
         " -delay [seconds]: wait before starting to consume events.\n"
         " -timed [seconds]: stop listening and exit after a set amount of time.\n"
         " -no_csv: do not create any output file.\n"
+        " -exclude_dropped: exclude dropped presents from the csv output.\n"
         " -scroll_toggle: only record events while scroll lock is enabled.\n"
         );
     printf("\nCSV columns explained (self explanatory columns omitted):\n"
@@ -122,6 +123,10 @@ int main(int argc, char ** argv)
             if (!strcmp(argv[i], "-no_csv"))
             {
                 args.mOutputFileName = "*";
+            }
+            else if (!strcmp(argv[i], "-exclude_dropped"))
+            {
+                args.mExcludeDropped = true;
             }
             else if (!strcmp(argv[i], "-scroll_toggle"))
             {

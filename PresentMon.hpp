@@ -108,10 +108,12 @@ struct PresentMonArgs {
     int mDelay = 0;
     int mTimer = 0;
     bool mScrollLockToggle = false;
+    bool mExcludeDropped = false;
 };
 
 struct PresentMonData {
     const PresentMonArgs *mArgs = nullptr;
+    uint64_t mStartupQpcTime;
     FILE *mOutputFile = nullptr;
     std::map<uint32_t, ProcessInfo> mProcessMap;
 };
