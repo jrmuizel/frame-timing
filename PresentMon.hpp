@@ -56,7 +56,7 @@ struct PresentEvent {
     uint32_t ProcessId = 0;
 
     PresentMode PresentMode = PresentMode::Unknown;
-    bool SupportsTearing = true;
+    bool SupportsTearing = false;
     bool MMIO = false;
 
     Runtime Runtime = Runtime::Other;
@@ -74,13 +74,11 @@ struct PresentEvent {
 
     // Additional transient state
     uint32_t QueueSubmitSequence = 0;
+    uint32_t RuntimeThread = 0;
     uint64_t Hwnd = 0;
     std::deque<std::shared_ptr<PresentEvent>> DependentPresents;
-
-    bool logged = false;
-
-#if _DEBUG
     bool Completed = false;
+#if _DEBUG
     ~PresentEvent() { assert(Completed || g_Quit); }
 #endif
 };
