@@ -114,6 +114,7 @@ struct PresentMonArgs {
 struct PresentMonData {
     const PresentMonArgs *mArgs = nullptr;
     uint64_t mStartupQpcTime;
+    std::string mOutputFilePath;
     FILE *mOutputFile = nullptr;
     std::map<uint32_t, ProcessInfo> mProcessMap;
 };
@@ -124,5 +125,5 @@ void PresentMon_Init(const PresentMonArgs& args, PresentMonData& data);
 void PresentMon_UpdateNewProcesses(PresentMonData& data, std::map<uint32_t, ProcessInfo>& processes);
 void PresentMon_Update(PresentMonData& data, std::vector<std::shared_ptr<PresentEvent>>& presents, uint64_t perfFreq);
 void PresentMon_UpdateDeadProcesses(PresentMonData& data, std::vector<uint32_t>& processIds);
-void PresentMon_Shutdown(PresentMonData& data);
+void PresentMon_Shutdown(PresentMonData& data, bool log_corrupted);
 

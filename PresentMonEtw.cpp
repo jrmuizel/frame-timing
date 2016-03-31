@@ -1120,6 +1120,8 @@ void PresentMonEtw(const PresentMonArgs& args)
             std::map<uint32_t, ProcessInfo> newProcesses;
             std::vector<uint32_t> deadProcesses;
 
+            bool log_corrupted = false;
+
             while (!g_Quit)
             {
                 presents.clear();
@@ -1139,6 +1141,11 @@ void PresentMonEtw(const PresentMonArgs& args)
                 PresentMon_Update(data, presents, session.PerfFreq());
                 if (session.AnythingLost(eventsLost, buffersLost)) {
                     printf("Lost %u events, %u buffers.", eventsLost, buffersLost);
+                    // FIXME: How do we set a threshold here?
+                    if (eventsLost > 100) {
+                        log_corrupted = true;
+                        g_FileComplete = true;
+                    }
                 }
 
                 if (args.mEtlFileName) {
@@ -1152,7 +1159,7 @@ void PresentMonEtw(const PresentMonArgs& args)
                 Sleep(100);
             }
 
-            PresentMon_Shutdown(data);
+            PresentMon_Shutdown(data, log_corrupted);
         }
 
         etwThread.join();

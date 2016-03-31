@@ -221,7 +221,7 @@ void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
     QueryPerformanceCounter((PLARGE_INTEGER)&pm.mStartupQpcTime);
 
     if (args.mOutputFileName) {
-        fopen_s(&pm.mOutputFile, args.mOutputFileName, "w");
+        pm.mOutputFilePath = args.mOutputFileName;
     } else if (args.mTargetProcessName) {
         struct tm tm;
         time_t time_now = time(NULL);
@@ -231,13 +231,13 @@ void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
             tm.tm_hour, tm.tm_min, tm.tm_sec);
         std::string path;
         if (strchr(args.mTargetProcessName, '*')) {
-            path = FormatString("PresentMon-%s.csv", date.c_str());
+            pm.mOutputFilePath = FormatString("PresentMon-%s.csv", date.c_str());
         } else {
-            path = FormatString("PresentMon-%s-%s.csv", args.mTargetProcessName, date.c_str());
+            pm.mOutputFilePath = FormatString("PresentMon-%s-%s.csv", args.mTargetProcessName, date.c_str());
         }
-        fopen_s(&pm.mOutputFile, path.c_str(), "w");
     }
 
+    fopen_s(&pm.mOutputFile, pm.mOutputFilePath.c_str(), "w");
     if (pm.mOutputFile) {
         fprintf(pm.mOutputFile, "Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,AllowsTearing,PresentFlags,PresentMode,Dropped,TimeInSeconds,"
                                 "MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\n");
@@ -304,12 +304,21 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
     SetConsoleText(display.c_str());
 }
 
-void PresentMon_Shutdown(PresentMonData& pm)
+void PresentMon_Shutdown(PresentMonData& pm, bool log_corrupted)
 {
     if (pm.mOutputFile)
     {
-        fclose(pm.mOutputFile);
-        pm.mOutputFile = nullptr;
+        if (log_corrupted) {
+            fclose(pm.mOutputFile);
+            fopen_s(&pm.mOutputFile, pm.mOutputFilePath.c_str(), "w");
+            if (pm.mOutputFile) {
+                fprintf(pm.mOutputFile, "Error: Some ETW packets were lost. Collected data is unreliable.\n");
+            }
+        }
+        if (pm.mOutputFile) {
+            fclose(pm.mOutputFile);
+            pm.mOutputFile = nullptr;
+        }
     }
     pm.mProcessMap.clear();
 }
