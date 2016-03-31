@@ -165,16 +165,18 @@ struct PMTraceConsumer : ITraceConsumer
     //   SubmitPresentHistory (use model field for classification, get token ptr) -> PropagatePresentHistory (by token ptr) ->
     //    Assume DWM will compose this buffer on next present (missing InFrame event), follow windowed blit paths to screen time
 
+    // For each process, stores each present started. Used for present batching
+    std::map<uint32_t, std::map<uint64_t, std::shared_ptr<PresentEvent>>> mPresentsByProcess;
+
+    // For each (process, swapchain) pair, stores each present started. Used to ensure consumer sees presents targeting the same swapchain in the order they were submitted.
+    typedef std::tuple<uint32_t, uint64_t> ProcessAndSwapChainKey;
+    std::map<ProcessAndSwapChainKey, std::deque<std::shared_ptr<PresentEvent>>> mPresentsByProcessAndSwapChain;
+
     // Presents in the process of being submitted
     // The first map contains a single present that is currently in-between a set of expected events on the same thread:
     //   (e.g. DXGI_Present_Start/DXGI_Present_Stop, or Flip/QueueSubmit)
-    // The second map contains a queue of presents currently pending for a process
-    //   These presents have been "batched" and will be submitted by a driver worker thread
-    //   The assumption is that they will be submitted to kernel in the same order they were submitted to DXGI,
-    //   but this might not hold true especially if there are multiple D3D devices in play
     // Used for mapping from runtime events to future events, and thread map used extensively for correlating kernel events
     std::map<uint32_t, std::shared_ptr<PresentEvent>> mPresentByThreadId;
-    std::map<uint32_t, std::deque<std::shared_ptr<PresentEvent>>> mPresentsByProcess;
 
     // Maps from queue packet submit sequence
     // Used for Flip -> MMIOFlip -> VSyncDPC for FS, for PresentHistoryToken -> MMIOFlip -> VSyncDPC for iFlip,
@@ -235,10 +237,7 @@ struct PMTraceConsumer : ITraceConsumer
 private:
     void CompletePresent(std::shared_ptr<PresentEvent> p)
     {
-#if _DEBUG
         assert(!p->Completed);
-        p->Completed = true;
-#endif
 
         // Complete all other presents that were riding along with this one (i.e. this one came from DWM)
         for (auto& p2 : p->DependentPresents) {
@@ -258,9 +257,30 @@ private:
                 mPresentByWindow.erase(hWndIter);
             }
         }
+        auto& processMap = mPresentsByProcess[p->ProcessId];
+        processMap.erase(p->QpcTime);
 
-        auto lock = scoped_lock(mMutex);
-        mCompletedPresents.push_back(p);
+        auto& presentDeque = mPresentsByProcessAndSwapChain[std::make_tuple(p->ProcessId, p->SwapChainAddress)];
+        auto presentIter = presentDeque.begin();
+        assert(!presentIter->get()->Completed); // It wouldn't be here anymore if it was
+
+        if (p->FinalState == PresentResult::Presented) {
+            while(*presentIter != p) {
+                CompletePresent(*presentIter);
+                presentIter = presentDeque.begin();
+            }
+        }
+        
+        p->Completed = true;
+        if (*presentIter == p) {
+            auto lock = scoped_lock(mMutex);
+            while (presentIter != presentDeque.end() && presentIter->get()->Completed) {
+                mCompletedPresents.push_back(*presentIter);
+                presentDeque.pop_front();
+                presentIter = presentDeque.begin();
+            }
+        }
+
     }
 
     decltype(mPresentByThreadId.begin()) FindOrCreatePresent(_In_ PEVENT_RECORD pEventRecord)
@@ -272,23 +292,50 @@ private:
         }
 
         // No such luck, check for batched presents
-        auto& processDeque = mPresentsByProcess[pEventRecord->EventHeader.ProcessId];
+        auto& processMap = mPresentsByProcess[pEventRecord->EventHeader.ProcessId];
+        auto processIter = std::find_if(processMap.begin(), processMap.end(),
+                                        [](auto processIter){return processIter.second->PresentMode == PresentMode::Unknown;});
         uint64_t EventTime = *(uint64_t*)&pEventRecord->EventHeader.TimeStamp;
-        if (processDeque.empty()) {
+        if (processIter == processMap.end()) {
             // This likely didn't originate from a runtime whose events we're tracking (DXGI/D3D9)
             // Could be composition buffers, or maybe another runtime (e.g. GL)
             auto newEvent = std::make_shared<PresentEvent>();
             newEvent->QpcTime = EventTime;
             newEvent->ProcessId = pEventRecord->EventHeader.ProcessId;
+            processMap.emplace(EventTime, newEvent);
+
+            auto& processSwapChainDeque = mPresentsByProcessAndSwapChain[std::make_tuple(pEventRecord->EventHeader.ProcessId, 0ull)];
+            processSwapChainDeque.emplace_back(newEvent);
+
             eventIter = mPresentByThreadId.emplace(pEventRecord->EventHeader.ThreadId, newEvent).first;
         } else {
             // Assume batched presents are popped off the front of the driver queue by process in order, do the same here
-            assert(processDeque.front()->QpcTime < EventTime);
-            eventIter = mPresentByThreadId.emplace(pEventRecord->EventHeader.ThreadId, processDeque.front()).first;
-            processDeque.pop_front();
+            eventIter = mPresentByThreadId.emplace(pEventRecord->EventHeader.ThreadId, processIter->second).first;
+            processMap.erase(processIter);
         }
 
         return eventIter;
+    }
+
+    void RuntimePresentStart(_In_ PEVENT_RECORD pEventRecord, PresentEvent &event)
+    {
+        auto& hdr = pEventRecord->EventHeader;
+        uint64_t EventTime = *(uint64_t*)&hdr.TimeStamp;
+        event.ProcessId = hdr.ProcessId;
+        event.QpcTime = EventTime;
+        event.RuntimeThread = hdr.ThreadId;
+        
+        // Ignore PRESENT_TEST: it's just to check if you're still fullscreen, doesn't actually do anything
+        if ((event.PresentFlags & DXGI_PRESENT_TEST) == 0) {
+            auto pEvent = std::make_shared<PresentEvent>(event);
+            mPresentByThreadId[hdr.ThreadId] = pEvent;
+
+            auto& processMap = mPresentsByProcess[hdr.ProcessId];
+            processMap.emplace(EventTime, pEvent);
+
+            auto& processSwapChainDeque = mPresentsByProcessAndSwapChain[std::make_tuple(hdr.ProcessId, event.SwapChainAddress)];
+            processSwapChainDeque.emplace_back(pEvent);
+        }
     }
 
     void RuntimePresentStop(_In_ PEVENT_RECORD pEventRecord, bool AllowPresentBatching = true)
@@ -303,34 +350,12 @@ private:
 
         assert(event.QpcTime < EndTime);
         event.TimeTaken = EndTime - event.QpcTime;
-
-        // PresentMode unknown means we didn't get any other events between the start and stop events which would help us classify
-        // That either means the driver is batching it, or the present was dropped (e.g. DoNotWait would've waited)
-        if (event.PresentMode == PresentMode::Unknown) {
-            if (AllowPresentBatching) {
-                auto& eventDeque = mPresentsByProcess[hdr.ProcessId];
-                eventDeque.push_back(eventIter->second);
-
-#if _DEBUG
-                auto& container = mPresentsByProcess[hdr.ProcessId];
-                for (UINT i = 0; i < container.size() - 1; ++i)
-                {
-                    assert(container[i]->QpcTime <= container[i + 1]->QpcTime);
-                }
-#endif
-
-                // We'll give the driver some time to submit this present
-                // In a batching scenario, the deque should grow to a steady state, and then we'll start popping off the front during FindOrCreatePresent above
-                const uint32_t cMaxPendingPresents = 20;
-                if (eventDeque.size() > cMaxPendingPresents)
-                {
-                    CompletePresent(eventDeque.front());
-                    eventDeque.pop_front();
-                }
-            } else {
-                CompletePresent(eventIter->second);
-            }
+        
+        if (!AllowPresentBatching) {
+            event.FinalState = PresentResult::Discarded;
+            CompletePresent(eventIter->second);
         }
+        mPresentByThreadId.erase(eventIter);
     }
 
     void OnDXGIEvent(_In_ PEVENT_RECORD pEventRecord);
@@ -346,28 +371,25 @@ void PMTraceConsumer::OnDXGIEvent(PEVENT_RECORD pEventRecord)
     enum {
         DXGIPresent_Start = 42,
         DXGIPresent_Stop,
+        DXGIPresentMPO_Start = 55,
+        DXGIPresentMPO_Stop = 56,
     };
 
     auto& hdr = pEventRecord->EventHeader;
-    uint64_t EventTime = *(uint64_t*)&hdr.TimeStamp;
+    TraceEventInfo eventInfo(pEventRecord);
     switch (hdr.EventDescriptor.Id)
     {
         case DXGIPresent_Start:
+        case DXGIPresentMPO_Start:
         {
             PresentEvent event;
-            event.ProcessId = hdr.ProcessId;
-            event.QpcTime = EventTime;
-        
-            TraceEventInfo eventInfo(pEventRecord);
             event.SwapChainAddress = eventInfo.GetPtr(L"pIDXGISwapChain");
             event.SyncInterval = eventInfo.GetData<uint32_t>(L"SyncInterval");
             event.PresentFlags = eventInfo.GetData<uint32_t>(L"Flags");
             event.Runtime = Runtime::DXGI;
-        
-            // Ignore PRESENT_TEST: it's just to check if you're still fullscreen, doesn't actually do anything
-            if ((event.PresentFlags & DXGI_PRESENT_TEST) == 0) {
-                mPresentByThreadId[hdr.ThreadId] = std::make_shared<PresentEvent>(event);
-            }
+            event.RuntimeThread = hdr.ThreadId;
+
+            RuntimePresentStart(pEventRecord, event);
 
 #if _DEBUG
             event.Completed = true;
@@ -375,8 +397,11 @@ void PMTraceConsumer::OnDXGIEvent(PEVENT_RECORD pEventRecord)
             break;
         }
         case DXGIPresent_Stop:
+        case DXGIPresentMPO_Stop:
         {
-            RuntimePresentStop(pEventRecord);
+            auto result = eventInfo.GetData<uint32_t>(L"Result");
+            bool AllowBatching = SUCCEEDED(result) && result != DXGI_STATUS_OCCLUDED && result != DXGI_STATUS_MODE_CHANGE_IN_PROGRESS && result != DXGI_STATUS_NO_DESKTOP_ACCESS;
+            RuntimePresentStop(pEventRecord, AllowBatching);
             break;
         }
     }
@@ -532,15 +557,16 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             }
 
             eventIter->second->ReadyTime = EventTime;
+            if (eventIter->second->PresentMode == PresentMode::Composed_Flip) {
+                eventIter->second->PresentMode = PresentMode::Hardware_Independent_Flip;
+            }
 
             if (Flags & DxgKrnl_MMIOFlip_Flags::FlipImmediate) {
                 eventIter->second->FinalState = PresentResult::Presented;
                 eventIter->second->ScreenTime = *(uint64_t*)&pEventRecord->EventHeader.TimeStamp;
+                eventIter->second->SupportsTearing = true;
                 if (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Flip) {
                     CompletePresent(eventIter->second);
-                } else {
-                    // We'll let the Win32K token discard event trigger the Complete for this one
-                    eventIter->second->SupportsTearing = true;
                 }
             }
 
@@ -564,7 +590,8 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                 eventIter->second->PlaneIndex = eventInfo.GetData<uint32_t>(L"LayerIndex");
             }
 
-            if (eventIter->second->PresentMode == PresentMode::Hardware_Independent_Flip) {
+            if (eventIter->second->PresentMode == PresentMode::Hardware_Independent_Flip ||
+                eventIter->second->PresentMode == PresentMode::Composed_Flip) {
                 eventIter->second->PresentMode = PresentMode::Hardware_Composed_Independent_Flip;
             }
 
@@ -630,7 +657,7 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                 CompletePresent(eventIter->second);
             }
 
-            if (eventIter->second->TimeTaken != 0 || eventIter->second->Runtime == Runtime::Other) {
+            if (eventIter->second->RuntimeThread != hdr.ThreadId) {
                 if (eventIter->second->TimeTaken == 0) {
                     eventIter->second->TimeTaken = EventTime - eventIter->second->QpcTime;
                 }
@@ -651,6 +678,7 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
 
             if (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Copy_To_Front_Buffer) {
                 eventIter->second->PresentMode = PresentMode::Composed_Copy_GPU_GDI;
+                eventIter->second->SupportsTearing = false;
                 // Overwrite some fields that may have been filled out while we thought it was fullscreen
                 assert(!eventIter->second->Completed);
                 eventIter->second->ReadyTime = eventIter->second->ScreenTime = 0;
@@ -672,6 +700,7 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
 
                 eventIter->second->ReadyTime = EventTime;
                 eventIter->second->PresentMode = PresentMode::Composed_Copy_CPU_GDI;
+                eventIter->second->SupportsTearing = false;
             } else if (eventIter->second->PresentMode == PresentMode::Unknown) {
                 enum class TokenModel {
                     Composition = 7,
@@ -701,7 +730,10 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             if (eventIter == mDxgKrnlPresentHistoryTokens.end()) {
                 return;
             }
-            eventIter->second->ReadyTime = EventTime;
+
+            auto& ReadyTime = eventIter->second->ReadyTime;
+            ReadyTime = (ReadyTime == 0 ?
+                         EventTime : min(ReadyTime, EventTime));
 
             if (eventIter->second->FinalState == PresentResult::Discarded &&
                 eventIter->second->PresentMode == PresentMode::Composed_Copy_GPU_GDI) {
@@ -719,6 +751,7 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             auto eventIter = FindOrCreatePresent(pEventRecord);
 
             eventIter->second->PresentMode = PresentMode::Hardware_Legacy_Copy_To_Front_Buffer;
+            eventIter->second->SupportsTearing = true;
             break;
         }
     }
@@ -751,7 +784,6 @@ void PMTraceConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
         {
             auto eventIter = FindOrCreatePresent(pEventRecord);
             eventIter->second->PresentMode = PresentMode::Composed_Flip;
-            eventIter->second->SupportsTearing = false;
 
             Win32KPresentHistoryTokenKey key(eventInfo.GetPtr(L"pCompositionSurfaceObject"),
                                              eventInfo.GetData<uint64_t>(L"PresentCount"),
@@ -942,16 +974,12 @@ void PMTraceConsumer::OnD3D9Event(PEVENT_RECORD pEventRecord)
     };
 
     auto& hdr = pEventRecord->EventHeader;
-    uint64_t EventTime = *(uint64_t*)&hdr.TimeStamp;
+    TraceEventInfo eventInfo(pEventRecord);
     switch (hdr.EventDescriptor.Id)
     {
         case D3D9PresentStart:
         {
             PresentEvent event;
-            event.ProcessId = hdr.ProcessId;
-            event.QpcTime = EventTime;
-        
-            TraceEventInfo eventInfo(pEventRecord);
             event.SwapChainAddress = eventInfo.GetPtr(L"pSwapchain");
             uint32_t D3D9Flags = eventInfo.GetData<uint32_t>(L"Flags");
             event.PresentFlags =
@@ -961,7 +989,7 @@ void PMTraceConsumer::OnD3D9Event(PEVENT_RECORD pEventRecord)
             event.SyncInterval = (D3D9Flags & D3DPRESENT_FORCEIMMEDIATE) ? 0 : event.SyncInterval;
             event.Runtime = Runtime::D3D9;
         
-            mPresentByThreadId[hdr.ThreadId] = std::make_shared<PresentEvent>(event);
+            RuntimePresentStart(pEventRecord, event);
 
 #if _DEBUG
             event.Completed = true;
@@ -970,7 +998,9 @@ void PMTraceConsumer::OnD3D9Event(PEVENT_RECORD pEventRecord)
         }
         case D3D9PresentStop:
         {
-            RuntimePresentStop(pEventRecord);
+            auto result = eventInfo.GetData<uint32_t>(L"Result");
+            bool AllowBatching = SUCCEEDED(result) && result != S_PRESENT_OCCLUDED;
+            RuntimePresentStop(pEventRecord, AllowBatching);
             break;
         }
     }
