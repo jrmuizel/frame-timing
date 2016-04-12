@@ -58,6 +58,7 @@ struct PresentEvent {
     PresentMode PresentMode = PresentMode::Unknown;
     bool SupportsTearing = false;
     bool MMIO = false;
+    bool SeenDxgkPresent = false;
 
     Runtime Runtime = Runtime::Other;
 

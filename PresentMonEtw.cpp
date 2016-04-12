@@ -530,7 +530,7 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                 // Sometimes, the queue packets associated with a present will complete before the DxgKrnl present event is fired
                 // In this case, for blit presents, we have no way to differentiate between fullscreen and windowed blits
                 // So, defer the completion of this present until we know all events have been fired
-                if (pEvent->Hwnd != 0) {
+                if (pEvent->SeenDxgkPresent) {
                     CompletePresent(pEvent);
                 }
             }
@@ -646,8 +646,10 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                 // When DWM is ready to present, we'll query for the most recent blt targeting this window and take it out of the map
                 mPresentByWindow[hWnd] = eventIter->second;
             }
+
             // For all other events, just remember the hWnd, we might need it later
             eventIter->second->Hwnd = hWnd;
+            eventIter->second->SeenDxgkPresent = true;
 
             if ((eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Copy_To_Front_Buffer || 
                  (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Flip && !eventIter->second->MMIO)) &&
