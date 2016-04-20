@@ -218,7 +218,16 @@ void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
 {
     pm.mArgs = &args;
 
-    QueryPerformanceCounter((PLARGE_INTEGER)&pm.mStartupQpcTime);
+	if (!args.mEtlFileName)
+	{
+		QueryPerformanceCounter((PLARGE_INTEGER)&pm.mStartupQpcTime);
+	}
+	else
+	{
+		// Reading events from ETL file so current QPC value is irrelevant. Update this 
+		// later from first event in the file.
+		pm.mStartupQpcTime = 0;
+	}
 
     if (args.mOutputFileName) {
         pm.mOutputFilePath = args.mOutputFileName;
