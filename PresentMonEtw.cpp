@@ -213,8 +213,8 @@ struct PMTraceConsumer : ITraceConsumer
     std::map<uint32_t, ProcessInfo> mNewProcessesFromETW;
     std::vector<uint32_t> mDeadProcessIds;
 
-	// Time of the first event of the trace
-	uint64_t mTraceStartTime = 0;
+    // Time of the first event of the trace
+    uint64_t mTraceStartTime = 0;
 
     bool DequeuePresents(std::vector<std::shared_ptr<PresentEvent>>& outPresents)
     {
@@ -1027,10 +1027,10 @@ void PMTraceConsumer::OnNTProcessEvent(PEVENT_RECORD pEventRecord)
 
 void PMTraceConsumer::OnEventRecord(PEVENT_RECORD pEventRecord)
 {
-	if (mTraceStartTime == 0)
-	{
-		mTraceStartTime = pEventRecord->EventHeader.TimeStamp.QuadPart;
-	}
+    if (mTraceStartTime == 0)
+    {
+        mTraceStartTime = pEventRecord->EventHeader.TimeStamp.QuadPart;
+    }
 
     auto& hdr = pEventRecord->EventHeader;
 
@@ -1124,11 +1124,11 @@ void PresentMonEtw(const PresentMonArgs& args)
                 newProcesses.clear();
                 deadProcesses.clear();
 
-				// If we are reading events from ETL file set start time to match time stamp of first event
-				if (data.mArgs->mEtlFileName && data.mStartupQpcTime == 0)
-				{
-					data.mStartupQpcTime = consumer.mTraceStartTime;
-				}
+                // If we are reading events from ETL file set start time to match time stamp of first event
+                if (data.mArgs->mEtlFileName && data.mStartupQpcTime == 0)
+                {
+                    data.mStartupQpcTime = consumer.mTraceStartTime;
+                }
 
                 if (args.mEtlFileName) {
                     consumer.GetProcessEvents(newProcesses, deadProcesses);
