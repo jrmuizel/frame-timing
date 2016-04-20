@@ -151,7 +151,7 @@ int main(int argc, char ** argv)
         }
     }
 
-    if (!HaveAdministratorPrivileges()) {
+    if (!args.mEtlFileName && !HaveAdministratorPrivileges()) {
         printf("Process is not running as admin. Attempting to elevate.\n");
         RestartAsAdministrator(argc, argv);
         return 0;
