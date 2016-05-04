@@ -147,10 +147,20 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
             }
 
             double timeInSeconds = (double)(int64_t)(p.QpcTime - pm.mStartupQpcTime) / perfFreq;
-            fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%s,%d,%d,%d,%s,%d,%.6lf,%.3lf,%.3lf,%.3lf,%.3lf,%.3lf\n",
-                proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime),
+            if (!pm.mArgs->mSimple)
+            {
+                fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%s,%d,%d,%d,%s,%d,%.6lf,%.3lf,%.3lf,%.3lf,%.3lf,%.3lf\n",
+                    proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime),
                     curr.SyncInterval, curr.SupportsTearing, curr.PresentFlags, PresentModeToString(curr.PresentMode), curr.FinalState != PresentResult::Presented,
-                timeInSeconds, deltaMilliseconds, timeSincePreviousDisplayed, timeTakenMilliseconds, deltaReady, deltaDisplayed);
+                    timeInSeconds, deltaMilliseconds, timeSincePreviousDisplayed, timeTakenMilliseconds, deltaReady, deltaDisplayed);
+            }
+            else
+            {
+                fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%s,%d,%d,%d,%.6lf,%.3lf,%.3lf\n",
+                    proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime),
+                    curr.SyncInterval, curr.PresentFlags, curr.FinalState != PresentResult::Presented,
+                    timeInSeconds, deltaMilliseconds, timeTakenMilliseconds);
+            }
         }
     }
 
@@ -248,8 +258,16 @@ void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
 
     fopen_s(&pm.mOutputFile, pm.mOutputFilePath.c_str(), "w");
     if (pm.mOutputFile) {
-        fprintf(pm.mOutputFile, "Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,AllowsTearing,PresentFlags,PresentMode,Dropped,TimeInSeconds,"
-                                "MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\n");
+        if (!pm.mArgs->mSimple)
+        {
+            fprintf(pm.mOutputFile, "Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,AllowsTearing,PresentFlags,PresentMode,Dropped,TimeInSeconds,"
+                                    "MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\n");
+        }
+        else
+        {
+            fprintf(pm.mOutputFile, "Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,"
+                                    "MsBetweenPresents,MsInPresentAPI\n");
+        }
     }
 }
 
@@ -301,11 +319,20 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
             if (chain.second.mLastPresentMode == PresentMode::Hardware_Composed_Independent_Flip) {
                 planeString = FormatString(": Plane %d", chain.second.mLastPlane);
             }
-            display += FormatString("\t%016llX (%s): SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, %.1lf displayed fps, %.2lf ms CPU, %.2lf ms latency) (%s%s)%s\n",
-                chain.first, RuntimeToString(chain.second.mRuntime), chain.second.mLastSyncInterval, chain.second.mLastFlags, 1000.0/fps, fps, dispFps, cpuTime * 1000.0, latency * 1000.0,
-                PresentModeToString(chain.second.mLastPresentMode),
-                planeString.c_str(),
-                (now - chain.second.mLastUpdateTicks) > 1000 ? " [STALE]" : "");
+            if (pm.mArgs->mSimple)
+            {
+                display += FormatString("\t%016llX (%s): SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, %.2lf ms CPU)%s\n",
+                    chain.first, RuntimeToString(chain.second.mRuntime), chain.second.mLastSyncInterval, chain.second.mLastFlags, 1000.0/fps, fps, cpuTime * 1000.0,
+                    (now - chain.second.mLastUpdateTicks) > 1000 ? " [STALE]" : "");
+            }
+            else
+            {
+                display += FormatString("\t%016llX (%s): SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, %.1lf displayed fps, %.2lf ms CPU, %.2lf ms latency) (%s%s)%s\n",
+                    chain.first, RuntimeToString(chain.second.mRuntime), chain.second.mLastSyncInterval, chain.second.mLastFlags, 1000.0/fps, fps, dispFps, cpuTime * 1000.0, latency * 1000.0,
+                    PresentModeToString(chain.second.mLastPresentMode),
+                    planeString.c_str(),
+                    (now - chain.second.mLastUpdateTicks) > 1000 ? " [STALE]" : "");
+            }
         }
     }
 

@@ -127,6 +127,9 @@ template <typename mutex_t> std::unique_lock<mutex_t> scoped_lock(mutex_t &m)
 
 struct PMTraceConsumer : ITraceConsumer
 {
+    PMTraceConsumer(bool simple) : mSimpleMode(simple) { }
+    bool mSimpleMode;
+
     std::mutex mMutex;
     // A set of presents that are "completed":
     // They progressed as far as they can through the pipeline before being either discarded or hitting the screen.
@@ -354,8 +357,8 @@ private:
         assert(event.QpcTime < EndTime);
         event.TimeTaken = EndTime - event.QpcTime;
         
-        if (!AllowPresentBatching) {
-            event.FinalState = PresentResult::Discarded;
+        if (!AllowPresentBatching || mSimpleMode) {
+            event.FinalState = AllowPresentBatching ? PresentResult::Presented : PresentResult::Discarded;
             CompletePresent(eventIter->second);
         }
         mPresentByThreadId.erase(eventIter);
@@ -1038,6 +1041,18 @@ void PMTraceConsumer::OnEventRecord(PEVENT_RECORD pEventRecord)
     {
         OnDXGIEvent(pEventRecord);
     }
+    else if (hdr.ProviderId == D3D9_PROVIDER_GUID)
+    {
+        OnD3D9Event(pEventRecord);
+    }
+    else if (hdr.ProviderId == NT_PROCESS_EVENT_GUID)
+    {
+        OnNTProcessEvent(pEventRecord);
+    }
+    else if (mSimpleMode)
+    {
+        return;
+    }
     else if (hdr.ProviderId == DXGKRNL_PROVIDER_GUID)
     {
         OnDXGKrnlEvent(pEventRecord);
@@ -1049,14 +1064,6 @@ void PMTraceConsumer::OnEventRecord(PEVENT_RECORD pEventRecord)
     else if (hdr.ProviderId == DWM_PROVIDER_GUID)
     {
         OnDWMEvent(pEventRecord);
-    }
-    else if (hdr.ProviderId == D3D9_PROVIDER_GUID)
-    {
-        OnD3D9Event(pEventRecord);
-    }
-    else if (hdr.ProviderId == NT_PROCESS_EVENT_GUID)
-    {
-        OnNTProcessEvent(pEventRecord);
     }
 }
 
@@ -1081,7 +1088,7 @@ void PresentMonEtw(const PresentMonArgs& args)
     std::wstring fileName(args.mEtlFileName, args.mEtlFileName +
         (args.mEtlFileName ? strlen(args.mEtlFileName) : 0));
     TraceSession session(L"PresentMon", !fileName.empty() ? fileName.c_str() : nullptr);
-    PMTraceConsumer consumer;
+    PMTraceConsumer consumer(args.mSimple);
 
     if (!args.mEtlFileName && !session.Start()) {
         if (session.Status() == ERROR_ALREADY_EXISTS) {
@@ -1093,10 +1100,13 @@ void PresentMonEtw(const PresentMonArgs& args)
     }
 
     session.EnableProvider(DXGI_PROVIDER_GUID, TRACE_LEVEL_INFORMATION);
-    session.EnableProvider(DXGKRNL_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 1);
-    session.EnableProvider(WIN32K_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 0x1000);
-    session.EnableProvider(DWM_PROVIDER_GUID, TRACE_LEVEL_VERBOSE);
     session.EnableProvider(D3D9_PROVIDER_GUID, TRACE_LEVEL_INFORMATION);
+    if (!args.mSimple)
+    {
+        session.EnableProvider(DXGKRNL_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 1);
+        session.EnableProvider(WIN32K_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 0x1000);
+        session.EnableProvider(DWM_PROVIDER_GUID, TRACE_LEVEL_VERBOSE);
+    }
 
     session.OpenTrace(&consumer);
     uint32_t eventsLost, buffersLost;
@@ -1169,10 +1179,13 @@ void PresentMonEtw(const PresentMonArgs& args)
 
     session.CloseTrace();
     session.DisableProvider(DXGI_PROVIDER_GUID);
-    session.DisableProvider(DXGKRNL_PROVIDER_GUID);
-    session.DisableProvider(WIN32K_PROVIDER_GUID);
-    session.DisableProvider(DWM_PROVIDER_GUID);
     session.DisableProvider(D3D9_PROVIDER_GUID);
+    if (!args.mSimple)
+    {
+        session.DisableProvider(DXGKRNL_PROVIDER_GUID);
+        session.DisableProvider(WIN32K_PROVIDER_GUID);
+        session.DisableProvider(DWM_PROVIDER_GUID);
+    }
     session.Stop();
 }
 

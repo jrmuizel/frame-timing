@@ -132,6 +132,10 @@ int main(int argc, char ** argv)
             {
                 args.mScrollLockToggle = true;
             }
+            else if (!strcmp(argv[i], "-simple"))
+            {
+                args.mSimple = true;
+            }
             else if (!strcmp(argv[i], "-?") || !strcmp(argv[i], "-help"))
             {
                 printHelp();

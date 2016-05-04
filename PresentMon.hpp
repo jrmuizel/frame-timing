@@ -110,6 +110,7 @@ struct PresentMonArgs {
     int mTimer = 0;
     bool mScrollLockToggle = false;
     bool mExcludeDropped = false;
+    bool mSimple = false;
 };
 
 struct PresentMonData {
