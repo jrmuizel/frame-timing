@@ -14,7 +14,7 @@
 // responsibility to update it.
 //--------------------------------------------------------------------------------------
 
-#define BUILDNUM 104
+#define BUILDNUM 105
 
 #include <windows.h>
 #include <thread>
@@ -56,6 +56,7 @@ void printHelp()
         " -no_csv: do not create any output file.\n"
         " -exclude_dropped: exclude dropped presents from the csv output.\n"
         " -scroll_toggle: only record events while scroll lock is enabled.\n"
+        " -simple: disable advanced tracking. try this if you encounter crashes.\n"
         );
     printf("\nCSV columns explained (self explanatory columns omitted):\n"
         "  Dropped: boolean indicator. 1 = dropped, 0 = displayed.\n"

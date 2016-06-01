@@ -15,4 +15,5 @@ ETW based FPS monitor for DX10+ programs, including Windows Store Apps / UWP App
  -no_csv: do not create any output file.
  -exclude_dropped: exclude dropped presents from the csv output.
  -scroll_toggle: only record events while scroll lock is enabled.
+ -simple: disable advanced tracking. try this if you encounter crashes.
 ```
