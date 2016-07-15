@@ -57,6 +57,7 @@ void printHelp()
         " -exclude_dropped: exclude dropped presents from the csv output.\n"
         " -scroll_toggle: only record events while scroll lock is enabled.\n"
         " -simple: disable advanced tracking. try this if you encounter crashes.\n"
+        " -terminate_on_proc_exit: terminate PresentMon when all instances of the specified process exit.\n"
         );
     printf("\nCSV columns explained (self explanatory columns omitted):\n"
         "  Dropped: boolean indicator. 1 = dropped, 0 = displayed.\n"
@@ -136,6 +137,10 @@ int main(int argc, char ** argv)
             else if (!strcmp(argv[i], "-simple"))
             {
                 args.mSimple = true;
+            }
+            else if (!strcmp(argv[i], "-terminate_on_proc_exit"))
+            {
+                args.mTerminateOnProcExit = true;
             }
             else if (!strcmp(argv[i], "-?") || !strcmp(argv[i], "-help"))
             {

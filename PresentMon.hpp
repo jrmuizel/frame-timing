@@ -99,6 +99,8 @@ struct ProcessInfo {
     uint64_t mLastRefreshTicks = 0; // GetTickCount64
     std::string mModuleName;
     std::map<uint64_t, SwapChainData> mChainMap;
+    bool mTerminationProcess;
+    bool mProcessExists = false;
 };
 
 struct PresentMonArgs {
@@ -111,6 +113,7 @@ struct PresentMonArgs {
     bool mScrollLockToggle = false;
     bool mExcludeDropped = false;
     bool mSimple = false;
+    bool mTerminateOnProcExit = false;
 };
 
 struct PresentMonData {
@@ -119,6 +122,7 @@ struct PresentMonData {
     std::string mOutputFilePath;
     FILE *mOutputFile = nullptr;
     std::map<uint32_t, ProcessInfo> mProcessMap;
+    uint32_t mTerminationProcessCount = 0;
 };
 
 void PresentMonEtw(const PresentMonArgs& args);
