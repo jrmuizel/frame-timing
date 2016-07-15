@@ -56,8 +56,12 @@ static void UpdateProcessInfo_Realtime(ProcessInfo& info, uint64_t now, uint32_t
                 info.mChainMap.clear();
                 info.mModuleName = name;
             }
-            CloseHandle(h);
+            DWORD dwExitCode = 0;
             info.mProcessExists = true;
+            if (GetExitCodeProcess(h, &dwExitCode) && dwExitCode != STILL_ACTIVE) {
+                info.mProcessExists = false;
+            }
+            CloseHandle(h);
         } else {
             info.mChainMap.clear();
             info.mProcessExists = false;
