@@ -27,6 +27,7 @@
 
 #pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "shlwapi.lib")
+#pragma comment(lib, "tdh.lib")
 
 enum {
     MAX_HISTORY_TIME = 2000,
