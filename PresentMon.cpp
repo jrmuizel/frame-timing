@@ -253,6 +253,7 @@ void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
 
     if (args.mOutputFileName) {
         pm.mOutputFilePath = args.mOutputFileName;
+        // TODO: Append args.mRestartCount after the filename, before the extension. RegEx?
     } else if (args.mTargetProcessName) {
         struct tm tm;
         time_t time_now = time(NULL);
@@ -379,4 +380,6 @@ void PresentMon_Shutdown(PresentMonData& pm, bool log_corrupted)
         }
     }
     pm.mProcessMap.clear();
+
+    SetConsoleText("");
 }

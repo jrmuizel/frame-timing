@@ -110,10 +110,12 @@ struct PresentMonArgs {
     int mTargetPid = 0;
     int mDelay = 0;
     int mTimer = 0;
+    int mRestartCount = 0;
     bool mScrollLockToggle = false;
     bool mExcludeDropped = false;
     bool mSimple = false;
     bool mTerminateOnProcExit = false;
+    bool mHotkeySupport = false;
 };
 
 struct PresentMonData {
