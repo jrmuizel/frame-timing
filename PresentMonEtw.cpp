@@ -670,6 +670,7 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                     eventIter->second->TimeTaken = EventTime - eventIter->second->QpcTime;
                 }
                 mPresentByThreadId.erase(eventIter);
+                eventIter->second->WasBatched = true;
             }
             break;
         }

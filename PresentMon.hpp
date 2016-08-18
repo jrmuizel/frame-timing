@@ -59,6 +59,7 @@ struct PresentEvent {
     bool SupportsTearing = false;
     bool MMIO = false;
     bool SeenDxgkPresent = false;
+    bool WasBatched = false;
 
     Runtime Runtime = Runtime::Other;
 
@@ -93,6 +94,7 @@ struct SwapChainData {
     std::deque<PresentEvent> mDisplayedPresentHistory;
     PresentMode mLastPresentMode = PresentMode::Unknown;
     uint32_t mLastPlane = 0;
+    bool mHasBeenBatched = false;
 };
 
 struct ProcessInfo {
