@@ -17,4 +17,6 @@ ETW based FPS monitor for DX10+ programs, including Windows Store Apps / UWP App
  -scroll_toggle: only record events while scroll lock is enabled.
  -simple: disable advanced tracking. try this if you encounter crashes.
  -terminate_on_proc_exit: terminate PresentMon when all instances of the specified process exit.
+ -hotkey: use F11 to start and stop listening, writing to a unique file each time.
+          delay kicks in after hotkey (each time), timer starts ticking from hotkey press.
 ```
