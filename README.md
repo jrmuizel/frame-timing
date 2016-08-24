@@ -16,4 +16,5 @@ ETW based FPS monitor for DX10+ programs, including Windows Store Apps / UWP App
  -exclude_dropped: exclude dropped presents from the csv output.
  -scroll_toggle: only record events while scroll lock is enabled.
  -simple: disable advanced tracking. try this if you encounter crashes.
+ -terminate_on_proc_exit: terminate PresentMon when all instances of the specified process exit.
 ```

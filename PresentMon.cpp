@@ -56,9 +56,15 @@ static void UpdateProcessInfo_Realtime(ProcessInfo& info, uint64_t now, uint32_t
                 info.mChainMap.clear();
                 info.mModuleName = name;
             }
+            DWORD dwExitCode = 0;
+            info.mProcessExists = true;
+            if (GetExitCodeProcess(h, &dwExitCode) && dwExitCode != STILL_ACTIVE) {
+                info.mProcessExists = false;
+            }
             CloseHandle(h);
         } else {
             info.mChainMap.clear();
+            info.mProcessExists = false;
         }
     }
     // remove chains without recent updates
@@ -114,6 +120,11 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
     }
     if (pm.mArgs->mTargetPid && p.ProcessId != pm.mArgs->mTargetPid) {
         return;
+    }
+
+    if (pm.mArgs->mTerminateOnProcExit && !proc.mTerminationProcess) {
+        proc.mTerminationProcess = true;
+        ++pm.mTerminationProcessCount;
     }
 
     auto& chain = proc.mChainMap[p.SwapChainAddress];
@@ -302,12 +313,22 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
         if (!pm.mArgs->mEtlFileName) {
             UpdateProcessInfo_Realtime(proc.second, now, proc.first);
         }
+        
+        if (proc.second.mTerminationProcess && !proc.second.mProcessExists) {
+            --pm.mTerminationProcessCount;
+            if (pm.mTerminationProcessCount == 0) {
+                g_Quit = true;
+            }
+            proc.second.mTerminationProcess = false;
+        }
+
         if (proc.second.mModuleName.empty() ||
             proc.second.mChainMap.empty())
         {
             // don't display empty processes
             continue;
         }
+
         display += FormatString("%s[%d]:\n", proc.second.mModuleName.c_str(),proc.first);
         for (auto& chain : proc.second.mChainMap)
         {
