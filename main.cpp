@@ -15,6 +15,7 @@
 //--------------------------------------------------------------------------------------
 
 #define BUILDNUM 105
+static const wchar_t* c_ClassName = L"PresentMon";
 
 #include <windows.h>
 #include <thread>
@@ -24,9 +25,16 @@
 #include "Util.hpp"
 #include <mutex>
 
+static const uint32_t c_Hotkey = 0x80;
+
 bool g_Quit = false;
 static std::thread *g_PresentMonThread;
 static std::mutex *g_ExitMutex;
+
+void StartPresentMonThread(PresentMonArgs& args)
+{
+    *g_PresentMonThread = std::thread(PresentMonEtw, args);
+}
 
 BOOL WINAPI HandlerRoutine(
     _In_ DWORD dwCtrlType
@@ -34,7 +42,7 @@ BOOL WINAPI HandlerRoutine(
 {
     std::lock_guard<std::mutex> lock(*g_ExitMutex);
     g_Quit = true;
-    if (g_PresentMonThread) {
+    if (g_PresentMonThread && g_PresentMonThread->joinable()) {
         g_PresentMonThread->join();
     }
     return TRUE;
@@ -58,6 +66,8 @@ void printHelp()
         " -scroll_toggle: only record events while scroll lock is enabled.\n"
         " -simple: disable advanced tracking. try this if you encounter crashes.\n"
         " -terminate_on_proc_exit: terminate PresentMon when all instances of the specified process exit.\n"
+        " -hotkey: use F11 to start and stop listening, writing to a unique file each time.\n"
+        "          delay kicks in after hotkey (each time), timer starts ticking from hotkey press.\n"
         );
     printf("\nCSV columns explained (self explanatory columns omitted):\n"
         "  Dropped: boolean indicator. 1 = dropped, 0 = displayed.\n"
@@ -67,6 +77,63 @@ void printHelp()
         "  MsUntilRenderComplete: time between present start and GPU work completion.\n"
         "  MsUntilDisplayed: time between present start and frame display.\n"
         );
+}
+
+LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    switch (uMsg)
+    {
+    case WM_HOTKEY:
+        if (wParam == c_Hotkey)
+        {
+            auto& args = *reinterpret_cast<PresentMonArgs*>(GetWindowLongPtrW(hWnd, GWLP_USERDATA));
+            if (g_PresentMonThread->joinable())
+            {
+                HandlerRoutine(CTRL_C_EVENT);
+                g_Quit = false;
+                args.mRestartCount++;
+            }
+            else
+            {
+                StartPresentMonThread(args);
+            }
+            break;
+            return 0;
+        }
+        __fallthrough;
+    default:
+        return DefWindowProcW(hWnd, uMsg, wParam, lParam);
+    }
+}
+
+HWND CreateMessageWindow(PresentMonArgs& args)
+{
+    WNDCLASSEXW Class = { sizeof(Class) };
+    Class.lpfnWndProc = WindowProc;
+    Class.lpszClassName = c_ClassName;
+    if (!RegisterClassExW(&Class))
+    {
+        printf("Failed to register hotkey class.\n");
+        return 0;
+    }
+
+    HWND hWnd = CreateWindowExW(0, c_ClassName, L"PresentMonWnd", 0, 0, 0, 0, 0, HWND_MESSAGE, 0, 0, nullptr);
+    if (!hWnd)
+    {
+        printf("Failed to create hotkey window.\n");
+        return 0;
+    }
+
+    if (!RegisterHotKey(hWnd, c_Hotkey, MOD_NOREPEAT, VK_F11))
+    {
+        printf("Failed to register hotkey.\n");
+        DestroyWindow(hWnd);
+        return 0;
+    }
+
+    SetWindowLongPtrW(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&args));
+
+    return hWnd;
 }
 
 int main(int argc, char ** argv)
@@ -142,6 +209,10 @@ int main(int argc, char ** argv)
             {
                 args.mTerminateOnProcExit = true;
             }
+            else if (!strcmp(argv[i], "-hotkey"))
+            {
+                args.mHotkeySupport = true;
+            }
             else if (!strcmp(argv[i], "-?") || !strcmp(argv[i], "-help"))
             {
                 printHelp();
@@ -167,6 +238,11 @@ int main(int argc, char ** argv)
         return 0;
     }
 
+    if (args.mEtlFileName && args.mHotkeySupport) {
+        printf("ETL files not supported with hotkeys.\n");
+        return 0;
+    }
+
     SetConsoleCtrlHandler(HandlerRoutine, TRUE);
     SetConsoleTitleA(title_string.c_str());
 
@@ -174,11 +250,29 @@ int main(int argc, char ** argv)
     g_ExitMutex = &exit_mutex;
 
     // Run PM in a separate thread so we can join it in the CtrlHandler (can't join the main thread)
-    std::thread pm(PresentMonEtw, args);
+    std::thread pm;
     g_PresentMonThread = &pm;
-    while (!g_Quit)
+
+    if (args.mHotkeySupport)
     {
-        Sleep(100);
+        HWND hWnd = CreateMessageWindow(args);
+        MSG message = {};
+        while (hWnd && !g_Quit)
+        {
+            while (PeekMessageW(&message, hWnd, 0, 0, PM_REMOVE))
+            {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+    }
+    else
+    {
+        StartPresentMonThread(args);
+        while (!g_Quit)
+        {
+            Sleep(100);
+        }
     }
 
     // Wait for tracing to finish, to ensure the PM thread closes the session correctly

@@ -1085,9 +1085,11 @@ void PresentMonEtw(const PresentMonArgs& args)
         return;
     }
 
+    g_FileComplete = false;
     std::wstring fileName(args.mEtlFileName, args.mEtlFileName +
         (args.mEtlFileName ? strlen(args.mEtlFileName) : 0));
-    TraceSession session(L"PresentMon", !fileName.empty() ? fileName.c_str() : nullptr);
+    std::wstring sessionName(L"PresentMon");
+    TraceSession session(sessionName.c_str(), !fileName.empty() ? fileName.c_str() : nullptr);
     PMTraceConsumer consumer(args.mSimple);
 
     if (!args.mEtlFileName && !session.Start()) {
