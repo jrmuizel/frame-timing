@@ -14,7 +14,7 @@
 // responsibility to update it.
 //--------------------------------------------------------------------------------------
 
-#define BUILDNUM 105
+#define BUILDNUM 106
 static const wchar_t* c_ClassName = L"PresentMon";
 
 #include <windows.h>
