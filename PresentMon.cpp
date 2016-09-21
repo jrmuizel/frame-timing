@@ -252,13 +252,20 @@ void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
     }
 
     if (args.mOutputFileName) {
-        pm.mOutputFilePath = args.mOutputFileName;
-        // TODO: Append args.mRestartCount after the filename, before the extension. RegEx?
+		if (!args.mHotkeySupport) {
+			pm.mOutputFilePath = args.mOutputFileName;
+		} else {
+			// Append args.mRestartCount after the filename, before the extension.
+			struct { char drive[_MAX_DRIVE], dir[_MAX_DIR], name[_MAX_FNAME], ext[_MAX_EXT]; } p = {0};
+			_splitpath_s(args.mOutputFileName, p.drive, p.dir, p.name, p.ext);
+			pm.mOutputFilePath = FormatString("%s%s%s-%d%s",
+				p.drive, p.dir, p.name, args.mRestartCount, p.ext[0] ? p.ext : ".csv");
+		}
     } else if (args.mTargetProcessName) {
         struct tm tm;
         time_t time_now = time(NULL);
         localtime_s(&tm, &time_now);
-        std::string date = FormatString("%4d-%02d-%02d-%02d-%02d",
+        std::string date = FormatString("%4d-%02d-%02dT%02d%02d%02d", // ISO 8601
             tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
             tm.tm_hour, tm.tm_min, tm.tm_sec);
         std::string path;
