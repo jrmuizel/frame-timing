@@ -99,6 +99,15 @@ const char* RuntimeToString(Runtime rt)
     }
 }
 
+const char* FinalStateToDroppedString(PresentResult res)
+{
+    switch (res) {
+    case PresentResult::Presented: return "0";
+    case PresentResult::Error: return "Error";
+    default: return "1";
+    }
+}
+
 void PruneDeque(std::deque<PresentEvent> &presentHistory, uint64_t perfFreq, uint32_t msTimeDiff, uint32_t maxHistLen) {
     while (!presentHistory.empty() &&
         (presentHistory.size() > maxHistLen ||
@@ -161,16 +170,16 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
             double timeInSeconds = (double)(int64_t)(p.QpcTime - pm.mStartupQpcTime) / perfFreq;
             if (!pm.mArgs->mSimple)
             {
-                fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%s,%d,%d,%d,%s,%d,%.6lf,%.3lf,%.3lf,%.3lf,%.3lf,%.3lf\n",
+                fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%s,%d,%d,%d,%s,%s,%.6lf,%.3lf,%.3lf,%.3lf,%.3lf,%.3lf\n",
                     proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime),
-                    curr.SyncInterval, curr.SupportsTearing, curr.PresentFlags, PresentModeToString(curr.PresentMode), curr.FinalState != PresentResult::Presented,
+                    curr.SyncInterval, curr.SupportsTearing, curr.PresentFlags, PresentModeToString(curr.PresentMode), FinalStateToDroppedString(curr.FinalState),
                     timeInSeconds, deltaMilliseconds, timeSincePreviousDisplayed, timeTakenMilliseconds, deltaReady, deltaDisplayed);
             }
             else
             {
-                fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%s,%d,%d,%d,%.6lf,%.3lf,%.3lf\n",
+                fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%s,%d,%d,%s,%.6lf,%.3lf,%.3lf\n",
                     proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime),
-                    curr.SyncInterval, curr.PresentFlags, curr.FinalState != PresentResult::Presented,
+                    curr.SyncInterval, curr.PresentFlags, FinalStateToDroppedString(curr.FinalState),
                     timeInSeconds, deltaMilliseconds, timeTakenMilliseconds);
             }
         }

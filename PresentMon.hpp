@@ -41,7 +41,7 @@ enum class PresentMode
 };
 enum class PresentResult
 {
-    Unknown, Presented, Discarded
+    Unknown, Presented, Discarded, Error
 };
 enum class Runtime
 {

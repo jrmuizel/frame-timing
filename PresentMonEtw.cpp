@@ -243,7 +243,11 @@ struct PMTraceConsumer : ITraceConsumer
 private:
     void CompletePresent(std::shared_ptr<PresentEvent> p)
     {
-        assert(!p->Completed);
+        if (p->Completed)
+        {
+            p->FinalState = PresentResult::Error;
+            return;
+        }
 
         // Complete all other presents that were riding along with this one (i.e. this one came from DWM)
         for (auto& p2 : p->DependentPresents) {
@@ -294,7 +298,11 @@ private:
         // Easy: we're on a thread that had some step in the present process
         auto eventIter = mPresentByThreadId.find(pEventRecord->EventHeader.ThreadId);
         if (eventIter != mPresentByThreadId.end()) {
-            return eventIter;
+            if (eventIter->second->PresentMode != PresentMode::Unknown) {
+                mPresentByThreadId.erase(eventIter);
+            } else {
+                return eventIter;
+            }
         }
 
         // No such luck, check for batched presents
