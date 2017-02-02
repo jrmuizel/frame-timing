@@ -14,7 +14,7 @@
 // responsibility to update it.
 //--------------------------------------------------------------------------------------
 
-#define BUILDNUM 105
+#define BUILDNUM 106
 static const wchar_t* c_ClassName = L"PresentMon";
 
 #include <windows.h>
@@ -81,29 +81,22 @@ void printHelp()
 
 LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-    switch (uMsg)
-    {
-    case WM_HOTKEY:
-        if (wParam == c_Hotkey)
-        {
-            auto& args = *reinterpret_cast<PresentMonArgs*>(GetWindowLongPtrW(hWnd, GWLP_USERDATA));
-            if (g_PresentMonThread->joinable())
-            {
-                HandlerRoutine(CTRL_C_EVENT);
-                g_Quit = false;
-                args.mRestartCount++;
-            }
-            else
-            {
-                StartPresentMonThread(args);
-            }
-            break;
-            return 0;
-        }
-        __fallthrough;
-    default:
-        return DefWindowProcW(hWnd, uMsg, wParam, lParam);
-    }
+	if (uMsg == WM_HOTKEY && wParam == c_Hotkey)
+	{
+		auto& args = *reinterpret_cast<PresentMonArgs*>(GetWindowLongPtrW(hWnd, GWLP_USERDATA));
+		if (g_PresentMonThread->joinable())
+		{
+			HandlerRoutine(CTRL_C_EVENT);
+			g_Quit = false;
+			args.mRestartCount++;
+		}
+		else
+		{
+			StartPresentMonThread(args);
+		}
+	}
+
+	return DefWindowProc(hWnd, uMsg, wParam, lParam);
 }
 
 HWND CreateMessageWindow(PresentMonArgs& args)
