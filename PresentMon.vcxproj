@@ -157,11 +157,16 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="PresentMonEtw.cpp" />
     <ClCompile Include="PresentMon.cpp" />
+    <ClCompile Include="PresentMonTraceConsumer.cpp" />
+    <ClCompile Include="TraceConsumer.cpp" />
     <ClCompile Include="TraceSession.cpp" />
     <ClCompile Include="Util.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="PresentMon.hpp" />
+    <ClInclude Include="CommonIncludes.hpp" />
+    <ClInclude Include="PresentMonTraceConsumer.hpp" />
+    <ClInclude Include="TraceConsumer.hpp" />
     <ClInclude Include="TraceSession.hpp" />
     <ClInclude Include="Util.hpp" />
   </ItemGroup>

@@ -16,12 +16,8 @@
 
 #include "PresentMon.hpp"
 #include "Util.hpp"
-#include <algorithm>
-#include <numeric>
-#include <ctime>
-#include <iterator>
 
-#include <windows.h>
+#include <numeric>
 #include <psapi.h>
 #include <shlwapi.h>
 
