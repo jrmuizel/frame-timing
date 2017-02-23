@@ -633,34 +633,6 @@ void PMTraceConsumer::OnD3D9Event(PEVENT_RECORD pEventRecord)
     }
 }
 
-void PMTraceConsumer::OnNTProcessEvent(PEVENT_RECORD pEventRecord)
-{
-    TraceEventInfo eventInfo(pEventRecord);
-    auto pid = eventInfo.GetData<uint32_t>(L"ProcessId");
-    auto lock = scoped_lock(mProcessMutex);
-    switch (pEventRecord->EventHeader.EventDescriptor.Opcode)
-    {
-    case EVENT_TRACE_TYPE_START:
-    case EVENT_TRACE_TYPE_DC_START:
-    {
-        ProcessInfo process;
-        auto nameSize = eventInfo.GetDataSize(L"ImageFileName");
-        process.mModuleName.resize(nameSize, '\0');
-        eventInfo.GetData(L"ImageFileName", (byte*)process.mModuleName.data(), nameSize);
-
-        mNewProcessesFromETW.insert_or_assign(pid, std::move(process));
-        break;
-    }
-    case EVENT_TRACE_TYPE_END:
-    case EVENT_TRACE_TYPE_DC_END:
-    {
-        mDeadProcessIds.emplace_back(pid);
-        break;
-    }
-    }
-
-}
-
 void PMTraceConsumer::OnEventRecord(PEVENT_RECORD pEventRecord)
 {
     if (mTraceStartTime == 0)
@@ -678,10 +650,6 @@ void PMTraceConsumer::OnEventRecord(PEVENT_RECORD pEventRecord)
     {
         OnD3D9Event(pEventRecord);
     }
-    else if (hdr.ProviderId == NT_PROCESS_EVENT_GUID)
-    {
-        OnNTProcessEvent(pEventRecord);
-    }
     else if (mSimpleMode)
     {
         return;
@@ -698,4 +666,138 @@ void PMTraceConsumer::OnEventRecord(PEVENT_RECORD pEventRecord)
     {
         OnDWMEvent(pEventRecord);
     }
+}
+
+void PMTraceConsumer::CompletePresent(std::shared_ptr<PresentEvent> p)
+{
+    if (p->Completed)
+    {
+
+        p->FinalState = PresentResult::Error;
+        return;
+    }
+
+    // Complete all other presents that were riding along with this one (i.e. this one came from DWM)
+    for (auto& p2 : p->DependentPresents) {
+        p2->ScreenTime = p->ScreenTime;
+        p2->FinalState = PresentResult::Presented;
+        CompletePresent(p2);
+    }
+    p->DependentPresents.clear();
+
+    // Remove it from any tracking maps that it may have been inserted into
+    if (p->QueueSubmitSequence != 0) {
+        mPresentsBySubmitSequence.erase(p->QueueSubmitSequence);
+    }
+    if (p->Hwnd != 0) {
+        auto hWndIter = mPresentByWindow.find(p->Hwnd);
+        if (hWndIter != mPresentByWindow.end() && hWndIter->second == p) {
+            mPresentByWindow.erase(hWndIter);
+        }
+    }
+    auto& processMap = mPresentsByProcess[p->ProcessId];
+    processMap.erase(p->QpcTime);
+
+    auto& presentDeque = mPresentsByProcessAndSwapChain[std::make_tuple(p->ProcessId, p->SwapChainAddress)];
+    auto presentIter = presentDeque.begin();
+    assert(!presentIter->get()->Completed); // It wouldn't be here anymore if it was
+
+    if (p->FinalState == PresentResult::Presented) {
+        while (*presentIter != p) {
+            CompletePresent(*presentIter);
+            presentIter = presentDeque.begin();
+        }
+    }
+
+    p->Completed = true;
+    if (*presentIter == p) {
+        auto lock = scoped_lock(mMutex);
+        while (presentIter != presentDeque.end() && presentIter->get()->Completed) {
+            mCompletedPresents.push_back(*presentIter);
+            presentDeque.pop_front();
+            presentIter = presentDeque.begin();
+        }
+    }
+
+}
+
+decltype(PMTraceConsumer::mPresentByThreadId.begin()) PMTraceConsumer::FindOrCreatePresent(_In_ PEVENT_RECORD pEventRecord)
+{
+    // Easy: we're on a thread that had some step in the present process
+    auto eventIter = mPresentByThreadId.find(pEventRecord->EventHeader.ThreadId);
+    if (eventIter != mPresentByThreadId.end()) {
+        if (eventIter->second->PresentMode != PresentMode::Unknown) {
+            mPresentByThreadId.erase(eventIter);
+        }
+        else {
+            return eventIter;
+        }
+    }
+
+    // No such luck, check for batched presents
+    auto& processMap = mPresentsByProcess[pEventRecord->EventHeader.ProcessId];
+    auto processIter = std::find_if(processMap.begin(), processMap.end(),
+        [](auto processIter) {return processIter.second->PresentMode == PresentMode::Unknown; });
+    uint64_t EventTime = *(uint64_t*)&pEventRecord->EventHeader.TimeStamp;
+    if (processIter == processMap.end()) {
+        // This likely didn't originate from a runtime whose events we're tracking (DXGI/D3D9)
+        // Could be composition buffers, or maybe another runtime (e.g. GL)
+        auto newEvent = std::make_shared<PresentEvent>();
+        newEvent->QpcTime = EventTime;
+        newEvent->ProcessId = pEventRecord->EventHeader.ProcessId;
+        processMap.emplace(EventTime, newEvent);
+
+        auto& processSwapChainDeque = mPresentsByProcessAndSwapChain[std::make_tuple(pEventRecord->EventHeader.ProcessId, 0ull)];
+        processSwapChainDeque.emplace_back(newEvent);
+
+        eventIter = mPresentByThreadId.emplace(pEventRecord->EventHeader.ThreadId, newEvent).first;
+    }
+    else {
+        // Assume batched presents are popped off the front of the driver queue by process in order, do the same here
+        eventIter = mPresentByThreadId.emplace(pEventRecord->EventHeader.ThreadId, processIter->second).first;
+        processMap.erase(processIter);
+    }
+
+    return eventIter;
+}
+
+void PMTraceConsumer::RuntimePresentStart(_In_ PEVENT_RECORD pEventRecord, PresentEvent &event)
+{
+    auto& hdr = pEventRecord->EventHeader;
+    uint64_t EventTime = *(uint64_t*)&hdr.TimeStamp;
+    event.ProcessId = hdr.ProcessId;
+    event.QpcTime = EventTime;
+    event.RuntimeThread = hdr.ThreadId;
+
+    // Ignore PRESENT_TEST: it's just to check if you're still fullscreen, doesn't actually do anything
+    if ((event.PresentFlags & DXGI_PRESENT_TEST) == 0) {
+        auto pEvent = std::make_shared<PresentEvent>(event);
+        mPresentByThreadId[hdr.ThreadId] = pEvent;
+
+        auto& processMap = mPresentsByProcess[hdr.ProcessId];
+        processMap.emplace(EventTime, pEvent);
+
+        auto& processSwapChainDeque = mPresentsByProcessAndSwapChain[std::make_tuple(hdr.ProcessId, event.SwapChainAddress)];
+        processSwapChainDeque.emplace_back(pEvent);
+    }
+}
+
+void PMTraceConsumer::RuntimePresentStop(_In_ PEVENT_RECORD pEventRecord, bool AllowPresentBatching)
+{
+    auto& hdr = pEventRecord->EventHeader;
+    uint64_t EndTime = *(uint64_t*)&hdr.TimeStamp;
+    auto eventIter = mPresentByThreadId.find(hdr.ThreadId);
+    if (eventIter == mPresentByThreadId.end()) {
+        return;
+    }
+    auto &event = *eventIter->second;
+
+    assert(event.QpcTime < EndTime);
+    event.TimeTaken = EndTime - event.QpcTime;
+
+    if (!AllowPresentBatching || mSimpleMode) {
+        event.FinalState = AllowPresentBatching ? PresentResult::Presented : PresentResult::Discarded;
+        CompletePresent(eventIter->second);
+    }
+    mPresentByThreadId.erase(eventIter);
 }

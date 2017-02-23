@@ -108,6 +108,7 @@ void PresentMonEtw(const PresentMonArgs& args)
     ProcessTraceConsumer procConsumer = {};
     MultiTraceConsumer mtConsumer = {};
 
+    mtConsumer.AddTraceConsumer(&procConsumer);
     mtConsumer.AddTraceConsumer(&pmConsumer);
 
     if (!args.mEtlFileName && !session.Start()) {
@@ -157,11 +158,11 @@ void PresentMonEtw(const PresentMonArgs& args)
                 // If we are reading events from ETL file set start time to match time stamp of first event
                 if (data.mArgs->mEtlFileName && data.mStartupQpcTime == 0)
                 {
-                    data.mStartupQpcTime = pmConsumer.mTraceStartTime;
+                    data.mStartupQpcTime = mtConsumer.mTraceStartTime;
                 }
 
                 if (args.mEtlFileName) {
-                    pmConsumer.GetProcessEvents(newProcesses, deadProcesses);
+                    procConsumer.GetProcessEvents(newProcesses, deadProcesses);
                     PresentMon_UpdateNewProcesses(data, newProcesses);
                 }
 
