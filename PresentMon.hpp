@@ -42,6 +42,7 @@ struct PresentMonArgs {
     bool mScrollLockToggle = false;
     bool mExcludeDropped = false;
     bool mSimple = false;
+    bool mSimpleConsole = false;
     bool mTerminateOnProcExit = false;
     bool mHotkeySupport = false;
 };

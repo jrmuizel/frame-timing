@@ -43,10 +43,18 @@ static void LockedStartRecording(PresentMonArgs& args)
     g_StopRecording = false;
     g_RecordingThread = std::thread(PresentMonEtw, args);
     g_IsRecording = true;
+
+    if (args.mSimpleConsole) {
+        printf("Started recording.\n");
+    }
 }
 
-static void LockedStopRecording()
+static void LockedStopRecording(PresentMonArgs const& args)
 {
+    if (args.mSimpleConsole) {
+        printf("Stopping recording.\n");
+    }
+
     g_StopRecording = true;
     if (g_RecordingThread.joinable()) {
         g_RecordingThread.join();
@@ -60,11 +68,11 @@ static void StartRecording(PresentMonArgs& args)
     LockedStartRecording(args);
 }
 
-static void StopRecording()
+static void StopRecording(PresentMonArgs const& args)
 {
     std::lock_guard<std::mutex> lock(g_RecordingMutex);
     if (g_IsRecording) {
-        LockedStopRecording();
+        LockedStopRecording(args);
     }
 }
 
@@ -89,7 +97,7 @@ static LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
 
         std::lock_guard<std::mutex> lock(g_RecordingMutex);
         if (g_IsRecording) {
-            LockedStopRecording();
+            LockedStopRecording(args);
             args.mRestartCount++;
         } else {
             LockedStartRecording(args);
@@ -160,6 +168,7 @@ void PrintHelp()
         "    -terminate_on_proc_exit    Terminate PresentMon when all instances of the specified process exit.\n"
         "    -simple                    Disable advanced tracking (try this if you encounter crashes).\n"
         "    -dont_restart_as_admin     Don't try to elevate privilege.\n"
+        "    -no_top                    Don't display active swap chains in the console window.\n"
         );
 }
 
@@ -204,6 +213,7 @@ int main(int argc, char** argv)
         else ARG1("-terminate_on_proc_exit", args.mTerminateOnProcExit = true)
         else ARG1("-simple",                 args.mSimple              = true)
         else ARG1("-dont_restart_as_admin",  tryToElevate              = false)
+        else ARG1("-no_top",                 args.mSimpleConsole       = true)
 
         // Provided argument wasn't recognized
         else fprintf(stderr, "error: unexpected argument '%s'.\n", argv[i]);
@@ -275,7 +285,7 @@ int main(int argc, char** argv)
     // Wait for tracing to finish, to ensure the PM thread closes the session
     // correctly Prevent races on joining the PM thread between the control
     // handler and the main thread
-    StopRecording();
+    StopRecording(args);
 
     return 0;
 }

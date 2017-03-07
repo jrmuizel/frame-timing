@@ -414,7 +414,8 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
             proc.second.mTerminationProcess = false;
         }
 
-        if (proc.second.mModuleName.empty() ||
+        if (pm.mArgs->mSimpleConsole ||
+            proc.second.mModuleName.empty() ||
             proc.second.mChainMap.empty())
         {
             // don't display empty processes
@@ -464,7 +465,9 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
     }
 
     // refresh the console
-    SetConsoleText(display.c_str());
+    if (pm.mArgs->mSimpleConsole == false) {
+        SetConsoleText(display.c_str());
+    }
 }
 
 void PresentMon_Shutdown(PresentMonData& pm, bool log_corrupted)
@@ -485,7 +488,9 @@ void PresentMon_Shutdown(PresentMonData& pm, bool log_corrupted)
     }
     pm.mProcessMap.clear();
 
-    SetConsoleText("");
+    if (pm.mArgs->mSimpleConsole == false) {
+        SetConsoleText("");
+    }
 }
 
 static bool g_FileComplete = false;
@@ -558,6 +563,12 @@ void PresentMonEtw(const PresentMonArgs& args)
 
             while (!g_StopRecording)
             {
+#if _DEBUG
+                if (args.mSimpleConsole) {
+                    printf(".");
+                }
+#endif
+
                 presents.clear();
                 newProcesses.clear();
                 deadProcesses.clear();
