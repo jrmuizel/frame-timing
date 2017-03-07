@@ -3,8 +3,6 @@
 //
 
 #include "TraceSession.hpp"
-#include <tchar.h>
-#include <cstdio>
 
 static VOID WINAPI EventRecordCallback(_In_ PEVENT_RECORD pEventRecord)
 {
@@ -72,6 +70,15 @@ bool TraceSession::EnableProvider(const GUID& providerId, UCHAR level, ULONGLONG
     if (_started)
     {
         _status = EnableTraceEx2(_hSession, &providerId, EVENT_CONTROL_CODE_ENABLE_PROVIDER, level, anyKeyword, allKeyword, 0, NULL);
+    }
+    return (_status == ERROR_SUCCESS);
+}
+
+bool TraceSession::CaptureState(const GUID& providerId, UCHAR level, ULONGLONG anyKeyword, ULONGLONG allKeyword)
+{
+    if (_started)
+    {
+        _status = EnableTraceEx2(_hSession, &providerId, EVENT_CONTROL_CODE_CAPTURE_STATE, level, anyKeyword, allKeyword, 0, NULL);
     }
     return (_status == ERROR_SUCCESS);
 }

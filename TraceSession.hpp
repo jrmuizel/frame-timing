@@ -3,19 +3,9 @@
 //
 
 #pragma once
-
-#include <windows.h>
-#include <evntprov.h> // must be after windows.h
-#include <evntrace.h> // must be after windows.h
-#include <evntcons.h> // must be after windows.h
-#include <stdint.h>
+#include "TraceConsumer.hpp"
 
 #undef OpenTrace
-
-struct ITraceConsumer {
-    virtual void OnEventRecord(_In_ PEVENT_RECORD pEventRecord) = 0;
-    virtual bool ContinueProcessing() = 0;
-};
 
 class TraceSession
 {
@@ -27,6 +17,7 @@ public:
 public:
     bool Start();
     bool EnableProvider(const GUID& providerId, UCHAR level, ULONGLONG anyKeyword = 0, ULONGLONG allKeyword = 0);
+    bool CaptureState(const GUID& providerId, UCHAR level, ULONGLONG anyKeyword = 0, ULONGLONG allKeyword = 0);
     bool OpenTrace(ITraceConsumer *pConsumer);
     bool Process();
     bool CloseTrace();
