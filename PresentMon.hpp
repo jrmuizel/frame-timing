@@ -1,24 +1,35 @@
-//--------------------------------------------------------------------------------------
-// Copyright 2015 Intel Corporation
-// All Rights Reserved
-//
-// Permission is granted to use, copy, distribute and prepare derivative works of this
-// software for any purpose and without fee, provided, that the above copyright notice
-// and this statement appear in all copies.  Intel makes no representations about the
-// suitability of this software for any purpose.  THIS SOFTWARE IS PROVIDED "AS IS."
-// INTEL SPECIFICALLY DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, AND ALL LIABILITY,
-// INCLUDING CONSEQUENTIAL AND OTHER INDIRECT DAMAGES, FOR THE USE OF THIS SOFTWARE,
-// INCLUDING LIABILITY FOR INFRINGEMENT OF ANY PROPRIETARY RIGHTS, AND INCLUDING THE
-// WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.  Intel does not
-// assume any responsibility for any errors which may appear in this software nor any
-// responsibility to update it.
-//--------------------------------------------------------------------------------------
+/*
+Copyright 2017 Intel Corporation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
 
 #pragma once
 
 #include "CommonIncludes.hpp"
 #include "PresentMonTraceConsumer.hpp"
 
+// Target:           mTargetProcessName mTargetPid mEtlFileName
+//  All processes    nullptr            0          nullptr
+//  Process by name  process name       0          nullptr
+//  Process by ID    nullptr            pid        nullptr
+//  ETL file         nullptr            0          path
 struct PresentMonArgs {
     const char *mOutputFileName = nullptr;
     const char *mTargetProcessName = nullptr;
@@ -27,9 +38,11 @@ struct PresentMonArgs {
     int mDelay = 0;
     int mTimer = 0;
     int mRestartCount = 0;
+    bool mOutputFile = true;
     bool mScrollLockToggle = false;
     bool mExcludeDropped = false;
     bool mSimple = false;
+    bool mSimpleConsole = false;
     bool mTerminateOnProcExit = false;
     bool mHotkeySupport = false;
 };
@@ -37,7 +50,7 @@ struct PresentMonArgs {
 struct PresentMonData {
     const PresentMonArgs *mArgs = nullptr;
     uint64_t mStartupQpcTime;
-    std::string mOutputFilePath;
+    char mOutputFilePath[MAX_PATH];
     FILE *mOutputFile = nullptr;
     std::map<uint32_t, ProcessInfo> mProcessMap;
     uint32_t mTerminationProcessCount = 0;
