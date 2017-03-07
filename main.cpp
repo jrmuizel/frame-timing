@@ -27,7 +27,6 @@ SOFTWARE.
 #include <thread>
 
 #include "PresentMon.hpp"
-#include "Util.hpp"
 
 static const uint32_t c_Hotkey = 0x80;
 
@@ -166,7 +165,7 @@ int main(int argc, char** argv)
         else ARG2("-etl_file",               args.mEtlFileName         = argv[i])
 
         // Output options
-        else ARG1("-no_csv",                 args.mOutputFileName      = "*")       // will cause file creation to fail
+        else ARG1("-no_csv",                 args.mOutputFile          = false)
         else ARG2("-output_file",            args.mOutputFileName      = argv[i])
 
         // Control and filtering options

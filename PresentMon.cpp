@@ -21,7 +21,6 @@ SOFTWARE.
 */
 
 #include "PresentMon.hpp"
-#include "Util.hpp"
 
 #include <numeric>
 #include <psapi.h>
@@ -44,6 +43,67 @@ static void map_erase_if(Map& m, F pred)
     while ((i = std::find_if(i, m.end(), pred)) != m.end()) {
         m.erase(i++);
     }
+}
+
+static void SetConsoleText(const char *text)
+{
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    enum { MAX_BUFFER = 16384 };
+    char buffer[16384];
+    int bufferSize = 0;
+    auto write = [&](int ch) {
+        if (bufferSize < MAX_BUFFER) {
+            buffer[bufferSize++] = ch;
+        }
+    };
+
+    if (!GetConsoleScreenBufferInfo(hConsole, &csbi))
+    {
+        return;
+    }
+
+    int oldBufferSize = int(csbi.dwSize.X * csbi.dwSize.Y);
+    if (oldBufferSize > MAX_BUFFER) {
+        oldBufferSize = MAX_BUFFER;
+    }
+
+    int x = 0;
+    while (*text) {
+        int repeat = 1;
+        int ch = *text;
+        if (ch == '\t') {
+            ch = ' ';
+            repeat = 4;
+        }
+        else if (ch == '\n') {
+            ch = ' ';
+            repeat = csbi.dwSize.X - x;
+        }
+        for (int i = 0; i < repeat; ++i) {
+            write(ch);
+            if (++x >= csbi.dwSize.X) {
+                x = 0;
+            }
+        }
+        text++;
+    }
+
+    for (int i = bufferSize; i < oldBufferSize; ++i)
+    {
+        write(' ');
+    }
+
+    COORD origin = { 0,0 };
+    DWORD dwCharsWritten;
+    WriteConsoleOutputCharacterA(
+        hConsole,
+        buffer,
+        bufferSize,
+        origin,
+        &dwCharsWritten);
+
+    SetConsoleCursorPosition(hConsole, origin);
 }
 
 static void UpdateProcessInfo_Realtime(ProcessInfo& info, uint64_t now, uint32_t thisPid)
@@ -261,42 +321,53 @@ void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
         pm.mStartupQpcTime = 0;
     }
 
-    if (args.mOutputFileName) {
-		if (!args.mHotkeySupport) {
-			pm.mOutputFilePath = args.mOutputFileName;
-		} else {
-			// Append args.mRestartCount after the filename, before the extension.
-			struct { char drive[_MAX_DRIVE], dir[_MAX_DIR], name[_MAX_FNAME], ext[_MAX_EXT]; } p = {0};
-			_splitpath_s(args.mOutputFileName, p.drive, p.dir, p.name, p.ext);
-			pm.mOutputFilePath = FormatString("%s%s%s-%d%s",
-				p.drive, p.dir, p.name, args.mRestartCount, p.ext[0] ? p.ext : ".csv");
-		}
-    } else {
-        struct tm tm;
-        time_t time_now = time(NULL);
-        localtime_s(&tm, &time_now);
-        std::string date = FormatString("%4d-%02d-%02dT%02d%02d%02d", // ISO 8601
-            tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-            tm.tm_hour, tm.tm_min, tm.tm_sec);
-        std::string path;
-        if (args.mTargetProcessName == nullptr) {
-            pm.mOutputFilePath = FormatString("PresentMon-%s.csv", date.c_str());
+    if (args.mOutputFile) {
+        // Figure out what file name to use:
+        //    FILENAME.EXT                     If FILENAME.EXT specified on command line
+        //    FILENAME-RECORD#.EXT             If FILENAME.EXT specified on command line and -hotkey used
+        //    PresentMon-PROCESSNAME-TIME.csv  If targetting a process by name
+        //    PresentMon-TIME.csv              Otherwise
+        if (args.mOutputFileName) {
+            if (!args.mHotkeySupport) {
+                _snprintf_s(pm.mOutputFilePath, _TRUNCATE, "%s", args.mOutputFileName);
+            } else {
+                char drive[_MAX_DRIVE] = {};
+                char dir[_MAX_DIR] = {};
+                char name[_MAX_FNAME] = {};
+                char ext[_MAX_EXT] = {};
+                _splitpath_s(args.mOutputFileName, drive, dir, name, ext);
+                _snprintf_s(pm.mOutputFilePath, _TRUNCATE, "%s%s%s-%d%s", drive, dir, name, args.mRestartCount, ext);
+            }
         } else {
-            pm.mOutputFilePath = FormatString("PresentMon-%s-%s.csv", args.mTargetProcessName, date.c_str());
-        }
-    }
+            struct tm tm;
+            time_t time_now = time(NULL);
+            localtime_s(&tm, &time_now);
 
-    fopen_s(&pm.mOutputFile, pm.mOutputFilePath.c_str(), "w");
-    if (pm.mOutputFile) {
-        if (!pm.mArgs->mSimple)
-        {
-            fprintf(pm.mOutputFile, "Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,AllowsTearing,PresentFlags,PresentMode,Dropped,TimeInSeconds,"
-                                    "MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\n");
+            if (args.mTargetProcessName == nullptr) {
+                _snprintf_s(pm.mOutputFilePath, _TRUNCATE, "PresentMon-%4d-%02d-%02dT%02d%02d%02d.csv", // ISO 8601
+                    tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                    tm.tm_hour, tm.tm_min, tm.tm_sec);
+            } else {
+                _snprintf_s(pm.mOutputFilePath, _TRUNCATE, "PresentMon-%s-%4d-%02d-%02dT%02d%02d%02d.csv", // ISO 8601
+                    args.mTargetProcessName,
+                    tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+                    tm.tm_hour, tm.tm_min, tm.tm_sec);
+            }
         }
-        else
-        {
-            fprintf(pm.mOutputFile, "Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,"
-                                    "MsBetweenPresents,MsInPresentAPI\n");
+
+        // Open output file and print CSV header
+        fopen_s(&pm.mOutputFile, pm.mOutputFilePath, "w");
+        if (pm.mOutputFile) {
+            if (!pm.mArgs->mSimple)
+            {
+                fprintf(pm.mOutputFile, "Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,AllowsTearing,PresentFlags,PresentMode,Dropped,TimeInSeconds,"
+                                        "MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\n");
+            }
+            else
+            {
+                fprintf(pm.mOutputFile, "Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,"
+                                        "MsBetweenPresents,MsInPresentAPI\n");
+            }
         }
     }
 }
@@ -332,7 +403,7 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
         if (!pm.mArgs->mEtlFileName) {
             UpdateProcessInfo_Realtime(proc.second, now, proc.first);
         }
-        
+
         if (proc.second.mTerminationProcess && !proc.second.mProcessExists) {
             --pm.mTerminationProcessCount;
             if (pm.mTerminationProcessCount == 0) {
@@ -348,31 +419,45 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
             continue;
         }
 
-        display += FormatString("%s[%d]:\n", proc.second.mModuleName.c_str(),proc.first);
+        char str[256] = {};
+        _snprintf_s(str, _TRUNCATE, "%s[%d]:\n", proc.second.mModuleName.c_str(),proc.first);
+        display += str;
         for (auto& chain : proc.second.mChainMap)
         {
             double fps = ComputeFps(chain.second, perfFreq);
-            double dispFps = ComputeDisplayedFps(chain.second, perfFreq);
-            double cpuTime = ComputeCpuFrameTime(chain.second, perfFreq);
-            double latency = ComputeLatency(chain.second, perfFreq);
-            std::string planeString;
-            if (chain.second.mLastPresentMode == PresentMode::Hardware_Composed_Independent_Flip) {
-                planeString = FormatString(": Plane %d", chain.second.mLastPlane);
+
+            _snprintf_s(str, _TRUNCATE, "\t%016llX (%s): SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, ",
+                chain.first,
+                RuntimeToString(chain.second.mRuntime),
+                chain.second.mLastSyncInterval,
+                chain.second.mLastFlags,
+                1000.0/fps,
+                fps);
+            display += str;
+
+            if (!pm.mArgs->mSimple) {
+                _snprintf_s(str, _TRUNCATE, "%.1lf displayed fps, ", ComputeDisplayedFps(chain.second, perfFreq));
+                display += str;
             }
-            if (pm.mArgs->mSimple)
-            {
-                display += FormatString("\t%016llX (%s): SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, %.2lf ms CPU)%s\n",
-                    chain.first, RuntimeToString(chain.second.mRuntime), chain.second.mLastSyncInterval, chain.second.mLastFlags, 1000.0/fps, fps, cpuTime * 1000.0,
-                    (now - chain.second.mLastUpdateTicks) > 1000 ? " [STALE]" : "");
+
+            _snprintf_s(str, _TRUNCATE, "%.2lf ms CPU", ComputeCpuFrameTime(chain.second, perfFreq) * 1000.0);
+            display += str;
+
+            if (!pm.mArgs->mSimple) {
+                _snprintf_s(str, _TRUNCATE, ", %.2lf ms latency) (%s",
+                    1000.0 * ComputeLatency(chain.second, perfFreq),
+                    PresentModeToString(chain.second.mLastPresentMode));
+                display += str;
+
+                if (chain.second.mLastPresentMode == PresentMode::Hardware_Composed_Independent_Flip) {
+                    _snprintf_s(str, _TRUNCATE, ": Plane %d", chain.second.mLastPlane);
+                    display += str;
+                }
             }
-            else
-            {
-                display += FormatString("\t%016llX (%s): SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, %.1lf displayed fps, %.2lf ms CPU, %.2lf ms latency) (%s%s)%s\n",
-                    chain.first, RuntimeToString(chain.second.mRuntime), chain.second.mLastSyncInterval, chain.second.mLastFlags, 1000.0/fps, fps, dispFps, cpuTime * 1000.0, latency * 1000.0,
-                    PresentModeToString(chain.second.mLastPresentMode),
-                    planeString.c_str(),
-                    (now - chain.second.mLastUpdateTicks) > 1000 ? " [STALE]" : "");
-            }
+
+            _snprintf_s(str, _TRUNCATE, ")%s\n",
+                (now - chain.second.mLastUpdateTicks) > 1000 ? " [STALE]" : "");
+            display += str;
         }
     }
 
@@ -386,7 +471,7 @@ void PresentMon_Shutdown(PresentMonData& pm, bool log_corrupted)
     {
         if (log_corrupted) {
             fclose(pm.mOutputFile);
-            fopen_s(&pm.mOutputFile, pm.mOutputFilePath.c_str(), "w");
+            fopen_s(&pm.mOutputFile, pm.mOutputFilePath, "w");
             if (pm.mOutputFile) {
                 fprintf(pm.mOutputFile, "Error: Some ETW packets were lost. Collected data is unreliable.\n");
             }

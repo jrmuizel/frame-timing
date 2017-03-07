@@ -38,6 +38,7 @@ struct PresentMonArgs {
     int mDelay = 0;
     int mTimer = 0;
     int mRestartCount = 0;
+    bool mOutputFile = true;
     bool mScrollLockToggle = false;
     bool mExcludeDropped = false;
     bool mSimple = false;
@@ -48,7 +49,7 @@ struct PresentMonArgs {
 struct PresentMonData {
     const PresentMonArgs *mArgs = nullptr;
     uint64_t mStartupQpcTime;
-    std::string mOutputFilePath;
+    char mOutputFilePath[MAX_PATH];
     FILE *mOutputFile = nullptr;
     std::map<uint32_t, ProcessInfo> mProcessMap;
     uint32_t mTerminationProcessCount = 0;

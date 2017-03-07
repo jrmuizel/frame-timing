@@ -160,7 +160,6 @@
     <ClCompile Include="PresentMonTraceConsumer.cpp" />
     <ClCompile Include="TraceConsumer.cpp" />
     <ClCompile Include="TraceSession.cpp" />
-    <ClCompile Include="Util.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="PresentMon.hpp" />
@@ -168,7 +167,6 @@
     <ClInclude Include="PresentMonTraceConsumer.hpp" />
     <ClInclude Include="TraceConsumer.hpp" />
     <ClInclude Include="TraceSession.hpp" />
-    <ClInclude Include="Util.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
