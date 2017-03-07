@@ -407,7 +407,7 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
         if (proc.second.mTerminationProcess && !proc.second.mProcessExists) {
             --pm.mTerminationProcessCount;
             if (pm.mTerminationProcessCount == 0) {
-                g_Quit = true;
+                QuitPresentMon();
             }
             proc.second.mTerminationProcess = false;
         }

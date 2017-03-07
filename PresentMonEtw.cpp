@@ -39,7 +39,7 @@ struct ProcessTraceConsumer : public ITraceConsumer
     }
 
     virtual void OnEventRecord(_In_ PEVENT_RECORD pEventRecord);
-    virtual bool ContinueProcessing() { return !g_Quit; }
+    virtual bool ContinueProcessing() { return !g_StopRecording; }
 
 private:
     void OnNTProcessEvent(PEVENT_RECORD pEventRecord);
@@ -94,14 +94,14 @@ static void EtwProcessingThread(TraceSession *session)
 
     session->Process();
 
-    // Guarantees that the PM thread does one more loop to pick up any last events before setting g_Quit
+    // Guarantees that the PM thread does one more loop to pick up any last events before calling QuitPresentMon()
     g_FileComplete = true;
 }
 
 void PresentMonEtw(const PresentMonArgs& args)
 {
     Sleep(args.mDelay * 1000);
-    if (g_Quit) {
+    if (g_StopRecording) {
         return;
     }
 
@@ -155,7 +155,7 @@ void PresentMonEtw(const PresentMonArgs& args)
 
             bool log_corrupted = false;
 
-            while (!g_Quit)
+            while (!g_StopRecording)
             {
                 presents.clear();
                 newProcesses.clear();
@@ -192,7 +192,7 @@ void PresentMonEtw(const PresentMonArgs& args)
                 }
 
                 if (g_FileComplete || (args.mTimer > 0 && GetTickCount64() - start_time > args.mTimer * 1000)) {
-                    g_Quit = true;
+                    QuitPresentMon();
                 }
 
                 Sleep(100);

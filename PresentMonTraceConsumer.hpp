@@ -39,7 +39,8 @@ static const auto DWM_PROVIDER_GUID = __uuidof(DWM_PROVIDER_GUID_HOLDER);
 static const auto D3D9_PROVIDER_GUID = __uuidof(D3D9_PROVIDER_GUID_HOLDER);
 static const auto NT_PROCESS_EVENT_GUID = __uuidof(NT_PROCESS_EVENT_GUID_HOLDER);
 
-extern bool g_Quit;
+extern bool g_StopRecording;
+void QuitPresentMon();
 
 template <typename mutex_t> std::unique_lock<mutex_t> scoped_lock(mutex_t &m)
 {
@@ -103,7 +104,7 @@ struct PresentEvent {
     std::deque<std::shared_ptr<PresentEvent>> DependentPresents;
     bool Completed = false;
 #if _DEBUG
-    ~PresentEvent() { assert(Completed || g_Quit); }
+    ~PresentEvent() { assert(Completed || g_StopRecording); }
 #endif
 };
 
@@ -225,7 +226,7 @@ struct PMTraceConsumer : ITraceConsumer
     }
 
     virtual void OnEventRecord(_In_ PEVENT_RECORD pEventRecord);
-    virtual bool ContinueProcessing() { return !g_Quit; }
+    virtual bool ContinueProcessing() { return !g_StopRecording; }
 
 private:
     void CompletePresent(std::shared_ptr<PresentEvent> p);

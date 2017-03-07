@@ -30,80 +30,107 @@ SOFTWARE.
 
 static const uint32_t c_Hotkey = 0x80;
 
-bool g_Quit = false;
-static std::thread *g_PresentMonThread;
-static std::mutex *g_ExitMutex;
+static HWND g_hWnd = 0;
+bool g_StopRecording = false;
 
-bool HaveAdministratorPrivileges();
-void RestartAsAdministrator(int argc, char** argv);
-void SetConsoleTitle(int argc, char** argv);
+static std::mutex g_RecordingMutex;
+static std::thread g_RecordingThread;
+static bool g_IsRecording = false;
 
-void StartPresentMonThread(PresentMonArgs& args)
+static void LockedStartRecording(PresentMonArgs& args)
 {
-    *g_PresentMonThread = std::thread(PresentMonEtw, args);
+    assert(g_IsRecording == false);
+    g_StopRecording = false;
+    g_RecordingThread = std::thread(PresentMonEtw, args);
+    g_IsRecording = true;
 }
 
-BOOL WINAPI HandlerRoutine(
+static void LockedStopRecording()
+{
+    g_StopRecording = true;
+    if (g_RecordingThread.joinable()) {
+        g_RecordingThread.join();
+    }
+    g_IsRecording = false;
+}
+
+static void StartRecording(PresentMonArgs& args)
+{
+    std::lock_guard<std::mutex> lock(g_RecordingMutex);
+    LockedStartRecording(args);
+}
+
+static void StopRecording()
+{
+    std::lock_guard<std::mutex> lock(g_RecordingMutex);
+    if (g_IsRecording) {
+        LockedStopRecording();
+    }
+}
+
+void QuitPresentMon()
+{
+    g_StopRecording = true;
+    PostMessage(g_hWnd, WM_QUIT, 0, 0);
+}
+
+static BOOL WINAPI ConsoleCtrlHandler(
     _In_ DWORD dwCtrlType
     )
 {
-    std::lock_guard<std::mutex> lock(*g_ExitMutex);
-    g_Quit = true;
-    if (g_PresentMonThread && g_PresentMonThread->joinable()) {
-        g_PresentMonThread->join();
-    }
+    QuitPresentMon();
     return TRUE;
 }
 
-LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+static LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-    if (uMsg == WM_HOTKEY && wParam == c_Hotkey)
-    {
+    if (uMsg == WM_HOTKEY && wParam == c_Hotkey) {
         auto& args = *reinterpret_cast<PresentMonArgs*>(GetWindowLongPtrW(hWnd, GWLP_USERDATA));
-        if (g_PresentMonThread->joinable())
-        {
-            HandlerRoutine(CTRL_C_EVENT);
-            g_Quit = false;
+
+        std::lock_guard<std::mutex> lock(g_RecordingMutex);
+        if (g_IsRecording) {
+            LockedStopRecording();
             args.mRestartCount++;
-        }
-        else
-        {
-            StartPresentMonThread(args);
+        } else {
+            LockedStartRecording(args);
         }
     }
 
     return DefWindowProc(hWnd, uMsg, wParam, lParam);
 }
 
-HWND CreateMessageWindow(PresentMonArgs& args)
+static HWND CreateMessageQueue(PresentMonArgs& args)
 {
     WNDCLASSEXW Class = { sizeof(Class) };
     Class.lpfnWndProc = WindowProc;
     Class.lpszClassName = L"PresentMon";
-    if (!RegisterClassExW(&Class))
-    {
-        printf("Failed to register hotkey class.\n");
+    if (!RegisterClassExW(&Class)) {
+        fprintf(stderr, "error: failed to register hotkey class.\n");
         return 0;
     }
 
     HWND hWnd = CreateWindowExW(0, Class.lpszClassName, L"PresentMonWnd", 0, 0, 0, 0, 0, HWND_MESSAGE, 0, 0, nullptr);
-    if (!hWnd)
-    {
-        printf("Failed to create hotkey window.\n");
+    if (!hWnd) {
+        fprintf(stderr, "error: failed to create hotkey window.\n");
         return 0;
     }
 
-    if (!RegisterHotKey(hWnd, c_Hotkey, MOD_NOREPEAT, VK_F11))
-    {
-        printf("Failed to register hotkey.\n");
-        DestroyWindow(hWnd);
-        return 0;
+    if (args.mHotkeySupport) {
+        if (!RegisterHotKey(hWnd, c_Hotkey, MOD_NOREPEAT, VK_F11)) {
+            fprintf(stderr, "error: failed to register hotkey.\n");
+            DestroyWindow(hWnd);
+            return 0;
+        }
     }
 
     SetWindowLongPtrW(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&args));
 
     return hWnd;
 }
+
+bool HaveAdministratorPrivileges();
+void RestartAsAdministrator(int argc, char** argv);
+void SetConsoleTitle(int argc, char** argv);
 
 void PrintHelp()
 {
@@ -214,44 +241,42 @@ int main(int argc, char** argv)
     // Set console title to command line arguments
     SetConsoleTitle(argc, argv);
 
-    // Set CTRL handler to properly shut down when user closes process
-    SetConsoleCtrlHandler(HandlerRoutine, TRUE);
+    // Create a message queue to handle WM_HOTKEY and WM_QUIT messages.
+    HWND hWnd = CreateMessageQueue(args);
+    if (hWnd == 0) {
+        return 3;
+    }
+    g_hWnd = hWnd;  // Store the hWnd in a global for the CTRL handler to use.
+                    // This must be stored before setting the handler.
 
-    std::mutex exit_mutex;
-    g_ExitMutex = &exit_mutex;
+    // Set CTRL handler to capture when the user tries to close the process by
+    // closing the console window or CTRL-C or similar.  The handler will
+    // ignore this and instead post WM_QUIT to our message queue.
+    SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
 
-    // Run PM in a separate thread so we can join it in the CtrlHandler (can't join the main thread)
-    std::thread pm;
-    g_PresentMonThread = &pm;
-
-    if (args.mHotkeySupport)
+    // Now that everything is running we can start recording on the recording
+    // thread.  If we're using -hotkey then we don't start recording until the
+    // user presses the hotkey (F11).
+    if (!args.mHotkeySupport)
     {
-        HWND hWnd = CreateMessageWindow(args);
-        MSG message = {};
-        while (hWnd && !g_Quit)
-        {
-            while (PeekMessageW(&message, hWnd, 0, 0, PM_REMOVE))
-            {
-                TranslateMessage(&message);
-                DispatchMessageW(&message);
-            }
-        }
-    }
-    else
-    {
-        StartPresentMonThread(args);
-        while (!g_Quit)
-        {
-            Sleep(100);
-        }
+        StartRecording(args);
     }
 
-    // Wait for tracing to finish, to ensure the PM thread closes the session correctly
-    // Prevent races on joining the PM thread between the control handler and the main thread
-    std::lock_guard<std::mutex> lock(exit_mutex);
-    if (g_PresentMonThread->joinable()) {
-        g_PresentMonThread->join();
+    // Start the message queue loop, which is the main mechanism for starting
+    // and stopping the recording from the hotkey as well as terminating the
+    // process.
+    //
+    // This thread will block waiting for any messages.
+    for (MSG message = {}; GetMessageW(&message, hWnd, 0, 0); ) {
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
     }
+
+    // Wait for tracing to finish, to ensure the PM thread closes the session
+    // correctly Prevent races on joining the PM thread between the control
+    // handler and the main thread
+    StopRecording();
+
     return 0;
 }
 
