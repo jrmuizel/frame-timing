@@ -27,6 +27,3 @@ SOFTWARE.
 std::string FormatString(const char *fmt, ...);
 void SetConsoleText(const char *text);
 
-bool HaveAdministratorPrivileges(void);
-void RestartAsAdministrator(int argc, char **argv);
-void WaitForProcess(int pid);

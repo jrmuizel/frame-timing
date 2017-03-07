@@ -1,25 +1,8 @@
 # PresentMon
 
-ETW based FPS monitor for DX10+ programs, including Windows Store Apps / UWP Apps.
-
-### command line options:
-
-```html
- -captureall: record ALL processes (default).
- -process_name [exe name]: record specific process.
- -process_id [integer]: record specific process ID.
- -output_file [path]: override the default output path.
- -etl_file [path]: consume events from an ETL file instead of real-time.
- -delay [seconds]: wait before starting to consume events.
- -timed [seconds]: stop listening and exit after a set amount of time.
- -no_csv: do not create any output file.
- -exclude_dropped: exclude dropped presents from the csv output.
- -scroll_toggle: only record events while scroll lock is enabled.
- -simple: disable advanced tracking. try this if you encounter crashes.
- -terminate_on_proc_exit: terminate PresentMon when all instances of the specified process exit.
- -hotkey: use F11 to start and stop listening, writing to a unique file each time.
-          delay kicks in after hotkey (each time), timer starts ticking from hotkey press.
-```
+PresentMon is a tool to extract ETW information related to swap chain
+presentation.  It can be used to trace and analyze frame durations of D3D10+
+applications, including UWP applications.
 
 ## License
 
@@ -42,3 +25,51 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Command line options
+
+```html
+Capture target options (use one of the following):
+    -captureall                Record all processes (default).
+    -process_name [exe name]   Record specific process specified by name.
+    -process_id [integer]      Record specific process specified by ID.
+    -etl_file [path]           Consume events from an ETL file instead of a running process.
+
+Output options:
+    -no_csv                    Do not create any output file.
+    -output_file [path]        Write CSV output to specified path. Otherwise, the default is
+                               PresentMon-PROCESSNAME-TIME.csv.
+
+Control and filtering options:
+    -scroll_toggle             Only record events while scroll lock is enabled.
+    -hotkey                    Use F11 to start and stop recording, writing to a unique file each time.
+    -delay [seconds]           Wait for specified time before starting to record. When using
+                               -hotkey, delay occurs each time recording is started.
+    -timed [seconds]           Stop recording after the specified amount of time.  PresentMon will exit
+                               timer expires.
+    -exclude_dropped           Exclude dropped presents from the csv output.
+    -terminate_on_proc_exit    Terminate PresentMon when all instances of the specified process exit.
+    -simple                    Disable advanced tracking (try this if you encounter crashes).
+    -dont_restart_as_admin     Don't try to elevate privilege.
+```
+
+## Comma-separated value (CSV) file output
+
+| CSV Column Header | CSV Data Description |
+|---|---|
+| Application            | Process name (if known) |
+| ProcessID              | Process ID |
+| SwapChainAddress       | Swap chain address |
+| Runtime                | Swap chain runtime (e.g., D3D9 or DXGI) |
+| SyncInterval           | Sync interval used |
+| AllowsTearing          | Whether tearing possible (1) or not (0) |
+| PresentFlags           | Present flags used |
+| PresentMode            | Present mode |
+| Dropped                | Whether the present was dropped (1) or displayed (0) |
+| TimeInSeconds          | Time since PresentMon recording started |
+| MsBetweenPresents      | Time between this Present() API call and the previous one |
+| MsBetweenDisplayChange | Time between when this frame was displayed, and previous was displayed |
+| MsInPresentAPI         | Time spent inside the Present() API call |
+| MsUntilRenderComplete  | Time between present start and GPU work completion |
+| MsUntilDisplayed       | Time between present start and frame display |
+

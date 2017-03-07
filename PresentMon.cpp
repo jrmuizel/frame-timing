@@ -125,8 +125,7 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
         UpdateProcessInfo_Realtime(proc, now, p.ProcessId);
     }
 
-    if (pm.mArgs->mTargetProcessName && strcmp(pm.mArgs->mTargetProcessName, "*") &&
-        _stricmp(pm.mArgs->mTargetProcessName, proc.mModuleName.c_str())) {
+    if (pm.mArgs->mTargetProcessName != nullptr && _stricmp(pm.mArgs->mTargetProcessName, proc.mModuleName.c_str()) != 0) {
         // process name does not match
         return;
     }
@@ -272,7 +271,7 @@ void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
 			pm.mOutputFilePath = FormatString("%s%s%s-%d%s",
 				p.drive, p.dir, p.name, args.mRestartCount, p.ext[0] ? p.ext : ".csv");
 		}
-    } else if (args.mTargetProcessName) {
+    } else {
         struct tm tm;
         time_t time_now = time(NULL);
         localtime_s(&tm, &time_now);
@@ -280,7 +279,7 @@ void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
             tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
             tm.tm_hour, tm.tm_min, tm.tm_sec);
         std::string path;
-        if (strchr(args.mTargetProcessName, '*')) {
+        if (args.mTargetProcessName == nullptr) {
             pm.mOutputFilePath = FormatString("PresentMon-%s.csv", date.c_str());
         } else {
             pm.mOutputFilePath = FormatString("PresentMon-%s-%s.csv", args.mTargetProcessName, date.c_str());

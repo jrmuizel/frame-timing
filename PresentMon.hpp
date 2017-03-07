@@ -25,6 +25,11 @@ SOFTWARE.
 #include "CommonIncludes.hpp"
 #include "PresentMonTraceConsumer.hpp"
 
+// Target:           mTargetProcessName mTargetPid mEtlFileName
+//  All processes    nullptr            0          nullptr
+//  Process by name  process name       0          nullptr
+//  Process by ID    nullptr            pid        nullptr
+//  ETL file         nullptr            0          path
 struct PresentMonArgs {
     const char *mOutputFileName = nullptr;
     const char *mTargetProcessName = nullptr;
