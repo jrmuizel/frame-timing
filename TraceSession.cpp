@@ -1,6 +1,5 @@
 // Code based on:
 // http://chabster.blogspot.com/2012/10/realtime-etw-consumer-howto.html
-//
 
 #include "TraceSession.hpp"
 
