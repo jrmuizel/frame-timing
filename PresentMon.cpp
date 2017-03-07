@@ -20,6 +20,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+#include "TraceSession.hpp"
+#include "ProcessTraceConsumer.hpp"
 #include "PresentMon.hpp"
 
 #include <numeric>
@@ -485,3 +487,133 @@ void PresentMon_Shutdown(PresentMonData& pm, bool log_corrupted)
 
     SetConsoleText("");
 }
+
+static bool g_FileComplete = false;
+static void EtwProcessingThread(TraceSession *session)
+{
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+
+    session->Process();
+
+    // Guarantees that the PM thread does one more loop to pick up any last events before calling QuitPresentMon()
+    g_FileComplete = true;
+}
+
+void PresentMonEtw(const PresentMonArgs& args)
+{
+    Sleep(args.mDelay * 1000);
+    if (g_StopRecording) {
+        return;
+    }
+
+    g_FileComplete = false;
+    std::wstring fileName(args.mEtlFileName, args.mEtlFileName +
+        (args.mEtlFileName ? strlen(args.mEtlFileName) : 0));
+    std::wstring sessionName(L"PresentMon");
+    TraceSession session(sessionName.c_str(), !fileName.empty() ? fileName.c_str() : nullptr);
+    PMTraceConsumer pmConsumer(args.mSimple);
+    ProcessTraceConsumer procConsumer = {};
+    MultiTraceConsumer mtConsumer = {};
+
+    mtConsumer.AddTraceConsumer(&procConsumer);
+    mtConsumer.AddTraceConsumer(&pmConsumer);
+
+    if (!args.mEtlFileName && !session.Start()) {
+        if (session.Status() == ERROR_ALREADY_EXISTS) {
+            if (!session.Stop() || !session.Start()) {
+                printf("ETW session error. Quitting.\n");
+                exit(0);
+            }
+        }
+    }
+
+    session.EnableProvider(DXGI_PROVIDER_GUID, TRACE_LEVEL_INFORMATION);
+    session.EnableProvider(D3D9_PROVIDER_GUID, TRACE_LEVEL_INFORMATION);
+    if (!args.mSimple)
+    {
+        session.EnableProvider(DXGKRNL_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 1);
+        session.EnableProvider(WIN32K_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 0x1000);
+        session.EnableProvider(DWM_PROVIDER_GUID, TRACE_LEVEL_VERBOSE);
+    }
+
+    session.OpenTrace(&mtConsumer);
+    uint32_t eventsLost, buffersLost;
+
+    {
+        // Launch the ETW producer thread
+        std::thread etwThread(EtwProcessingThread, &session);
+
+        // Consume / Update based on the ETW output
+        {
+            PresentMonData data;
+
+            PresentMon_Init(args, data);
+            uint64_t start_time = GetTickCount64();
+
+            std::vector<std::shared_ptr<PresentEvent>> presents;
+            std::map<uint32_t, ProcessInfo> newProcesses;
+            std::vector<uint32_t> deadProcesses;
+
+            bool log_corrupted = false;
+
+            while (!g_StopRecording)
+            {
+                presents.clear();
+                newProcesses.clear();
+                deadProcesses.clear();
+
+                // If we are reading events from ETL file set start time to match time stamp of first event
+                if (data.mArgs->mEtlFileName && data.mStartupQpcTime == 0)
+                {
+                    data.mStartupQpcTime = mtConsumer.mTraceStartTime;
+                }
+
+                if (args.mEtlFileName) {
+                    procConsumer.GetProcessEvents(newProcesses, deadProcesses);
+                    PresentMon_UpdateNewProcesses(data, newProcesses);
+                }
+
+                pmConsumer.DequeuePresents(presents);
+                if (args.mScrollLockToggle && (GetKeyState(VK_SCROLL) & 1) == 0) {
+                    presents.clear();
+                }
+
+                PresentMon_Update(data, presents, session.PerfFreq());
+                if (session.AnythingLost(eventsLost, buffersLost)) {
+                    printf("Lost %u events, %u buffers.", eventsLost, buffersLost);
+                    // FIXME: How do we set a threshold here?
+                    if (eventsLost > 100) {
+                        log_corrupted = true;
+                        g_FileComplete = true;
+                    }
+                }
+
+                if (args.mEtlFileName) {
+                    PresentMon_UpdateDeadProcesses(data, deadProcesses);
+                }
+
+                if (g_FileComplete || (args.mTimer > 0 && GetTickCount64() - start_time > args.mTimer * 1000)) {
+                    QuitPresentMon();
+                }
+
+                Sleep(100);
+            }
+
+            PresentMon_Shutdown(data, log_corrupted);
+        }
+
+        etwThread.join();
+    }
+
+    session.CloseTrace();
+    session.DisableProvider(DXGI_PROVIDER_GUID);
+    session.DisableProvider(D3D9_PROVIDER_GUID);
+    if (!args.mSimple)
+    {
+        session.DisableProvider(DXGKRNL_PROVIDER_GUID);
+        session.DisableProvider(WIN32K_PROVIDER_GUID);
+        session.DisableProvider(DWM_PROVIDER_GUID);
+    }
+    session.Stop();
+}
+

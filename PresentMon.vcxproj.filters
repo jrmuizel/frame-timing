@@ -3,13 +3,17 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="PresentMon.cpp" />
-    <ClCompile Include="PresentMonEtw.cpp" />
     <ClCompile Include="TraceSession.cpp" />
-    <ClCompile Include="Util.cpp" />
+    <ClCompile Include="PresentMonTraceConsumer.cpp" />
+    <ClCompile Include="TraceConsumer.cpp" />
+    <ClCompile Include="ProcessTraceConsumer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="PresentMon.hpp" />
     <ClInclude Include="TraceSession.hpp" />
-    <ClInclude Include="Util.hpp" />
+    <ClInclude Include="CommonIncludes.hpp" />
+    <ClInclude Include="PresentMonTraceConsumer.hpp" />
+    <ClInclude Include="TraceConsumer.hpp" />
+    <ClInclude Include="ProcessTraceConsumer.hpp" />
   </ItemGroup>
 </Project>

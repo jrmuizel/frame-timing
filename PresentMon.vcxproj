@@ -155,9 +155,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
-    <ClCompile Include="PresentMonEtw.cpp" />
     <ClCompile Include="PresentMon.cpp" />
     <ClCompile Include="PresentMonTraceConsumer.cpp" />
+    <ClCompile Include="ProcessTraceConsumer.cpp" />
     <ClCompile Include="TraceConsumer.cpp" />
     <ClCompile Include="TraceSession.cpp" />
   </ItemGroup>
@@ -165,6 +165,7 @@
     <ClInclude Include="PresentMon.hpp" />
     <ClInclude Include="CommonIncludes.hpp" />
     <ClInclude Include="PresentMonTraceConsumer.hpp" />
+    <ClInclude Include="ProcessTraceConsumer.hpp" />
     <ClInclude Include="TraceConsumer.hpp" />
     <ClInclude Include="TraceSession.hpp" />
   </ItemGroup>
