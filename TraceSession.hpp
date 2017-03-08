@@ -13,6 +13,9 @@ public:
     TraceSession(const wchar_t* szSessionName, const wchar_t* szFileName);
     ~TraceSession();
 
+    TraceSession(const TraceSession&) = delete;
+    TraceSession& operator=(const TraceSession&) = delete;
+
 public:
     bool Start();
     bool EnableProvider(const GUID& providerId, UCHAR level, ULONGLONG anyKeyword = 0, ULONGLONG allKeyword = 0);

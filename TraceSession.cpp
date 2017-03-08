@@ -15,7 +15,7 @@ static ULONG WINAPI BufferRecordCallback(_In_ PEVENT_TRACE_LOGFILE Buffer)
 
 TraceSession::TraceSession(const wchar_t* szSessionName, const wchar_t* szFileName)
     : _szSessionName(_wcsdup(szSessionName))
-    , _szFileName(_wcsdup(szFileName))
+    , _szFileName(szFileName == nullptr ? nullptr : _wcsdup(szFileName))
     , _status(0)
     , _pSessionProperties(0)
     , _hSession(0)
@@ -29,6 +29,7 @@ TraceSession::TraceSession(const wchar_t* szSessionName, const wchar_t* szFileNa
 TraceSession::~TraceSession(void)
 {
     free(_szSessionName);
+    free(_szFileName);
     free(_pSessionProperties);
 }
 
@@ -41,6 +42,10 @@ bool TraceSession::Start()
         size_t fileNameBytes = _szFileName ? (wcslen(_szFileName) + 1) * sizeof(wchar_t) : 0;
         size_t buffSize = sizeof(EVENT_TRACE_PROPERTIES) + sessionNameBytes + fileNameBytes;
         _pSessionProperties = reinterpret_cast<EVENT_TRACE_PROPERTIES *>(malloc(buffSize));
+        if (_pSessionProperties == nullptr) {
+            return false;
+        }
+
         ZeroMemory(_pSessionProperties, buffSize);
         _pSessionProperties->Wnode.BufferSize = ULONG(buffSize);
         _pSessionProperties->Wnode.ClientContext = 1;

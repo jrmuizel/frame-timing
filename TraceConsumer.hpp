@@ -37,8 +37,9 @@ struct ITraceConsumer {
 class TraceEventInfo
 {
 public:
-    TraceEventInfo(PEVENT_RECORD pEvent)
-        : pEvent(pEvent) {
+    explicit TraceEventInfo(PEVENT_RECORD pEvent)
+        : pInfo(nullptr)
+        , pEvent(pEvent) {
         unsigned long bufferSize = 0;
         auto result = TdhGetEventInformation(pEvent, 0, nullptr, nullptr, &bufferSize);
         if (result == ERROR_INSUFFICIENT_BUFFER) {
@@ -51,19 +52,6 @@ public:
     }
     TraceEventInfo(const TraceEventInfo&) = delete;
     TraceEventInfo& operator=(const TraceEventInfo&) = delete;
-    TraceEventInfo(TraceEventInfo&& o) {
-        *this = std::move(o);
-    }
-    TraceEventInfo& operator=(TraceEventInfo&& o) {
-        if (pInfo) {
-            operator delete(pInfo);
-        }
-        pInfo = o.pInfo;
-        pEvent = o.pEvent;
-        o.pInfo = nullptr;
-        return *this;
-    }
-
     ~TraceEventInfo() {
         operator delete(pInfo);
         pInfo = nullptr;
@@ -115,12 +103,9 @@ private:
 
 class MultiTraceConsumer : public ITraceConsumer
 {
-
 public:
-    void AddTraceConsumer(ITraceConsumer* pConsumer)
-    {
-        if (pConsumer != nullptr)
-        {
+    void AddTraceConsumer(ITraceConsumer* pConsumer) {
+        if (pConsumer != nullptr) {
             mTraceConsumers.push_back(pConsumer);
         }
     }
