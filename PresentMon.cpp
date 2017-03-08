@@ -512,14 +512,26 @@ void PresentMonEtw(const PresentMonArgs& args)
     }
 
     g_FileComplete = false;
-    std::wstring fileName(args.mEtlFileName, args.mEtlFileName +
-        (args.mEtlFileName ? strlen(args.mEtlFileName) : 0));
-    std::wstring sessionName(L"PresentMon");
-    TraceSession session(sessionName.c_str(), !fileName.empty() ? fileName.c_str() : nullptr);
+
+    // Convert ETL Filename to wchar_t if it exists, and construct a
+    // TraceSession.
+    wchar_t* wEtlFileName = nullptr;
+    if (args.mEtlFileName != nullptr) {
+        auto size = strlen(args.mEtlFileName) + 1;
+        wEtlFileName = new wchar_t [size];
+        mbstowcs_s(&size, wEtlFileName, size, args.mEtlFileName, size - 1);
+    }
+
+    TraceSession session(L"PresentMon", wEtlFileName);
+
+    delete[] wEtlFileName;
+    wEtlFileName = nullptr;
+
+
     PMTraceConsumer pmConsumer(args.mSimple);
     ProcessTraceConsumer procConsumer = {};
-    MultiTraceConsumer mtConsumer = {};
 
+    MultiTraceConsumer mtConsumer = {};
     mtConsumer.AddTraceConsumer(&procConsumer);
     mtConsumer.AddTraceConsumer(&pmConsumer);
 

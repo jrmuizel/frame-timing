@@ -223,9 +223,9 @@ int main(int argc, char** argv)
     }
 
     // Validate command line arguments
-    if ((args.mTargetProcessName == nullptr ? 0 : 1) +
-        (args.mTargetPid         <= 0       ? 0 : 1) +
-        (args.mEtlFileName       == nullptr ? 0 : 1) > 1) {
+    if (((args.mTargetProcessName == nullptr) ? 0 : 1) +
+        ((args.mTargetPid         <= 0      ) ? 0 : 1) +
+        ((args.mEtlFileName       == nullptr) ? 0 : 1) > 1) {
         fprintf(stderr, "error: only specify one of -captureall, -process_name, -process_id, or -etl_file.\n");
         PrintHelp();
         return 1;

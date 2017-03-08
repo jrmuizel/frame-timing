@@ -635,7 +635,9 @@ void PMTraceConsumer::OnD3D9Event(PEVENT_RECORD pEventRecord)
             ((D3D9Flags & D3DPRESENT_DONOTFLIP) ? DXGI_PRESENT_DO_NOT_SEQUENCE : 0) |
             ((D3D9Flags & D3DPRESENT_DONOTWAIT) ? DXGI_PRESENT_DO_NOT_WAIT : 0) |
             ((D3D9Flags & D3DPRESENT_FLIPRESTART) ? DXGI_PRESENT_RESTART : 0);
-        event.SyncInterval = (D3D9Flags & D3DPRESENT_FORCEIMMEDIATE) ? 0 : event.SyncInterval;
+        if ((D3D9Flags & D3DPRESENT_FORCEIMMEDIATE) != 0) {
+            event.SyncInterval = 0;
+        }
         event.Runtime = Runtime::D3D9;
 
         RuntimePresentStart(pEventRecord, event);
