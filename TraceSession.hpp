@@ -1,6 +1,5 @@
 // Code based on:
 // http://chabster.blogspot.com/2012/10/realtime-etw-consumer-howto.html
-//
 
 #pragma once
 #include "TraceConsumer.hpp"
@@ -13,6 +12,9 @@ class TraceSession
 public:
     TraceSession(const wchar_t* szSessionName, const wchar_t* szFileName);
     ~TraceSession();
+
+    TraceSession(const TraceSession&) = delete;
+    TraceSession& operator=(const TraceSession&) = delete;
 
 public:
     bool Start();
