@@ -156,6 +156,7 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="PresentMon.cpp" />
+    <ClCompile Include="SwapChainData.cpp" />
     <ClCompile Include="PresentMonTraceConsumer.cpp" />
     <ClCompile Include="ProcessTraceConsumer.cpp" />
     <ClCompile Include="TraceConsumer.cpp" />
@@ -164,6 +165,7 @@
   <ItemGroup>
     <ClInclude Include="PresentMon.hpp" />
     <ClInclude Include="CommonIncludes.hpp" />
+    <ClInclude Include="SwapChainData.hpp" />
     <ClInclude Include="PresentMonTraceConsumer.hpp" />
     <ClInclude Include="ProcessTraceConsumer.hpp" />
     <ClInclude Include="TraceConsumer.hpp" />
