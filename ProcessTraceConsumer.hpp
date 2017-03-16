@@ -27,6 +27,15 @@ SOFTWARE.
 
 #include "TraceConsumer.hpp"
 #include "PresentMonTraceConsumer.hpp"
+#include "SwapChainData.hpp"
+
+struct ProcessInfo {
+    uint64_t mLastRefreshTicks = 0; // GetTickCount64
+    std::string mModuleName;
+    std::map<uint64_t, SwapChainData> mChainMap;
+    bool mTerminationProcess;
+    bool mProcessExists = false;
+};
 
 struct ProcessTraceConsumer : public ITraceConsumer
 {

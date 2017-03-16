@@ -21,22 +21,14 @@ SOFTWARE.
 */
 
 #include "TraceSession.hpp"
-#include "ProcessTraceConsumer.hpp"
 #include "PresentMon.hpp"
 
-#include <numeric>
 #include <psapi.h>
 #include <shlwapi.h>
 
 #pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "tdh.lib")
-
-enum {
-    MAX_HISTORY_TIME = 2000,
-    CHAIN_TIMEOUT_THRESHOLD_TICKS = 10000, // 10 sec
-    MAX_PRESENTS_IN_DEQUE = 60*(MAX_HISTORY_TIME/1000)
-};
 
 template <typename Map, typename F>
 static void map_erase_if(Map& m, F pred)
@@ -133,8 +125,8 @@ static void UpdateProcessInfo_Realtime(ProcessInfo& info, uint64_t now, uint32_t
         }
     }
     // remove chains without recent updates
-    map_erase_if(info.mChainMap, [now](const std::pair<const uint64_t, SwapChainData>& entry) {
-        return now - entry.second.mLastUpdateTicks > CHAIN_TIMEOUT_THRESHOLD_TICKS;
+        map_erase_if(info.mChainMap, [now](const std::pair<const uint64_t, SwapChainData>& entry) {
+        return entry.second.IsStale(now);
     });
 }
 
@@ -172,14 +164,6 @@ const char* FinalStateToDroppedString(PresentResult res)
     }
 }
 
-void PruneDeque(std::deque<PresentEvent> &presentHistory, uint64_t perfFreq, uint32_t msTimeDiff, uint32_t maxHistLen) {
-    while (!presentHistory.empty() &&
-        (presentHistory.size() > maxHistLen ||
-           ((double)(presentHistory.back().QpcTime - presentHistory.front().QpcTime) / perfFreq) * 1000 > msTimeDiff)) {
-        presentHistory.pop_front();
-    }
-}
-
 void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perfFreq)
 {
     auto& proc = pm.mProcessMap[p.ProcessId];
@@ -201,17 +185,8 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
     }
 
     auto& chain = proc.mChainMap[p.SwapChainAddress];
-
-    if (p.FinalState == PresentResult::Presented)
-    {
-        chain.mDisplayedPresentHistory.push_back(p);
-    }
-    if (!chain.mPresentHistory.empty())
-    {
-        assert(chain.mPresentHistory.back().QpcTime <= p.QpcTime);
-    }
-    chain.mPresentHistory.push_back(p);
-
+    chain.AddPresentToSwapChain(p);
+    
     if (pm.mOutputFile && (p.FinalState == PresentResult::Presented || !pm.mArgs->mExcludeDropped)) {
         auto len = chain.mPresentHistory.size();
         auto displayedLen = chain.mDisplayedPresentHistory.size();
@@ -248,64 +223,7 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
         }
     }
 
-    PruneDeque(chain.mDisplayedPresentHistory, perfFreq, MAX_HISTORY_TIME, MAX_PRESENTS_IN_DEQUE);
-    PruneDeque(chain.mPresentHistory, perfFreq, MAX_HISTORY_TIME, MAX_PRESENTS_IN_DEQUE);
-
-    chain.mLastUpdateTicks = now;
-    chain.mRuntime = p.Runtime;
-    chain.mLastSyncInterval = p.SyncInterval;
-    chain.mLastFlags = p.PresentFlags;
-    chain.mLastPresentMode = p.PresentMode;
-    chain.mLastPlane = p.PlaneIndex;
-}
-
-static double ComputeFps(const std::deque<PresentEvent>& presentHistory, uint64_t qpcFreq)
-{
-    if (presentHistory.size() < 2) {
-        return 0.0;
-    }
-    auto start = presentHistory.front().QpcTime;
-    auto end = presentHistory.back().QpcTime;
-    auto count = presentHistory.size() - 1;
-
-    double deltaT = double(end - start) / qpcFreq;
-    return count / deltaT;
-}
-
-static double ComputeDisplayedFps(SwapChainData& stats, uint64_t qpcFreq)
-{
-    return ComputeFps(stats.mDisplayedPresentHistory, qpcFreq);
-}
-
-static double ComputeFps(SwapChainData& stats, uint64_t qpcFreq)
-{
-    return ComputeFps(stats.mPresentHistory, qpcFreq);
-}
-
-static double ComputeLatency(SwapChainData& stats, uint64_t qpcFreq)
-{
-    if (stats.mDisplayedPresentHistory.size() < 2) {
-        return 0.0;
-    }
-
-    uint64_t totalLatency = std::accumulate(stats.mDisplayedPresentHistory.begin(), stats.mDisplayedPresentHistory.end() - 1, 0ull,
-                                   [](uint64_t current, PresentEvent const& e) { return current + e.ScreenTime - e.QpcTime; });
-    double average = ((double)(totalLatency) / qpcFreq) / (stats.mDisplayedPresentHistory.size() - 1);
-    return average;
-}
-
-static double ComputeCpuFrameTime(SwapChainData& stats, uint64_t qpcFreq)
-{
-    if (stats.mPresentHistory.size() < 2) {
-        return 0.0;
-    }
-    
-    uint64_t timeInPresent = std::accumulate(stats.mPresentHistory.begin(), stats.mPresentHistory.end() - 1, 0ull,
-                                   [](uint64_t current, PresentEvent const& e) { return current + e.TimeTaken; });
-    uint64_t totalTime = stats.mPresentHistory.back().QpcTime - stats.mPresentHistory.front().QpcTime;
-    
-    double timeNotInPresent = double(totalTime - timeInPresent) / qpcFreq;
-    return timeNotInPresent / (stats.mPresentHistory.size() - 1);
+    chain.UpdateSwapChainInfo(p, now, perfFreq);
 }
 
 void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
@@ -427,7 +345,7 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
         display += str;
         for (auto& chain : proc.second.mChainMap)
         {
-            double fps = ComputeFps(chain.second, perfFreq);
+            double fps = chain.second.ComputeFps(perfFreq);
 
             _snprintf_s(str, _TRUNCATE, "\t%016llX (%s): SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, ",
                 chain.first,
@@ -439,16 +357,16 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
             display += str;
 
             if (!pm.mArgs->mSimple) {
-                _snprintf_s(str, _TRUNCATE, "%.1lf displayed fps, ", ComputeDisplayedFps(chain.second, perfFreq));
+                _snprintf_s(str, _TRUNCATE, "%.1lf displayed fps, ", chain.second.ComputeDisplayedFps(perfFreq));
                 display += str;
             }
 
-            _snprintf_s(str, _TRUNCATE, "%.2lf ms CPU", ComputeCpuFrameTime(chain.second, perfFreq) * 1000.0);
+            _snprintf_s(str, _TRUNCATE, "%.2lf ms CPU", chain.second.ComputeCpuFrameTime(perfFreq) * 1000.0);
             display += str;
 
             if (!pm.mArgs->mSimple) {
                 _snprintf_s(str, _TRUNCATE, ", %.2lf ms latency) (%s",
-                    1000.0 * ComputeLatency(chain.second, perfFreq),
+                    1000.0 * chain.second.ComputeLatency(perfFreq),
                     PresentModeToString(chain.second.mLastPresentMode));
                 display += str;
 

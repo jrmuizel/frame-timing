@@ -24,6 +24,7 @@ SOFTWARE.
 
 #include "CommonIncludes.hpp"
 #include "PresentMonTraceConsumer.hpp"
+#include "ProcessTraceConsumer.hpp"
 
 // Target:           mTargetProcessName mTargetPid mEtlFileName
 //  All processes    nullptr            0          nullptr

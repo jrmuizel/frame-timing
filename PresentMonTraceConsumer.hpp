@@ -71,6 +71,10 @@ enum class Runtime
     DXGI, D3D9, Other
 };
 
+const char* PresentModeToString(PresentMode mode);
+const char* RuntimeToString(Runtime rt);
+const char* FinalStateToDroppedString(PresentResult res);
+
 struct PresentEvent {
     // Available from DXGI Present
     uint64_t QpcTime = 0;
@@ -106,25 +110,6 @@ struct PresentEvent {
 #if _DEBUG
     ~PresentEvent() { assert(Completed || g_StopRecording); }
 #endif
-};
-
-struct SwapChainData {
-    Runtime mRuntime = Runtime::Other;
-    uint64_t mLastUpdateTicks = 0;
-    uint32_t mLastSyncInterval = -1;
-    uint32_t mLastFlags = -1;
-    std::deque<PresentEvent> mPresentHistory;
-    std::deque<PresentEvent> mDisplayedPresentHistory;
-    PresentMode mLastPresentMode = PresentMode::Unknown;
-    uint32_t mLastPlane = 0;
-};
-
-struct ProcessInfo {
-    uint64_t mLastRefreshTicks = 0; // GetTickCount64
-    std::string mModuleName;
-    std::map<uint64_t, SwapChainData> mChainMap;
-    bool mTerminationProcess;
-    bool mProcessExists = false;
 };
 
 struct PMTraceConsumer : ITraceConsumer
