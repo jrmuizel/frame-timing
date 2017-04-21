@@ -246,6 +246,27 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             eventIter->second->PresentMode = PresentMode::Hardware_Composed_Independent_Flip;
         }
 
+        if (hdr.EventDescriptor.Version >= 2)
+        {
+            enum class DxgKrnl_MMIOFlipMPO_FlipEntryStatus {
+                FlipWaitVSync = 5,
+                FlipWaitComplete = 11,
+                // There are others, but they're more complicated to deal with.
+            };
+
+            auto FlipEntryStatusAfterFlip = eventInfo.GetData<DxgKrnl_MMIOFlipMPO_FlipEntryStatus>(L"FlipEntryStatusAfterFlip");
+            if (FlipEntryStatusAfterFlip != DxgKrnl_MMIOFlipMPO_FlipEntryStatus::FlipWaitVSync) {
+                eventIter->second->FinalState = PresentResult::Presented;
+                eventIter->second->SupportsTearing = true;
+                if (FlipEntryStatusAfterFlip == DxgKrnl_MMIOFlipMPO_FlipEntryStatus::FlipWaitComplete) {
+                    eventIter->second->ScreenTime = *(uint64_t*)&pEventRecord->EventHeader.TimeStamp;
+                }
+                if (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Flip) {
+                    CompletePresent(eventIter->second);
+                }
+            }
+        }
+
         break;
     }
     case DxgKrnl_VSyncDPC:
@@ -741,7 +762,7 @@ decltype(PMTraceConsumer::mPresentByThreadId.begin()) PMTraceConsumer::FindOrCre
     // Easy: we're on a thread that had some step in the present process
     auto eventIter = mPresentByThreadId.find(pEventRecord->EventHeader.ThreadId);
     if (eventIter != mPresentByThreadId.end()) {
-        if (eventIter->second->PresentMode != PresentMode::Unknown) {
+        if (eventIter->second->Completed) {
             mPresentByThreadId.erase(eventIter);
         }
         else {
