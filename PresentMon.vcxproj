@@ -154,6 +154,7 @@
     <Manifest />
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="CommandLine.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="PresentMon.cpp" />
     <ClCompile Include="SwapChainData.cpp" />
@@ -163,6 +164,7 @@
     <ClCompile Include="TraceSession.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="CommandLine.hpp" />
     <ClInclude Include="PresentMon.hpp" />
     <ClInclude Include="CommonIncludes.hpp" />
     <ClInclude Include="SwapChainData.hpp" />

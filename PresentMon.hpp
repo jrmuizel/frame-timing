@@ -22,34 +22,13 @@ SOFTWARE.
 
 #pragma once
 
+#include "CommandLine.hpp"
 #include "CommonIncludes.hpp"
 #include "PresentMonTraceConsumer.hpp"
 #include "ProcessTraceConsumer.hpp"
 
-// Target:           mTargetProcessName mTargetPid mEtlFileName
-//  All processes    nullptr            0          nullptr
-//  Process by name  process name       0          nullptr
-//  Process by ID    nullptr            pid        nullptr
-//  ETL file         nullptr            0          path
-struct PresentMonArgs {
-    const char *mOutputFileName = nullptr;
-    const char *mTargetProcessName = nullptr;
-    const char *mEtlFileName = nullptr;
-    int mTargetPid = 0;
-    int mDelay = 0;
-    int mTimer = 0;
-    int mRestartCount = 0;
-    bool mOutputFile = true;
-    bool mScrollLockToggle = false;
-    bool mExcludeDropped = false;
-    bool mSimple = false;
-    bool mSimpleConsole = false;
-    bool mTerminateOnProcExit = false;
-    bool mHotkeySupport = false;
-};
-
 struct PresentMonData {
-    const PresentMonArgs *mArgs = nullptr;
+    const CommandLineArgs *mArgs = nullptr;
     uint64_t mStartupQpcTime;
     char mOutputFilePath[MAX_PATH];
     FILE *mOutputFile = nullptr;
@@ -57,9 +36,9 @@ struct PresentMonData {
     uint32_t mTerminationProcessCount = 0;
 };
 
-void PresentMonEtw(const PresentMonArgs& args);
+void PresentMonEtw(const CommandLineArgs& args);
 
-void PresentMon_Init(const PresentMonArgs& args, PresentMonData& data);
+void PresentMon_Init(const CommandLineArgs& args, PresentMonData& data);
 void PresentMon_UpdateNewProcesses(PresentMonData& data, std::map<uint32_t, ProcessInfo>& processes);
 void PresentMon_Update(PresentMonData& data, std::vector<std::shared_ptr<PresentEvent>>& presents, uint64_t perfFreq);
 void PresentMon_UpdateDeadProcesses(PresentMonData& data, std::vector<uint32_t>& processIds);

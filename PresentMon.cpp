@@ -226,7 +226,7 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
     chain.UpdateSwapChainInfo(p, now, perfFreq);
 }
 
-void PresentMon_Init(const PresentMonArgs& args, PresentMonData& pm)
+void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
 {
     pm.mArgs = &args;
 
@@ -422,7 +422,7 @@ static void EtwProcessingThread(TraceSession *session)
     g_FileComplete = true;
 }
 
-void PresentMonEtw(const PresentMonArgs& args)
+void PresentMonEtw(const CommandLineArgs& args)
 {
     Sleep(args.mDelay * 1000);
     if (g_StopRecording) {
