@@ -36,10 +36,36 @@ namespace {
 const uint32_t c_Hotkey = 0x80;
 
 HWND g_hWnd = 0;
+bool g_originalScrollLockEnabled = false;
 
 std::mutex g_RecordingMutex;
 std::thread g_RecordingThread;
 bool g_IsRecording = false;
+
+bool EnableScrollLock(bool enable)
+{
+    auto enabled = (GetKeyState(VK_SCROLL) & 1) == 1;
+    if (enabled != enable) {
+        auto extraInfo = GetMessageExtraInfo();
+        INPUT input[2] = {};
+
+        input[0].type = INPUT_KEYBOARD;
+        input[0].ki.wVk = VK_SCROLL;
+        input[0].ki.dwExtraInfo = extraInfo;
+
+        input[1].type = INPUT_KEYBOARD;
+        input[1].ki.wVk = VK_SCROLL;
+        input[1].ki.dwFlags = KEYEVENTF_KEYUP;
+        input[1].ki.dwExtraInfo = extraInfo;
+
+        auto sendCount = SendInput(2, input, sizeof(INPUT));
+        if (sendCount != 2) {
+            fprintf(stderr, "warning: could not toggle scroll lock.\n");
+        }
+    }
+
+    return enabled;
+}
 
 void LockedStartRecording(CommandLineArgs& args)
 {
@@ -51,10 +77,16 @@ void LockedStartRecording(CommandLineArgs& args)
     if (args.mSimpleConsole) {
         printf("Started recording.\n");
     }
+    if (args.mScrollLockIndicator) {
+        EnableScrollLock(true);
+    }
 }
 
 void LockedStopRecording(CommandLineArgs const& args)
 {
+    if (args.mScrollLockIndicator) {
+        EnableScrollLock(false);
+    }
     if (args.mSimpleConsole) {
         printf("Stopping recording.\n");
     }
@@ -207,27 +239,36 @@ int main(int argc, char** argv)
         return 2;
     }
 
+    int ret = 0;
+
     // Set console title to command line arguments
     SetConsoleTitle(argc, argv);
+
+    // If the user wants to use the scroll lock key as an indicator of when
+    // present mon is recording events, make sure it is disabled to start.
+    if (args.mScrollLockIndicator) {
+        g_originalScrollLockEnabled = EnableScrollLock(false);
+    }
 
     // Create a message queue to handle WM_HOTKEY and WM_QUIT messages.
     HWND hWnd = CreateMessageQueue(args);
     if (hWnd == 0) {
-        return 3;
+        ret = 3;
+        goto clean_up;
     }
-    g_hWnd = hWnd;  // Store the hWnd in a global for the CTRL handler to use.
-                    // This must be stored before setting the handler.
 
     // Set CTRL handler to capture when the user tries to close the process by
     // closing the console window or CTRL-C or similar.  The handler will
     // ignore this and instead post WM_QUIT to our message queue.
+    //
+    // We must set g_hWnd before setting the handler.
+    g_hWnd = hWnd;
     SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
 
     // Now that everything is running we can start recording on the recording
     // thread.  If we're using -hotkey then we don't start recording until the
     // user presses the hotkey (F11).
-    if (!args.mHotkeySupport)
-    {
+    if (!args.mHotkeySupport) {
         StartRecording(args);
     }
 
@@ -246,5 +287,11 @@ int main(int argc, char** argv)
     // handler and the main thread
     StopRecording(args);
 
-    return 0;
+clean_up:
+    // Restore original scroll lock state
+    if (args.mScrollLockIndicator) {
+        EnableScrollLock(g_originalScrollLockEnabled);
+    }
+
+    return ret;
 }

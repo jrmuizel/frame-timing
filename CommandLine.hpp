@@ -40,6 +40,7 @@ struct CommandLineArgs {
     UINT mHotkeyVirtualKeyCode = VK_F11;
     bool mOutputFile = true;
     bool mScrollLockToggle = false;
+    bool mScrollLockIndicator = false;
     bool mExcludeDropped = false;
     bool mSimple = false;
     bool mSimpleConsole = false;

@@ -42,6 +42,7 @@ Output options:
 
 Control and filtering options:
     -scroll_toggle             Only record events while scroll lock is enabled.
+    -scroll_indicator          Set scroll lock while recording events.
     -hotkey [key]              Use specified key to start and stop recording, writing to a
                                unique file each time (default is F11).
     -delay [seconds]           Wait for specified time before starting to record. When using

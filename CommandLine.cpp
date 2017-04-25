@@ -227,6 +227,7 @@ void PrintHelp()
         "\n"
         "Control and filtering options:\n"
         "    -scroll_toggle             Only record events while scroll lock is enabled.\n"
+        "    -scroll_indicator          Set scroll lock while recording events.\n"
         "    -hotkey [key]              Use specified key to start and stop recording, writing to a\n"
         "                               unique file each time (default is F11).\n"
         "    -delay [seconds]           Wait for specified time before starting to record. When using\n"
@@ -274,6 +275,7 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
         // Control and filtering options
         else ARG1("-hotkey",                 AssignHotkey(&i, argc, argv, args))
         else ARG1("-scroll_toggle",          args->mScrollLockToggle    = true)
+        else ARG1("-scroll_indicator",       args->mScrollLockIndicator = true)
         else ARG2("-delay",                  args->mDelay               = atoi(argv[i]))
         else ARG2("-timed",                  args->mTimer               = atoi(argv[i]))
         else ARG1("-exclude_dropped",        args->mExcludeDropped      = true)
