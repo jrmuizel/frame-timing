@@ -122,7 +122,7 @@ HWND CreateMessageQueue(CommandLineArgs& args)
     }
 
     if (args.mHotkeySupport) {
-        if (!RegisterHotKey(hWnd, c_Hotkey, MOD_NOREPEAT, VK_F11)) {
+        if (!RegisterHotKey(hWnd, c_Hotkey, args.mHotkeyModifiers, args.mHotkeyVirtualKeyCode)) {
             fprintf(stderr, "error: failed to register hotkey.\n");
             DestroyWindow(hWnd);
             return 0;

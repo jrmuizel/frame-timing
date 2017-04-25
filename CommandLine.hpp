@@ -21,6 +21,7 @@ SOFTWARE.
 */
 
 #pragma once
+#include <windows.h>
 
 // Target:           mTargetProcessName mTargetPid mEtlFileName
 //  All processes    nullptr            0          nullptr
@@ -35,6 +36,8 @@ struct CommandLineArgs {
     int mDelay = 0;
     int mTimer = 0;
     int mRestartCount = 0;
+    UINT mHotkeyModifiers = MOD_NOREPEAT;
+    UINT mHotkeyVirtualKeyCode = VK_F11;
     bool mOutputFile = true;
     bool mScrollLockToggle = false;
     bool mExcludeDropped = false;

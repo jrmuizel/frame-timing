@@ -48,6 +48,166 @@ bool CombineArguments(
     return true;
 }
 
+bool ParseModifier(char* arg, UINT* inoutModifier)
+{
+    struct {
+        char const* arg;
+        UINT modifier;
+    } options[] = {
+        { "alt",     MOD_ALT     },
+        { "control", MOD_CONTROL },
+        { "ctrl",    MOD_CONTROL },
+        { "shift",   MOD_SHIFT   },
+        { "sh",      MOD_SHIFT   },
+        { "windows", MOD_WIN     },
+        { "win",     MOD_WIN     },
+    };
+
+    for (size_t i = 0, N = _countof(options); i < N; ++i) {
+        if (_stricmp(arg, options[i].arg) == 0) {
+            *inoutModifier |= options[i].modifier;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool ParseKeyCode(char* arg, UINT* outKeyCode)
+{
+#define CHECK_KEY(_Arg, _Code) \
+    if (_stricmp(arg, _Arg) == 0) { *outKeyCode = _Code; return true; }
+    CHECK_KEY("BACKSPACE", VK_BACK)
+    CHECK_KEY("TAB", VK_TAB)
+    CHECK_KEY("CLEAR", VK_CLEAR)
+    CHECK_KEY("ENTER", VK_RETURN)
+    CHECK_KEY("PAUSE", VK_PAUSE)
+    CHECK_KEY("CAPSLOCK", VK_CAPITAL)
+    CHECK_KEY("ESC", VK_ESCAPE)
+    CHECK_KEY("SPACE", VK_SPACE)
+    CHECK_KEY("PAGEUP", VK_PRIOR)
+    CHECK_KEY("PAGEDOWN", VK_NEXT)
+    CHECK_KEY("END", VK_END)
+    CHECK_KEY("HOME", VK_HOME)
+    CHECK_KEY("LEFT", VK_LEFT)
+    CHECK_KEY("UP", VK_UP)
+    CHECK_KEY("RIGHT", VK_RIGHT)
+    CHECK_KEY("DOWN", VK_DOWN)
+    CHECK_KEY("PRINTSCREEN", VK_SNAPSHOT)
+    CHECK_KEY("INS", VK_INSERT)
+    CHECK_KEY("DEL", VK_DELETE)
+    CHECK_KEY("HELP", VK_HELP)
+    CHECK_KEY("0", 0x30)
+    CHECK_KEY("1", 0x31)
+    CHECK_KEY("2", 0x32)
+    CHECK_KEY("3", 0x33)
+    CHECK_KEY("4", 0x34)
+    CHECK_KEY("5", 0x35)
+    CHECK_KEY("6", 0x36)
+    CHECK_KEY("7", 0x37)
+    CHECK_KEY("8", 0x38)
+    CHECK_KEY("9", 0x39)
+    CHECK_KEY("A", 0x42)
+    CHECK_KEY("B", 0x43)
+    CHECK_KEY("C", 0x44)
+    CHECK_KEY("D", 0x45)
+    CHECK_KEY("E", 0x46)
+    CHECK_KEY("F", 0x47)
+    CHECK_KEY("G", 0x48)
+    CHECK_KEY("H", 0x49)
+    CHECK_KEY("I", 0x4A)
+    CHECK_KEY("J", 0x4B)
+    CHECK_KEY("K", 0x4C)
+    CHECK_KEY("L", 0x4D)
+    CHECK_KEY("M", 0x4E)
+    CHECK_KEY("N", 0x4F)
+    CHECK_KEY("O", 0x50)
+    CHECK_KEY("P", 0x51)
+    CHECK_KEY("Q", 0x52)
+    CHECK_KEY("R", 0x53)
+    CHECK_KEY("S", 0x54)
+    CHECK_KEY("T", 0x55)
+    CHECK_KEY("U", 0x56)
+    CHECK_KEY("V", 0x57)
+    CHECK_KEY("W", 0x58)
+    CHECK_KEY("X", 0x59)
+    CHECK_KEY("Y", 0x5A)
+    CHECK_KEY("Num0", VK_NUMPAD0)
+    CHECK_KEY("Num1", VK_NUMPAD1)
+    CHECK_KEY("Num2", VK_NUMPAD2)
+    CHECK_KEY("Num3", VK_NUMPAD3)
+    CHECK_KEY("Num4", VK_NUMPAD4)
+    CHECK_KEY("Num5", VK_NUMPAD5)
+    CHECK_KEY("Num6", VK_NUMPAD6)
+    CHECK_KEY("Num7", VK_NUMPAD7)
+    CHECK_KEY("Num8", VK_NUMPAD8)
+    CHECK_KEY("Num9", VK_NUMPAD9)
+    CHECK_KEY("Multiply", VK_MULTIPLY)
+    CHECK_KEY("Add", VK_ADD)
+    CHECK_KEY("Separator", VK_SEPARATOR)
+    CHECK_KEY("Subtract", VK_SUBTRACT)
+    CHECK_KEY("Decimal", VK_DECIMAL)
+    CHECK_KEY("Divide", VK_DIVIDE)
+    CHECK_KEY("F1", VK_F1)
+    CHECK_KEY("F2", VK_F2)
+    CHECK_KEY("F3", VK_F3)
+    CHECK_KEY("F4", VK_F4)
+    CHECK_KEY("F5", VK_F5)
+    CHECK_KEY("F6", VK_F6)
+    CHECK_KEY("F7", VK_F7)
+    CHECK_KEY("F8", VK_F8)
+    CHECK_KEY("F9", VK_F9)
+    CHECK_KEY("F10", VK_F10)
+    CHECK_KEY("F11", VK_F11)
+    CHECK_KEY("F12", VK_F12)
+    CHECK_KEY("F13", VK_F13)
+    CHECK_KEY("F14", VK_F14)
+    CHECK_KEY("F15", VK_F15)
+    CHECK_KEY("F16", VK_F16)
+    CHECK_KEY("F17", VK_F17)
+    CHECK_KEY("F18", VK_F18)
+    CHECK_KEY("F19", VK_F19)
+    CHECK_KEY("F20", VK_F20)
+    CHECK_KEY("F21", VK_F21)
+    CHECK_KEY("F22", VK_F22)
+    CHECK_KEY("F23", VK_F23)
+    CHECK_KEY("F24", VK_F24)
+    CHECK_KEY("NUMLOCK", VK_NUMLOCK)
+    CHECK_KEY("SCROLLLOCK", VK_SCROLL)
+
+    return false;
+}
+
+void AssignHotkey(int* inoutArgIdx, int argc, char** argv, CommandLineArgs* args)
+{
+    auto argIdx = *inoutArgIdx;
+
+    args->mHotkeySupport = true;
+    if (++argIdx == argc) {
+        return;
+    }
+
+#pragma warning(suppress: 4996)
+    auto token = strtok(argv[argIdx], "+");
+    for (;;) {
+        auto prev = token;
+#pragma warning(suppress: 4996)
+        token = strtok(nullptr, "+");
+        if (token == nullptr) {
+            if (!ParseKeyCode(prev, &args->mHotkeyVirtualKeyCode)) {
+                return;
+            }
+            break;
+        }
+
+        if (!ParseModifier(prev, &args->mHotkeyModifiers)) {
+            return;
+        }
+    }
+
+    *inoutArgIdx = argIdx;
+}
+
 void PrintHelp()
 {
     // NOTE: remember to update README.md when modifying usage
@@ -67,7 +227,8 @@ void PrintHelp()
         "\n"
         "Control and filtering options:\n"
         "    -scroll_toggle             Only record events while scroll lock is enabled.\n"
-        "    -hotkey                    Use F11 to start and stop recording, writing to a unique file each time.\n"
+        "    -hotkey [key]              Use specified key to start and stop recording, writing to a\n"
+        "                               unique file each time (default is F11).\n"
         "    -delay [seconds]           Wait for specified time before starting to record. When using\n"
         "                               -hotkey, delay occurs each time recording is started.\n"
         "    -timed [seconds]           Stop recording after the specified amount of time.  PresentMon will exit\n"
@@ -111,7 +272,7 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
         else ARG2("-output_file",            args->mOutputFileName      = argv[i])
 
         // Control and filtering options
-        else ARG1("-hotkey",                 args->mHotkeySupport       = true)
+        else ARG1("-hotkey",                 AssignHotkey(&i, argc, argv, args))
         else ARG1("-scroll_toggle",          args->mScrollLockToggle    = true)
         else ARG2("-delay",                  args->mDelay               = atoi(argv[i]))
         else ARG2("-timed",                  args->mTimer               = atoi(argv[i]))
@@ -122,7 +283,9 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
         else ARG1("-no_top",                 args->mSimpleConsole       = true)
 
         // Provided argument wasn't recognized
-        else fprintf(stderr, "error: unexpected argument '%s'.\n", argv[i]);
+        else fprintf(stderr, "error: %s '%s'.\n",
+            i > 0 && strcmp(argv[i - 1], "-hotkey") == 0 ? "failed to parse hotkey" : "unrecognized argument",
+            argv[i]);
 
         PrintHelp();
         return false;
@@ -141,6 +304,20 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
         fprintf(stderr, "error: -etl_file and -hotkey arguments are not compatible.\n");
         PrintHelp();
         return false;
+    }
+
+    if (args->mHotkeySupport) {
+        if ((args->mHotkeyModifiers & MOD_CONTROL) != 0 && args->mHotkeyVirtualKeyCode == 0x44 /*C*/) {
+            fprintf(stderr, "error: 'CTRL+C' cannot be used as a -hotkey, it is reserved for terminating the trace.\n");
+            PrintHelp();
+            return false;
+        }
+
+        if (args->mHotkeyModifiers == MOD_NOREPEAT && args->mHotkeyVirtualKeyCode == VK_F12) {
+            fprintf(stderr, "error: 'F12' cannot be used as a -hotkey, it is reserved for the debugger.\n");
+            PrintHelp();
+            return false;
+        }
     }
 
     return true;
