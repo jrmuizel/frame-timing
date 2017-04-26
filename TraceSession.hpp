@@ -22,9 +22,13 @@ SOFTWARE.
 
 #pragma once
 
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+
+#include <evntcons.h> // must be after windows.h
 #include <stdint.h>
 
-#include "ProcessTraceConsumer.hpp"
+#include "PresentMon.hpp"
 #include "PresentMonTraceConsumer.hpp"
 
 struct TraceSession {
@@ -40,13 +44,13 @@ struct TraceSession {
     uint32_t eventsLostCount_;
     uint32_t buffersLostCount_;
 
-    ProcessTraceConsumer* processTraceConsumer_;
+    PresentMonData* pmData_;
     PMTraceConsumer* pmTraceConsumer_;
 
     TraceSession()
         : sessionHandle_(0)
         , traceHandle_(INVALID_PROCESSTRACE_HANDLE)
-        , processTraceConsumer_(nullptr)
+        , pmData_(nullptr)
         , pmTraceConsumer_(nullptr)
     {
     }

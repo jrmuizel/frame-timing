@@ -20,14 +20,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-
 #include <cstddef>
-#include <evntcons.h> // must be after windows.h
-#include <stdint.h>
 #include <stdio.h>
 
+#include "Events.hpp"
 #include "TraceSession.hpp"
 
 namespace {
@@ -41,7 +37,7 @@ VOID WINAPI EventRecordCallback(EVENT_RECORD* pEventRecord)
         session->startTime_ = hdr.TimeStamp.QuadPart;
     }
 
-         if (hdr.ProviderId == NT_PROCESS_EVENT_GUID) session->processTraceConsumer_->OnNTProcessEvent(pEventRecord); 
+         if (hdr.ProviderId == NT_PROCESS_EVENT_GUID) HandleNTProcessEvent(pEventRecord, session->pmData_); 
     else if (hdr.ProviderId == DXGI_PROVIDER_GUID   ) session->pmTraceConsumer_->OnDXGIEvent(pEventRecord);
     else if (hdr.ProviderId == D3D9_PROVIDER_GUID   ) session->pmTraceConsumer_->OnD3D9Event(pEventRecord);
     else if (hdr.ProviderId == DXGKRNL_PROVIDER_GUID) session->pmTraceConsumer_->OnDXGKrnlEvent(pEventRecord);

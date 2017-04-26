@@ -20,28 +20,28 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include "ProcessTraceConsumer.hpp"
+#include "Events.hpp"
+#include "TraceConsumer.hpp"
 
-void ProcessTraceConsumer::OnNTProcessEvent(PEVENT_RECORD pEventRecord)
+void HandleNTProcessEvent(PEVENT_RECORD pEventRecord, PresentMonData* pmData)
 {
-    auto pid = GetEventData<uint32_t>(pEventRecord, L"ProcessId");
-    auto lock = scoped_lock(mProcessMutex);
-    switch (pEventRecord->EventHeader.EventDescriptor.Opcode)
-    {
+    NTProcessEvent event;
+
+    switch (pEventRecord->EventHeader.EventDescriptor.Opcode) {
     case EVENT_TRACE_TYPE_START:
     case EVENT_TRACE_TYPE_DC_START:
-    {
-        ProcessInfo process;
-        GetEventData(pEventRecord, L"ImageFileName", &process.mModuleName);
-
-        mNewProcessesFromETW.insert_or_assign(pid, std::move(process));
+        GetEventData(pEventRecord, L"ProcessId",     &event.ProcessId);
+        GetEventData(pEventRecord, L"ImageFileName", &event.ImageFileName);
         break;
-    }
+
     case EVENT_TRACE_TYPE_END:
     case EVENT_TRACE_TYPE_DC_END:
-    {
-        mDeadProcessIds.emplace_back(pid);
+        GetEventData(pEventRecord, L"ProcessId", &event.ProcessId);
         break;
     }
+
+    {
+        auto lock = scoped_lock(pmData->mNTProcessEventMutex);
+        pmData->mNTProcessEvents.emplace_back(event);
     }
 }

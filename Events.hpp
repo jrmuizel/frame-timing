@@ -21,36 +21,10 @@ SOFTWARE.
 */
 
 #pragma once
-#include <stdint.h>
-#include <map>
-#include <mutex>
-#include <vector>
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <evntcons.h> // must include after windows.h
+#include "PresentMon.hpp"
 
-#include "TraceConsumer.hpp"
-#include "PresentMonTraceConsumer.hpp"
-#include "SwapChainData.hpp"
-
-struct ProcessInfo {
-    uint64_t mLastRefreshTicks = 0; // GetTickCount64
-    std::string mModuleName;
-    std::map<uint64_t, SwapChainData> mChainMap;
-    bool mTerminationProcess;
-    bool mProcessExists = false;
-};
-
-struct ProcessTraceConsumer
-{
-    std::mutex mProcessMutex;
-    std::map<uint32_t, ProcessInfo> mNewProcessesFromETW;
-    std::vector<uint32_t> mDeadProcessIds;
-
-    void GetProcessEvents(decltype(mNewProcessesFromETW)& outNewProcesses, decltype(mDeadProcessIds)& outDeadProcesses)
-    {
-        auto lock = scoped_lock(mProcessMutex);
-        outNewProcesses.swap(mNewProcessesFromETW);
-        outDeadProcesses.swap(mDeadProcessIds);
-    }
-
-    void OnNTProcessEvent(PEVENT_RECORD pEventRecord);
-};
+void HandleNTProcessEvent(EVENT_RECORD* pEventRecord, PresentMonData* pmData);
 

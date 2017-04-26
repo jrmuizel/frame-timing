@@ -292,20 +292,6 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
     }
 }
 
-void PresentMon_UpdateNewProcesses(PresentMonData& pm, std::map<uint32_t, ProcessInfo>& newProcesses)
-{
-    for (auto processPair : newProcesses) {
-        pm.mProcessMap[processPair.first] = processPair.second;
-    }
-}
-
-void PresentMon_UpdateDeadProcesses(PresentMonData& pm, std::vector<uint32_t>& deadProcesses)
-{
-    for (auto pid : deadProcesses) {
-        pm.mProcessMap.erase(pid);
-    }
-}
-
 void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEvent>>& presents, uint64_t perfFreq)
 {
     std::string display;
@@ -432,11 +418,11 @@ void PresentMonEtw(const CommandLineArgs& args)
 
     g_FileComplete = false;
 
+    PresentMonData data;
     PMTraceConsumer pmConsumer(args.mSimple);
-    ProcessTraceConsumer procConsumer = {};
 
     TraceSession session;
-    session.processTraceConsumer_ = &procConsumer;
+    session.pmData_ = &data;
     session.pmTraceConsumer_ = &pmConsumer;
     if (!session.Initialize(args.mSimple, args.mEtlFileName)) {
         return;
@@ -448,14 +434,12 @@ void PresentMonEtw(const CommandLineArgs& args)
 
         // Consume / Update based on the ETW output
         {
-            PresentMonData data;
 
             PresentMon_Init(args, data);
             uint64_t start_time = GetTickCount64();
 
             std::vector<std::shared_ptr<PresentEvent>> presents;
-            std::map<uint32_t, ProcessInfo> newProcesses;
-            std::vector<uint32_t> deadProcesses;
+            std::vector<NTProcessEvent> ntProcessEvents;
 
             bool log_corrupted = false;
 
@@ -468,8 +452,7 @@ void PresentMonEtw(const CommandLineArgs& args)
 #endif
 
                 presents.clear();
-                newProcesses.clear();
-                deadProcesses.clear();
+                ntProcessEvents.clear();
 
                 // If we are reading events from ETL file set start time to match time stamp of first event
                 if (data.mArgs->mEtlFileName && data.mStartupQpcTime == 0)
@@ -478,8 +461,19 @@ void PresentMonEtw(const CommandLineArgs& args)
                 }
 
                 if (args.mEtlFileName) {
-                    procConsumer.GetProcessEvents(newProcesses, deadProcesses);
-                    PresentMon_UpdateNewProcesses(data, newProcesses);
+                    {
+                        auto lock = scoped_lock(data.mNTProcessEventMutex);
+                        ntProcessEvents.swap(data.mNTProcessEvents);
+                    }
+
+                    for (auto ntProcessEvent : ntProcessEvents) {
+                        if (!ntProcessEvent.ImageFileName.empty()) {
+                            ProcessInfo processInfo;
+                            processInfo.mModuleName = ntProcessEvent.ImageFileName;
+
+                            data.mProcessMap[ntProcessEvent.ProcessId] = processInfo;
+                        }
+                    }
                 }
 
                 pmConsumer.DequeuePresents(presents);
@@ -501,7 +495,11 @@ void PresentMonEtw(const CommandLineArgs& args)
                 }
 
                 if (args.mEtlFileName) {
-                    PresentMon_UpdateDeadProcesses(data, deadProcesses);
+                    for (auto ntProcessEvent : ntProcessEvents) {
+                        if (ntProcessEvent.ImageFileName.empty()) {
+                            data.mProcessMap.erase(ntProcessEvent.ProcessId);
+                        }
+                    }
                 }
 
                 if (g_FileComplete || (args.mTimer > 0 && GetTickCount64() - start_time > args.mTimer * 1000)) {

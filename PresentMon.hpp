@@ -25,7 +25,22 @@ SOFTWARE.
 #include "CommandLine.hpp"
 #include "CommonIncludes.hpp"
 #include "PresentMonTraceConsumer.hpp"
-#include "ProcessTraceConsumer.hpp"
+#include "SwapChainData.hpp"
+
+#include <unordered_map>
+
+struct NTProcessEvent {
+    uint32_t ProcessId;
+    std::string ImageFileName;  // If ImageFileName.empty(), then event is that process ending
+};
+
+struct ProcessInfo {
+    uint64_t mLastRefreshTicks = 0; // GetTickCount64
+    std::string mModuleName;
+    std::map<uint64_t, SwapChainData> mChainMap;
+    bool mTerminationProcess;
+    bool mProcessExists = false;
+};
 
 struct PresentMonData {
     const CommandLineArgs *mArgs = nullptr;
@@ -34,13 +49,15 @@ struct PresentMonData {
     FILE *mOutputFile = nullptr;
     std::map<uint32_t, ProcessInfo> mProcessMap;
     uint32_t mTerminationProcessCount = 0;
+
+    // Process events
+    std::mutex mNTProcessEventMutex;
+    std::vector<NTProcessEvent> mNTProcessEvents;
 };
 
 void PresentMonEtw(const CommandLineArgs& args);
 
 void PresentMon_Init(const CommandLineArgs& args, PresentMonData& data);
-void PresentMon_UpdateNewProcesses(PresentMonData& data, std::map<uint32_t, ProcessInfo>& processes);
 void PresentMon_Update(PresentMonData& data, std::vector<std::shared_ptr<PresentEvent>>& presents, uint64_t perfFreq);
-void PresentMon_UpdateDeadProcesses(PresentMonData& data, std::vector<uint32_t>& processIds);
 void PresentMon_Shutdown(PresentMonData& data, bool log_corrupted);
 
