@@ -20,99 +20,39 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-// Code based on:
-// http://chabster.blogspot.com/2012/10/realtime-etw-consumer-howto.html
-
 #pragma once
-#include "CommonIncludes.hpp"
 
-struct ITraceConsumer {
-    virtual void OnEventRecord(_In_ PEVENT_RECORD pEventRecord) = 0;
-    virtual bool ContinueProcessing() = 0;
-    
-    // Time of the first event of the trace
-    uint64_t mTraceStartTime = 0;
-};
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 
-class TraceEventInfo
+#include <tdh.h>
+
+void PrintEventInformation(FILE* fp, EVENT_RECORD* pEventRecord);
+
+template <typename T>
+bool GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name, T* out)
 {
-public:
-    explicit TraceEventInfo(PEVENT_RECORD pEvent)
-        : pInfo(nullptr)
-        , pEvent(pEvent) {
-        unsigned long bufferSize = 0;
-        auto result = TdhGetEventInformation(pEvent, 0, nullptr, nullptr, &bufferSize);
-        if (result == ERROR_INSUFFICIENT_BUFFER) {
-            pInfo = reinterpret_cast<TRACE_EVENT_INFO*>(operator new(bufferSize));
-            result = TdhGetEventInformation(pEvent, 0, nullptr, pInfo, &bufferSize);
-        }
-        if (result != ERROR_SUCCESS) {
-            throw std::exception("Unexpected error from TdhGetEventInformation.", result);
-        }
-    }
-    TraceEventInfo(const TraceEventInfo&) = delete;
-    TraceEventInfo& operator=(const TraceEventInfo&) = delete;
-    ~TraceEventInfo() {
-        operator delete(pInfo);
-        pInfo = nullptr;
+    PROPERTY_DATA_DESCRIPTOR descriptor;
+    descriptor.PropertyName = (ULONGLONG) name;
+    descriptor.ArrayIndex = ULONG_MAX;
+
+    auto status = TdhGetProperty(pEventRecord, 0, nullptr, 1, &descriptor, sizeof(T), (BYTE*) out);
+    if (status != ERROR_SUCCESS) {
+        fprintf(stderr, "error: could not get event %ls property (error=%u).\n", name, status);
+        PrintEventInformation(stderr, pEventRecord);
+        return false;
     }
 
-    void GetData(PCWSTR name, byte* outData, uint32_t dataSize) {
-        PROPERTY_DATA_DESCRIPTOR descriptor;
-        descriptor.ArrayIndex = 0;
-        descriptor.PropertyName = reinterpret_cast<unsigned long long>(name);
-        auto result = TdhGetProperty(pEvent, 0, nullptr, 1, &descriptor, dataSize, outData);
-        if (result != ERROR_SUCCESS) {
-            throw std::exception("Unexpected error from TdhGetProperty.", result);
-        }
-    }
+    return true;
+}
 
-    uint32_t GetDataSize(PCWSTR name) {
-        PROPERTY_DATA_DESCRIPTOR descriptor;
-        descriptor.ArrayIndex = 0;
-        descriptor.PropertyName = reinterpret_cast<unsigned long long>(name);
-        ULONG size = 0;
-        auto result = TdhGetPropertySize(pEvent, 0, nullptr, 1, &descriptor, &size);
-        if (result != ERROR_SUCCESS) {
-            throw std::exception("Unexpected error from TdhGetPropertySize.", result);
-        }
-        return size;
-    }
-
-    template <typename T>
-    T GetData(PCWSTR name) {
-        T local;
-        GetData(name, reinterpret_cast<byte*>(&local), sizeof(local));
-        return local;
-    }
-
-    uint64_t GetPtr(PCWSTR name) {
-        if (pEvent->EventHeader.Flags & EVENT_HEADER_FLAG_32_BIT_HEADER) {
-            return GetData<uint32_t>(name);
-        }
-        else if (pEvent->EventHeader.Flags & EVENT_HEADER_FLAG_64_BIT_HEADER) {
-            return GetData<uint64_t>(name);
-        }
-        return 0;
-    }
-
-private:
-    TRACE_EVENT_INFO* pInfo;
-    EVENT_RECORD* pEvent;
-};
-
-class MultiTraceConsumer : public ITraceConsumer
+template <typename T>
+T GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name)
 {
-public:
-    void AddTraceConsumer(ITraceConsumer* pConsumer) {
-        if (pConsumer != nullptr) {
-            mTraceConsumers.push_back(pConsumer);
-        }
-    }
+    T value = {};
+    auto ok = GetEventData(pEventRecord, name, &value);
+    (void) ok;
+    return value;
+}
 
-    virtual void OnEventRecord(_In_ PEVENT_RECORD pEventRecord);
-    virtual bool ContinueProcessing();
-
-private:
-    std::vector<ITraceConsumer*> mTraceConsumers;
-};
+template <> bool GetEventData<std::string>(EVENT_RECORD* pEventRecord, wchar_t const* name, std::string* out);

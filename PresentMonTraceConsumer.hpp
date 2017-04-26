@@ -112,7 +112,7 @@ struct PresentEvent {
 #endif
 };
 
-struct PMTraceConsumer : ITraceConsumer
+struct PMTraceConsumer
 {
     PMTraceConsumer(bool simple) : mSimpleMode(simple) { }
     bool mSimpleMode;
@@ -210,18 +210,15 @@ struct PMTraceConsumer : ITraceConsumer
         return false;
     }
 
-    virtual void OnEventRecord(_In_ PEVENT_RECORD pEventRecord);
-    virtual bool ContinueProcessing() { return !g_StopRecording; }
+    void OnDXGIEvent(_In_ PEVENT_RECORD pEventRecord);
+    void OnDXGKrnlEvent(_In_ PEVENT_RECORD pEventRecord);
+    void OnWin32kEvent(_In_ PEVENT_RECORD pEventRecord);
+    void OnDWMEvent(_In_ PEVENT_RECORD pEventRecord);
+    void OnD3D9Event(_In_ PEVENT_RECORD pEventRecord);
 
 private:
     void CompletePresent(std::shared_ptr<PresentEvent> p);
     decltype(mPresentByThreadId.begin()) FindOrCreatePresent(_In_ PEVENT_RECORD pEventRecord);
     void RuntimePresentStart(_In_ PEVENT_RECORD pEventRecord, PresentEvent &event);
     void RuntimePresentStop(_In_ PEVENT_RECORD pEventRecord, bool AllowPresentBatching = true);
-
-    void OnDXGIEvent(_In_ PEVENT_RECORD pEventRecord);
-    void OnDXGKrnlEvent(_In_ PEVENT_RECORD pEventRecord);
-    void OnWin32kEvent(_In_ PEVENT_RECORD pEventRecord);
-    void OnDWMEvent(_In_ PEVENT_RECORD pEventRecord);
-    void OnD3D9Event(_In_ PEVENT_RECORD pEventRecord);
 };

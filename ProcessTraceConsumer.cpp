@@ -22,25 +22,9 @@ SOFTWARE.
 
 #include "ProcessTraceConsumer.hpp"
 
-void ProcessTraceConsumer::OnEventRecord(PEVENT_RECORD pEventRecord)
-{
-    if (mTraceStartTime == 0)
-    {
-        mTraceStartTime = pEventRecord->EventHeader.TimeStamp.QuadPart;
-    }
-
-    auto& hdr = pEventRecord->EventHeader;
-
-    if (hdr.ProviderId == NT_PROCESS_EVENT_GUID)
-    {
-        OnNTProcessEvent(pEventRecord);
-    }
-}
-
 void ProcessTraceConsumer::OnNTProcessEvent(PEVENT_RECORD pEventRecord)
 {
-    TraceEventInfo eventInfo(pEventRecord);
-    auto pid = eventInfo.GetData<uint32_t>(L"ProcessId");
+    auto pid = GetEventData<uint32_t>(pEventRecord, L"ProcessId");
     auto lock = scoped_lock(mProcessMutex);
     switch (pEventRecord->EventHeader.EventDescriptor.Opcode)
     {
@@ -48,9 +32,7 @@ void ProcessTraceConsumer::OnNTProcessEvent(PEVENT_RECORD pEventRecord)
     case EVENT_TRACE_TYPE_DC_START:
     {
         ProcessInfo process;
-        auto nameSize = eventInfo.GetDataSize(L"ImageFileName");
-        process.mModuleName.resize(nameSize, '\0');
-        eventInfo.GetData(L"ImageFileName", (byte*)process.mModuleName.data(), nameSize);
+        GetEventData(pEventRecord, L"ImageFileName", &process.mModuleName);
 
         mNewProcessesFromETW.insert_or_assign(pid, std::move(process));
         break;

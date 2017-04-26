@@ -416,7 +416,8 @@ static void EtwProcessingThread(TraceSession *session)
 {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
 
-    session->Process();
+    auto status = ProcessTrace(&session->traceHandle_, 1, NULL, NULL);
+    (void) status; // check: _status == ERROR_SUCCESS;
 
     // Guarantees that the PM thread does one more loop to pick up any last events before calling QuitPresentMon()
     g_FileComplete = true;
@@ -431,48 +432,15 @@ void PresentMonEtw(const CommandLineArgs& args)
 
     g_FileComplete = false;
 
-    // Convert ETL Filename to wchar_t if it exists, and construct a
-    // TraceSession.
-    wchar_t* wEtlFileName = nullptr;
-    if (args.mEtlFileName != nullptr) {
-        auto size = strlen(args.mEtlFileName) + 1;
-        wEtlFileName = new wchar_t [size];
-        mbstowcs_s(&size, wEtlFileName, size, args.mEtlFileName, size - 1);
-    }
-
-    TraceSession session(L"PresentMon", wEtlFileName);
-
-    delete[] wEtlFileName;
-    wEtlFileName = nullptr;
-
-
     PMTraceConsumer pmConsumer(args.mSimple);
     ProcessTraceConsumer procConsumer = {};
 
-    MultiTraceConsumer mtConsumer = {};
-    mtConsumer.AddTraceConsumer(&procConsumer);
-    mtConsumer.AddTraceConsumer(&pmConsumer);
-
-    if (!args.mEtlFileName && !session.Start()) {
-        if (session.Status() == ERROR_ALREADY_EXISTS) {
-            if (!session.Stop() || !session.Start()) {
-                printf("ETW session error. Quitting.\n");
-                exit(0);
-            }
-        }
+    TraceSession session;
+    session.processTraceConsumer_ = &procConsumer;
+    session.pmTraceConsumer_ = &pmConsumer;
+    if (!session.Initialize(args.mSimple, args.mEtlFileName)) {
+        return;
     }
-
-    session.EnableProvider(DXGI_PROVIDER_GUID, TRACE_LEVEL_INFORMATION);
-    session.EnableProvider(D3D9_PROVIDER_GUID, TRACE_LEVEL_INFORMATION);
-    if (!args.mSimple)
-    {
-        session.EnableProvider(DXGKRNL_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 1);
-        session.EnableProvider(WIN32K_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 0x1000);
-        session.EnableProvider(DWM_PROVIDER_GUID, TRACE_LEVEL_VERBOSE);
-    }
-
-    session.OpenTrace(&mtConsumer);
-    uint32_t eventsLost, buffersLost;
 
     {
         // Launch the ETW producer thread
@@ -506,7 +474,7 @@ void PresentMonEtw(const CommandLineArgs& args)
                 // If we are reading events from ETL file set start time to match time stamp of first event
                 if (data.mArgs->mEtlFileName && data.mStartupQpcTime == 0)
                 {
-                    data.mStartupQpcTime = mtConsumer.mTraceStartTime;
+                    data.mStartupQpcTime = session.startTime_;
                 }
 
                 if (args.mEtlFileName) {
@@ -519,8 +487,11 @@ void PresentMonEtw(const CommandLineArgs& args)
                     presents.clear();
                 }
 
-                PresentMon_Update(data, presents, session.PerfFreq());
-                if (session.AnythingLost(eventsLost, buffersLost)) {
+                PresentMon_Update(data, presents, session.frequency_);
+
+                uint32_t eventsLost = 0;
+                uint32_t buffersLost = 0;
+                if (session.CheckLostReports(&eventsLost, &buffersLost)) {
                     printf("Lost %u events, %u buffers.", eventsLost, buffersLost);
                     // FIXME: How do we set a threshold here?
                     if (eventsLost > 100) {
@@ -546,15 +517,6 @@ void PresentMonEtw(const CommandLineArgs& args)
         etwThread.join();
     }
 
-    session.CloseTrace();
-    session.DisableProvider(DXGI_PROVIDER_GUID);
-    session.DisableProvider(D3D9_PROVIDER_GUID);
-    if (!args.mSimple)
-    {
-        session.DisableProvider(DXGKRNL_PROVIDER_GUID);
-        session.DisableProvider(WIN32K_PROVIDER_GUID);
-        session.DisableProvider(DWM_PROVIDER_GUID);
-    }
-    session.Stop();
+    session.Finalize();
 }
 

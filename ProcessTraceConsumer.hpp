@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+#pragma once
 #include <stdint.h>
 #include <map>
 #include <mutex>
@@ -37,7 +38,7 @@ struct ProcessInfo {
     bool mProcessExists = false;
 };
 
-struct ProcessTraceConsumer : public ITraceConsumer
+struct ProcessTraceConsumer
 {
     std::mutex mProcessMutex;
     std::map<uint32_t, ProcessInfo> mNewProcessesFromETW;
@@ -50,10 +51,6 @@ struct ProcessTraceConsumer : public ITraceConsumer
         outDeadProcesses.swap(mDeadProcessIds);
     }
 
-    virtual void OnEventRecord(_In_ PEVENT_RECORD pEventRecord);
-    virtual bool ContinueProcessing() { return !g_StopRecording; }
-
-private:
     void OnNTProcessEvent(PEVENT_RECORD pEventRecord);
 };
 

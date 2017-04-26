@@ -1,43 +1,58 @@
-// Code based on:
-// http://chabster.blogspot.com/2012/10/realtime-etw-consumer-howto.html
+/*
+Copyright 2017 Intel Corporation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+*/
 
 #pragma once
-#include "TraceConsumer.hpp"
 
-#undef OpenTrace
+#include <stdint.h>
 
-class TraceSession
-{
+#include "ProcessTraceConsumer.hpp"
+#include "PresentMonTraceConsumer.hpp"
 
-public:
-    TraceSession(const wchar_t* szSessionName, const wchar_t* szFileName);
-    ~TraceSession();
+struct TraceSession {
+    // BEGIN trace property block, must be beginning of TraceSession
+    EVENT_TRACE_PROPERTIES properties_;
+    wchar_t loggerName_[MAX_PATH];
+    // END Trace property block
 
-    TraceSession(const TraceSession&) = delete;
-    TraceSession& operator=(const TraceSession&) = delete;
+    TRACEHANDLE sessionHandle_;    // Must be first member after trace property block
+    TRACEHANDLE traceHandle_;
+    uint64_t startTime_;
+    uint64_t frequency_;
+    uint32_t eventsLostCount_;
+    uint32_t buffersLostCount_;
 
-public:
-    bool Start();
-    bool EnableProvider(const GUID& providerId, UCHAR level, ULONGLONG anyKeyword = 0, ULONGLONG allKeyword = 0);
-    bool CaptureState(const GUID& providerId, UCHAR level, ULONGLONG anyKeyword = 0, ULONGLONG allKeyword = 0);
-    bool OpenTrace(ITraceConsumer *pConsumer);
-    bool Process();
-    bool CloseTrace();
-    bool DisableProvider(const GUID& providerId);
-    bool Stop();
+    ProcessTraceConsumer* processTraceConsumer_;
+    PMTraceConsumer* pmTraceConsumer_;
 
-    bool AnythingLost(uint32_t &events, uint32_t &buffers);
+    TraceSession()
+        : sessionHandle_(0)
+        , traceHandle_(INVALID_PROCESSTRACE_HANDLE)
+        , processTraceConsumer_(nullptr)
+        , pmTraceConsumer_(nullptr)
+    {
+    }
 
-    ULONG Status() const;
-    LONGLONG PerfFreq() const;
-
-private:
-    LPTSTR _szSessionName, _szFileName;
-    ULONG _status;
-    EVENT_TRACE_PROPERTIES* _pSessionProperties;
-    TRACEHANDLE _hSession;
-    EVENT_TRACE_LOGFILEW _logFile;
-    TRACEHANDLE _hTrace;
-    uint32_t _eventsLost, _buffersLost;
-    bool _started;
+    bool Initialize(bool simpleMode, char const* inputEtlPath);
+    void Finalize();
+    bool CheckLostReports(uint32_t* eventsLost, uint32_t* buffersLost);
 };
+
