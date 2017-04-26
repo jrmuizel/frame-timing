@@ -77,36 +77,39 @@ const char* FinalStateToDroppedString(PresentResult res);
 
 struct PresentEvent {
     // Available from DXGI Present
-    uint64_t QpcTime = 0;
-    uint64_t SwapChainAddress = 0;
-    int32_t SyncInterval = -1;
-    uint32_t PresentFlags = 0;
-    uint32_t ProcessId = 0;
+    uint64_t QpcTime;
+    uint64_t SwapChainAddress;
+    int32_t SyncInterval;
+    uint32_t PresentFlags;
+    uint32_t ProcessId;
 
-    PresentMode PresentMode = PresentMode::Unknown;
-    bool SupportsTearing = false;
-    bool MMIO = false;
-    bool SeenDxgkPresent = false;
+    PresentMode PresentMode;
+    bool SupportsTearing;
+    bool MMIO;
+    bool SeenDxgkPresent;
 
-    Runtime Runtime = Runtime::Other;
+    Runtime Runtime;
 
     // Time spent in DXGI Present call
-    uint64_t TimeTaken = 0;
+    uint64_t TimeTaken;
 
     // Timestamp of "ready" state (GPU work completed)
-    uint64_t ReadyTime = 0;
+    uint64_t ReadyTime;
 
     // Timestamp of "complete" state (data on screen or discarded)
-    uint64_t ScreenTime = 0;
-    PresentResult FinalState = PresentResult::Unknown;
-    uint32_t PlaneIndex = 0;
+    uint64_t ScreenTime;
+    PresentResult FinalState;
+    uint32_t PlaneIndex;
 
     // Additional transient state
-    uint32_t QueueSubmitSequence = 0;
-    uint32_t RuntimeThread = 0;
-    uint64_t Hwnd = 0;
+    uint32_t QueueSubmitSequence;
+    uint32_t RuntimeThread;
+    uint64_t Hwnd;
     std::deque<std::shared_ptr<PresentEvent>> DependentPresents;
-    bool Completed = false;
+    bool Completed;
+
+    PresentEvent(EVENT_HEADER const& hdr, ::Runtime runtime);
+
 #if _DEBUG
     ~PresentEvent() { assert(Completed || g_StopRecording); }
 #endif
@@ -218,7 +221,7 @@ struct PMTraceConsumer
 
 private:
     void CompletePresent(std::shared_ptr<PresentEvent> p);
-    decltype(mPresentByThreadId.begin()) FindOrCreatePresent(_In_ PEVENT_RECORD pEventRecord);
-    void RuntimePresentStart(_In_ PEVENT_RECORD pEventRecord, PresentEvent &event);
-    void RuntimePresentStop(_In_ PEVENT_RECORD pEventRecord, bool AllowPresentBatching = true);
+    decltype(mPresentByThreadId.begin()) FindOrCreatePresent(EVENT_HEADER const& hdr);
+    void RuntimePresentStart(PresentEvent &event);
+    void RuntimePresentStop(EVENT_HEADER const& hdr, bool AllowPresentBatching);
 };
