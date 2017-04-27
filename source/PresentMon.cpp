@@ -46,7 +46,7 @@ static void SetConsoleText(const char *text)
     enum { MAX_BUFFER = 16384 };
     char buffer[16384];
     int bufferSize = 0;
-    auto write = [&](int ch) {
+    auto write = [&](char ch) {
         if (bufferSize < MAX_BUFFER) {
             buffer[bufferSize++] = ch;
         }
@@ -65,7 +65,7 @@ static void SetConsoleText(const char *text)
     int x = 0;
     while (*text) {
         int repeat = 1;
-        int ch = *text;
+        char ch = *text;
         if (ch == '\t') {
             ch = ' ';
             repeat = 4;

@@ -28,8 +28,8 @@ SOFTWARE.
 struct SwapChainData {
     Runtime mRuntime = Runtime::Other;
     uint64_t mLastUpdateTicks = 0;
-    uint32_t mLastSyncInterval = -1;
-    uint32_t mLastFlags = -1;
+    uint32_t mLastSyncInterval = UINT32_MAX;
+    uint32_t mLastFlags = UINT32_MAX;
     std::deque<PresentEvent> mPresentHistory;
     std::deque<PresentEvent> mDisplayedPresentHistory;
     PresentMode mLastPresentMode = PresentMode::Unknown;

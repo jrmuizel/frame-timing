@@ -32,10 +32,10 @@ struct CommandLineArgs {
     const char *mOutputFileName = nullptr;
     const char *mTargetProcessName = nullptr;
     const char *mEtlFileName = nullptr;
-    int mTargetPid = 0;
-    int mDelay = 0;
-    int mTimer = 0;
-    int mRestartCount = 0;
+    UINT mTargetPid = 0;
+    UINT mDelay = 0;
+    UINT mTimer = 0;
+    UINT mRestartCount = 0;
     UINT mHotkeyModifiers = MOD_NOREPEAT;
     UINT mHotkeyVirtualKeyCode = VK_F11;
     bool mOutputFile = true;

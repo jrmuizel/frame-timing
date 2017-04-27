@@ -208,6 +208,12 @@ void AssignHotkey(int* inoutArgIdx, int argc, char** argv, CommandLineArgs* args
     *inoutArgIdx = argIdx;
 }
 
+UINT atou(char const* a)
+{
+    int i = atoi(a);
+    return i <= 0 ? 0 : (UINT) i;
+}
+
 void PrintHelp()
 {
     // NOTE: remember to update README.md when modifying usage
@@ -265,7 +271,7 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
         // Capture target options
              ARG1("-captureall",             args->mTargetProcessName   = nullptr)
         else ARG2("-process_name",           args->mTargetProcessName   = argv[i])
-        else ARG2("-process_id",             args->mTargetPid           = atoi(argv[i]))
+        else ARG2("-process_id",             args->mTargetPid           = atou(argv[i]))
         else ARG2("-etl_file",               args->mEtlFileName         = argv[i])
 
         // Output options
@@ -276,8 +282,8 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
         else ARG1("-hotkey",                 AssignHotkey(&i, argc, argv, args))
         else ARG1("-scroll_toggle",          args->mScrollLockToggle    = true)
         else ARG1("-scroll_indicator",       args->mScrollLockIndicator = true)
-        else ARG2("-delay",                  args->mDelay               = atoi(argv[i]))
-        else ARG2("-timed",                  args->mTimer               = atoi(argv[i]))
+        else ARG2("-delay",                  args->mDelay               = atou(argv[i]))
+        else ARG2("-timed",                  args->mTimer               = atou(argv[i]))
         else ARG1("-exclude_dropped",        args->mExcludeDropped      = true)
         else ARG1("-terminate_on_proc_exit", args->mTerminateOnProcExit = true)
         else ARG1("-simple",                 args->mSimple              = true)

@@ -47,6 +47,8 @@ VOID WINAPI EventRecordCallback(EVENT_RECORD* pEventRecord)
 
 ULONG WINAPI BufferCallback(EVENT_TRACE_LOGFILEA* pLogFile)
 {
+    (void) pLogFile;
+
     if (g_StopRecording) {
         return FALSE; // break out of ProcessTrace()
     }

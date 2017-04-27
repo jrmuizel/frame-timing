@@ -551,9 +551,6 @@ void PMTraceConsumer::OnDWMEvent(PEVENT_RECORD pEventRecord)
     };
 
     auto& hdr = pEventRecord->EventHeader;
-
-    uint64_t EventTime = *(uint64_t*)&hdr.TimeStamp;
-
     switch (hdr.EventDescriptor.Id)
     {
     case DWM_DwmUpdateWindow:

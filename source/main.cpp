@@ -116,6 +116,7 @@ BOOL WINAPI ConsoleCtrlHandler(
     _In_ DWORD dwCtrlType
     )
 {
+    (void) dwCtrlType;
     QuitPresentMon();
     return TRUE;
 }
