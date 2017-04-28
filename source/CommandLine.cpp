@@ -242,6 +242,7 @@ void PrintHelp()
         "                               timer expires.\n"
         "    -exclude_dropped           Exclude dropped presents from the csv output.\n"
         "    -terminate_on_proc_exit    Terminate PresentMon when all instances of the specified process exit.\n"
+        "    -terminate_after_timed     Terminate PresentMon after the timed trace, specified using -timed, completes.\n"
         "    -simple                    Disable advanced tracking (try this if you encounter crashes).\n"
         "    -dont_restart_as_admin     Don't try to elevate privilege.\n"
         "    -no_top                    Don't display active swap chains in the console window.\n"
@@ -286,6 +287,7 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
         else ARG2("-timed",                  args->mTimer               = atou(argv[i]))
         else ARG1("-exclude_dropped",        args->mExcludeDropped      = true)
         else ARG1("-terminate_on_proc_exit", args->mTerminateOnProcExit = true)
+        else ARG1("-terminate_after_timed",  args->mTerminateAfterTimer = true)
         else ARG1("-simple",                 args->mSimple              = true)
         else ARG1("-dont_restart_as_admin",  args->mTryToElevate        = false)
         else ARG1("-no_top",                 args->mSimpleConsole       = true)
@@ -361,3 +363,29 @@ void SetConsoleTitle(
 
     SetConsoleTitleA(args);
 }
+
+bool EnableScrollLock(bool enable)
+{
+    auto enabled = (GetKeyState(VK_SCROLL) & 1) == 1;
+    if (enabled != enable) {
+        auto extraInfo = GetMessageExtraInfo();
+        INPUT input[2] = {};
+
+        input[0].type = INPUT_KEYBOARD;
+        input[0].ki.wVk = VK_SCROLL;
+        input[0].ki.dwExtraInfo = extraInfo;
+
+        input[1].type = INPUT_KEYBOARD;
+        input[1].ki.wVk = VK_SCROLL;
+        input[1].ki.dwFlags = KEYEVENTF_KEYUP;
+        input[1].ki.dwExtraInfo = extraInfo;
+
+        auto sendCount = SendInput(2, input, sizeof(INPUT));
+        if (sendCount != 2) {
+            fprintf(stderr, "warning: could not toggle scroll lock.\n");
+        }
+    }
+
+    return enabled;
+}
+

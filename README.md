@@ -51,6 +51,7 @@ Control and filtering options:
                                timer expires.
     -exclude_dropped           Exclude dropped presents from the csv output.
     -terminate_on_proc_exit    Terminate PresentMon when all instances of the specified process exit.
+    -terminate_after_timed     Terminate PresentMon after the timed trace, specified using -timed, completes.
     -simple                    Disable advanced tracking (try this if you encounter crashes).
     -dont_restart_as_admin     Don't try to elevate privilege.
     -no_top                    Don't display active swap chains in the console window.

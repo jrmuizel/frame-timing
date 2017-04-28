@@ -428,6 +428,13 @@ void PresentMonEtw(const CommandLineArgs& args)
         return;
     }
 
+    if (args.mSimpleConsole) {
+        printf("Started recording.\n");
+    }
+    if (args.mScrollLockIndicator) {
+        EnableScrollLock(true);
+    }
+
     {
         // Launch the ETW producer thread
         std::thread etwThread(EtwProcessingThread, &session);
@@ -502,8 +509,17 @@ void PresentMonEtw(const CommandLineArgs& args)
                     }
                 }
 
-                if (g_FileComplete || (args.mTimer > 0 && GetTickCount64() - start_time > args.mTimer * 1000)) {
+                if (g_FileComplete) {
                     QuitPresentMon();
+                    break;
+                }
+
+                if (args.mTimer > 0 && GetTickCount64() - start_time >= args.mTimer * 1000) {
+                    if (args.mTerminateAfterTimer) {
+                        QuitPresentMon();
+                    }
+                    g_StopRecording = true;
+                    break;
                 }
 
                 Sleep(100);
@@ -516,5 +532,12 @@ void PresentMonEtw(const CommandLineArgs& args)
     }
 
     session.Finalize();
+
+    if (args.mScrollLockIndicator) {
+        EnableScrollLock(false);
+    }
+    if (args.mSimpleConsole) {
+        printf("Stopping recording.\n");
+    }
 }
 

@@ -45,6 +45,7 @@ struct CommandLineArgs {
     bool mSimple = false;
     bool mSimpleConsole = false;
     bool mTerminateOnProcExit = false;
+    bool mTerminateAfterTimer = false;
     bool mHotkeySupport = false;
     bool mTryToElevate = true;
 };
@@ -52,3 +53,4 @@ struct CommandLineArgs {
 bool ParseCommandLine(int argc, char** argv, CommandLineArgs* out);
 bool RestartAsAdministrator(int argc, char** argv);
 void SetConsoleTitle(int argc, char** argv);
+bool EnableScrollLock(bool enable);

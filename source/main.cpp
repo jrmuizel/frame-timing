@@ -42,55 +42,16 @@ std::mutex g_RecordingMutex;
 std::thread g_RecordingThread;
 bool g_IsRecording = false;
 
-bool EnableScrollLock(bool enable)
-{
-    auto enabled = (GetKeyState(VK_SCROLL) & 1) == 1;
-    if (enabled != enable) {
-        auto extraInfo = GetMessageExtraInfo();
-        INPUT input[2] = {};
-
-        input[0].type = INPUT_KEYBOARD;
-        input[0].ki.wVk = VK_SCROLL;
-        input[0].ki.dwExtraInfo = extraInfo;
-
-        input[1].type = INPUT_KEYBOARD;
-        input[1].ki.wVk = VK_SCROLL;
-        input[1].ki.dwFlags = KEYEVENTF_KEYUP;
-        input[1].ki.dwExtraInfo = extraInfo;
-
-        auto sendCount = SendInput(2, input, sizeof(INPUT));
-        if (sendCount != 2) {
-            fprintf(stderr, "warning: could not toggle scroll lock.\n");
-        }
-    }
-
-    return enabled;
-}
-
 void LockedStartRecording(CommandLineArgs& args)
 {
     assert(g_IsRecording == false);
     g_StopRecording = false;
     g_RecordingThread = std::thread(PresentMonEtw, args);
     g_IsRecording = true;
-
-    if (args.mSimpleConsole) {
-        printf("Started recording.\n");
-    }
-    if (args.mScrollLockIndicator) {
-        EnableScrollLock(true);
-    }
 }
 
-void LockedStopRecording(CommandLineArgs const& args)
+void LockedStopRecording()
 {
-    if (args.mScrollLockIndicator) {
-        EnableScrollLock(false);
-    }
-    if (args.mSimpleConsole) {
-        printf("Stopping recording.\n");
-    }
-
     g_StopRecording = true;
     if (g_RecordingThread.joinable()) {
         g_RecordingThread.join();
@@ -104,11 +65,11 @@ void StartRecording(CommandLineArgs& args)
     LockedStartRecording(args);
 }
 
-void StopRecording(CommandLineArgs const& args)
+void StopRecording()
 {
     std::lock_guard<std::mutex> lock(g_RecordingMutex);
     if (g_IsRecording) {
-        LockedStopRecording(args);
+        LockedStopRecording();
     }
 }
 
@@ -128,7 +89,7 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
         std::lock_guard<std::mutex> lock(g_RecordingMutex);
         if (g_IsRecording) {
-            LockedStopRecording(args);
+            LockedStopRecording();
             args.mRestartCount++;
         } else {
             LockedStartRecording(args);
@@ -286,7 +247,7 @@ int main(int argc, char** argv)
     // Wait for tracing to finish, to ensure the PM thread closes the session
     // correctly Prevent races on joining the PM thread between the control
     // handler and the main thread
-    StopRecording(args);
+    StopRecording();
 
 clean_up:
     // Restore original scroll lock state
