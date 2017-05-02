@@ -29,48 +29,40 @@ SOFTWARE.
 #include "CommandLine.hpp"
 #include "PresentMon.hpp"
 
-bool g_StopRecording = false;
-
 namespace {
 
-const uint32_t c_Hotkey = 0x80;
+enum {
+    HOTKEY_ID = 0x80,
+
+    WM_STOP_ETW_THREADS = WM_USER + 0,
+};
 
 HWND g_hWnd = 0;
 bool g_originalScrollLockEnabled = false;
 
-std::mutex g_RecordingMutex;
-std::thread g_RecordingThread;
-bool g_IsRecording = false;
+std::thread g_EtwConsumingThread;
+bool g_StopEtwThreads = true;
 
-void LockedStartRecording(CommandLineArgs& args)
+bool EtwThreadsRunning()
 {
-    assert(g_IsRecording == false);
-    g_StopRecording = false;
-    g_RecordingThread = std::thread(PresentMonEtw, args);
-    g_IsRecording = true;
+    return g_EtwConsumingThread.joinable();
 }
 
-void LockedStopRecording()
+void StartEtwThreads(CommandLineArgs const& args)
 {
-    g_StopRecording = true;
-    if (g_RecordingThread.joinable()) {
-        g_RecordingThread.join();
-    }
-    g_IsRecording = false;
+    assert(!EtwThreadsRunning());
+    assert(EtwThreadsShouldQuit());
+    g_StopEtwThreads = false;
+    g_EtwConsumingThread = std::thread(EtwConsumingThread, args);
 }
 
-void StartRecording(CommandLineArgs& args)
+void StopEtwThreads(CommandLineArgs* args)
 {
-    std::lock_guard<std::mutex> lock(g_RecordingMutex);
-    LockedStartRecording(args);
-}
-
-void StopRecording()
-{
-    std::lock_guard<std::mutex> lock(g_RecordingMutex);
-    if (g_IsRecording) {
-        LockedStopRecording();
-    }
+    assert(EtwThreadsRunning());
+    assert(g_StopEtwThreads == false);
+    g_StopEtwThreads = true;
+    g_EtwConsumingThread.join();
+    args->mRecordingCount++;
 }
 
 BOOL WINAPI ConsoleCtrlHandler(
@@ -78,22 +70,31 @@ BOOL WINAPI ConsoleCtrlHandler(
     )
 {
     (void) dwCtrlType;
-    QuitPresentMon();
+    PostStopRecording();
+    PostQuitProcess();
     return TRUE;
 }
 
 LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-    if (uMsg == WM_HOTKEY && wParam == c_Hotkey) {
-        auto& args = *reinterpret_cast<CommandLineArgs*>(GetWindowLongPtrW(hWnd, GWLP_USERDATA));
+    auto args = (CommandLineArgs*) GetWindowLongPtrW(hWnd, GWLP_USERDATA);
 
-        std::lock_guard<std::mutex> lock(g_RecordingMutex);
-        if (g_IsRecording) {
-            LockedStopRecording();
-            args.mRestartCount++;
-        } else {
-            LockedStartRecording(args);
+    switch (uMsg) {
+    case WM_HOTKEY:
+        if (wParam == HOTKEY_ID) {
+            if (EtwThreadsRunning()) {
+                StopEtwThreads(args);
+            } else {
+                StartEtwThreads(*args);
+            }
         }
+        break;
+
+    case WM_STOP_ETW_THREADS:
+        if (EtwThreadsRunning()) {
+            StopEtwThreads(args);
+        }
+        break;
     }
 
     return DefWindowProc(hWnd, uMsg, wParam, lParam);
@@ -116,7 +117,7 @@ HWND CreateMessageQueue(CommandLineArgs& args)
     }
 
     if (args.mHotkeySupport) {
-        if (!RegisterHotKey(hWnd, c_Hotkey, args.mHotkeyModifiers, args.mHotkeyVirtualKeyCode)) {
+        if (!RegisterHotKey(hWnd, HOTKEY_ID, args.mHotkeyModifiers, args.mHotkeyVirtualKeyCode)) {
             fprintf(stderr, "error: failed to register hotkey.\n");
             DestroyWindow(hWnd);
             return 0;
@@ -137,7 +138,6 @@ bool HaveAdministratorPrivileges()
     } static privilege = PRIVILEGE_UNKNOWN;
 
     if (privilege == PRIVILEGE_UNKNOWN) {
-
         typedef BOOL(WINAPI *OpenProcessTokenProc)(HANDLE ProcessHandle, DWORD DesiredAccess, PHANDLE TokenHandle);
         typedef BOOL(WINAPI *GetTokenInformationProc)(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS TokenInformationClass, LPVOID TokenInformation, DWORD TokenInformationLength, DWORD *ReturnLength);
         HMODULE advapi = LoadLibraryA("advapi32");
@@ -173,9 +173,23 @@ bool HaveAdministratorPrivileges()
 
 }
 
-void QuitPresentMon()
+bool EtwThreadsShouldQuit()
 {
-    g_StopRecording = true;
+    return g_StopEtwThreads;
+}
+
+void PostToggleRecording(CommandLineArgs const& args)
+{
+    PostMessage(g_hWnd, WM_HOTKEY, HOTKEY_ID, args.mHotkeyModifiers & ~MOD_NOREPEAT);
+}
+
+void PostStopRecording()
+{
+    PostMessage(g_hWnd, WM_STOP_ETW_THREADS, 0, 0);
+}
+
+void PostQuitProcess()
+{
     PostMessage(g_hWnd, WM_QUIT, 0, 0);
 }
 
@@ -212,7 +226,8 @@ int main(int argc, char** argv)
         g_originalScrollLockEnabled = EnableScrollLock(false);
     }
 
-    // Create a message queue to handle WM_HOTKEY and WM_QUIT messages.
+    // Create a message queue to handle WM_HOTKEY, WM_STOP_ETW_THREADS, and
+    // WM_QUIT messages.
     HWND hWnd = CreateMessageQueue(args);
     if (hWnd == 0) {
         ret = 3;
@@ -227,27 +242,22 @@ int main(int argc, char** argv)
     g_hWnd = hWnd;
     SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
 
-    // Now that everything is running we can start recording on the recording
-    // thread.  If we're using -hotkey then we don't start recording until the
-    // user presses the hotkey (F11).
+    // If the user didn't specify -hotkey, simulate a hotkey press to start the
+    // recording right away.
     if (!args.mHotkeySupport) {
-        StartRecording(args);
+        PostToggleRecording(args);
     }
 
-    // Start the message queue loop, which is the main mechanism for starting
-    // and stopping the recording from the hotkey as well as terminating the
-    // process.
-    //
-    // This thread will block waiting for any messages.
+    // Enter the main thread message loop.  This thread will block waiting for
+    // any messages, which will control the hotkey-toggling and process
+    // shutdown.
     for (MSG message = {}; GetMessageW(&message, hWnd, 0, 0); ) {
         TranslateMessage(&message);
         DispatchMessageW(&message);
     }
 
-    // Wait for tracing to finish, to ensure the PM thread closes the session
-    // correctly Prevent races on joining the PM thread between the control
-    // handler and the main thread
-    StopRecording();
+    // Everything should be shutdown by now.
+    assert(!EtwThreadsRunning());
 
 clean_up:
     // Restore original scroll lock state

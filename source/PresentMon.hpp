@@ -55,7 +55,7 @@ struct PresentMonData {
     std::vector<NTProcessEvent> mNTProcessEvents;
 };
 
-void PresentMonEtw(const CommandLineArgs& args);
+void EtwConsumingThread(const CommandLineArgs& args);
 
 void PresentMon_Init(const CommandLineArgs& args, PresentMonData& data);
 void PresentMon_Update(PresentMonData& data, std::vector<std::shared_ptr<PresentEvent>>& presents, uint64_t perfFreq);

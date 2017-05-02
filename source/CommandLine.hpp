@@ -35,7 +35,7 @@ struct CommandLineArgs {
     UINT mTargetPid = 0;
     UINT mDelay = 0;
     UINT mTimer = 0;
-    UINT mRestartCount = 0;
+    UINT mRecordingCount = 0;
     UINT mHotkeyModifiers = MOD_NOREPEAT;
     UINT mHotkeyVirtualKeyCode = VK_F11;
     bool mOutputFile = true;

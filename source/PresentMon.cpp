@@ -256,7 +256,7 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
                 char name[_MAX_FNAME] = {};
                 char ext[_MAX_EXT] = {};
                 _splitpath_s(args.mOutputFileName, drive, dir, name, ext);
-                _snprintf_s(pm.mOutputFilePath, _TRUNCATE, "%s%s%s-%d%s", drive, dir, name, args.mRestartCount, ext);
+                _snprintf_s(pm.mOutputFilePath, _TRUNCATE, "%s%s%s-%d%s", drive, dir, name, args.mRecordingCount, ext);
             }
         } else {
             struct tm tm;
@@ -313,7 +313,8 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
         if (proc.second.mTerminationProcess && !proc.second.mProcessExists) {
             --pm.mTerminationProcessCount;
             if (pm.mTerminationProcessCount == 0) {
-                QuitPresentMon();
+                PostStopRecording();
+                PostQuitProcess();
             }
             proc.second.mTerminationProcess = false;
         }
@@ -397,26 +398,26 @@ void PresentMon_Shutdown(PresentMonData& pm, bool log_corrupted)
     }
 }
 
-static bool g_FileComplete = false;
+static bool g_EtwProcessingThreadProcessing = false;
 static void EtwProcessingThread(TraceSession *session)
 {
+    assert(g_EtwProcessingThreadProcessing == true);
+
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
 
     auto status = ProcessTrace(&session->traceHandle_, 1, NULL, NULL);
     (void) status; // check: _status == ERROR_SUCCESS;
 
-    // Guarantees that the PM thread does one more loop to pick up any last events before calling QuitPresentMon()
-    g_FileComplete = true;
+    // Notify EtwConsumingThread that processing is complete
+    g_EtwProcessingThreadProcessing = false;
 }
 
-void PresentMonEtw(const CommandLineArgs& args)
+void EtwConsumingThread(const CommandLineArgs& args)
 {
     Sleep(args.mDelay * 1000);
-    if (g_StopRecording) {
+    if (EtwThreadsShouldQuit()) {
         return;
     }
-
-    g_FileComplete = false;
 
     PresentMonData data;
     PMTraceConsumer pmConsumer(args.mSimple);
@@ -437,21 +438,21 @@ void PresentMonEtw(const CommandLineArgs& args)
 
     {
         // Launch the ETW producer thread
-        std::thread etwThread(EtwProcessingThread, &session);
+        g_EtwProcessingThreadProcessing = true;
+        std::thread etwProcessingThread(EtwProcessingThread, &session);
 
         // Consume / Update based on the ETW output
         {
 
             PresentMon_Init(args, data);
-            uint64_t start_time = GetTickCount64();
+            auto timerRunning = args.mTimer > 0;
+            auto timerEnd = GetTickCount64() + args.mTimer * 1000;
 
             std::vector<std::shared_ptr<PresentEvent>> presents;
             std::vector<NTProcessEvent> ntProcessEvents;
 
             bool log_corrupted = false;
-
-            while (!g_StopRecording)
-            {
+            for (;;) {
 #if _DEBUG
                 if (args.mSimpleConsole) {
                     printf(".");
@@ -488,18 +489,8 @@ void PresentMonEtw(const CommandLineArgs& args)
                     presents.clear();
                 }
 
+                auto doneProcessingEvents = g_EtwProcessingThreadProcessing ? false : true;
                 PresentMon_Update(data, presents, session.frequency_);
-
-                uint32_t eventsLost = 0;
-                uint32_t buffersLost = 0;
-                if (session.CheckLostReports(&eventsLost, &buffersLost)) {
-                    printf("Lost %u events, %u buffers.", eventsLost, buffersLost);
-                    // FIXME: How do we set a threshold here?
-                    if (eventsLost > 100) {
-                        log_corrupted = true;
-                        g_FileComplete = true;
-                    }
-                }
 
                 if (args.mEtlFileName) {
                     for (auto ntProcessEvent : ntProcessEvents) {
@@ -509,16 +500,30 @@ void PresentMonEtw(const CommandLineArgs& args)
                     }
                 }
 
-                if (g_FileComplete) {
-                    QuitPresentMon();
-                    break;
+                uint32_t eventsLost = 0;
+                uint32_t buffersLost = 0;
+                if (session.CheckLostReports(&eventsLost, &buffersLost)) {
+                    printf("Lost %u events, %u buffers.", eventsLost, buffersLost);
+                    // FIXME: How do we set a threshold here?
+                    if (eventsLost > 100) {
+                        log_corrupted = true;
+                        PostStopRecording();
+                        PostQuitProcess();
+                    }
                 }
 
-                if (args.mTimer > 0 && GetTickCount64() - start_time >= args.mTimer * 1000) {
-                    if (args.mTerminateAfterTimer) {
-                        QuitPresentMon();
+                if (timerRunning) {
+                    if (GetTickCount64() >= timerEnd) {
+                        PostStopRecording();
+                        if (args.mTerminateAfterTimer) {
+                            PostQuitProcess();
+                        }
+                        timerRunning = false;
                     }
-                    g_StopRecording = true;
+                }
+
+                if (doneProcessingEvents) {
+                    assert(EtwThreadsShouldQuit());
                     break;
                 }
 
@@ -528,7 +533,9 @@ void PresentMonEtw(const CommandLineArgs& args)
             PresentMon_Shutdown(data, log_corrupted);
         }
 
-        etwThread.join();
+        assert(etwProcessingThread.joinable());
+        assert(!g_EtwProcessingThreadProcessing);
+        etwProcessingThread.join();
     }
 
     session.Finalize();

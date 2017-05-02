@@ -39,8 +39,9 @@ static const auto DWM_PROVIDER_GUID = __uuidof(DWM_PROVIDER_GUID_HOLDER);
 static const auto D3D9_PROVIDER_GUID = __uuidof(D3D9_PROVIDER_GUID_HOLDER);
 static const auto NT_PROCESS_EVENT_GUID = __uuidof(NT_PROCESS_EVENT_GUID_HOLDER);
 
-extern bool g_StopRecording;
-void QuitPresentMon();
+bool EtwThreadsShouldQuit();
+void PostStopRecording();
+void PostQuitProcess();
 
 template <typename mutex_t> std::unique_lock<mutex_t> scoped_lock(mutex_t &m)
 {
@@ -111,7 +112,7 @@ struct PresentEvent {
     PresentEvent(EVENT_HEADER const& hdr, ::Runtime runtime);
 
 #if _DEBUG
-    ~PresentEvent() { assert(Completed || g_StopRecording); }
+    ~PresentEvent() { assert(Completed || EtwThreadsShouldQuit()); }
 #endif
 };
 
