@@ -23,6 +23,7 @@ SOFTWARE.
 #include <stdio.h>
 
 #include "PresentMon.hpp"
+#include <generated/version.h>
 
 namespace {
 
@@ -218,7 +219,7 @@ void PrintHelp()
 {
     // NOTE: remember to update README.md when modifying usage
     fprintf(stderr,
-        "PresentMon (development branch)\n"
+        "PresentMon %s\n"
         "\n"
         "Capture target options (use one of the following):\n"
         "    -captureall                Record all processes (default).\n"
@@ -245,7 +246,8 @@ void PrintHelp()
         "    -terminate_after_timed     Terminate PresentMon after the timed trace, specified using -timed, completes.\n"
         "    -simple                    Disable advanced tracking (try this if you encounter crashes).\n"
         "    -dont_restart_as_admin     Don't try to elevate privilege.\n"
-        "    -no_top                    Don't display active swap chains in the console window.\n"
+        "    -no_top                    Don't display active swap chains in the console window.\n",
+        PRESENT_MON_VERSION
         );
 }
 
