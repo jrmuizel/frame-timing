@@ -104,28 +104,35 @@ static void UpdateProcessInfo_Realtime(ProcessInfo& info, uint64_t now, uint32_t
 {
     if (now - info.mLastRefreshTicks > 1000) {
         info.mLastRefreshTicks = now;
-        char path[MAX_PATH] = "<error>";
         HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, thisPid);
         if (h) {
-            GetModuleFileNameExA(h, NULL, path, sizeof(path) - 1);
-            std::string name = PathFindFileNameA(path);
-            if (name != info.mModuleName) {
-                info.mChainMap.clear();
-                info.mModuleName = name;
-            }
-            DWORD dwExitCode = 0;
             info.mProcessExists = true;
-            if (GetExitCodeProcess(h, &dwExitCode) && dwExitCode != STILL_ACTIVE) {
+
+            char path[MAX_PATH] = "<error>";
+            char* name = path;
+            DWORD numChars = sizeof(path);
+            if (QueryFullProcessImageNameA(h, 0, path, &numChars) == TRUE) {
+                name = PathFindFileNameA(path);
+            }
+            if (info.mModuleName.compare(name) != 0) {
+                info.mModuleName.assign(name);
+                info.mChainMap.clear();
+            }
+
+            DWORD dwExitCode = 0;
+            if (GetExitCodeProcess(h, &dwExitCode) == TRUE && dwExitCode != STILL_ACTIVE) {
                 info.mProcessExists = false;
             }
+
             CloseHandle(h);
         } else {
             info.mChainMap.clear();
             info.mProcessExists = false;
         }
     }
+
     // remove chains without recent updates
-        map_erase_if(info.mChainMap, [now](const std::pair<const uint64_t, SwapChainData>& entry) {
+    map_erase_if(info.mChainMap, [now](const std::pair<const uint64_t, SwapChainData>& entry) {
         return entry.second.IsStale(now);
     });
 }
