@@ -218,7 +218,7 @@ void PrintHelp()
 {
     // NOTE: remember to update README.md when modifying usage
     fprintf(stderr,
-        "PresentMon version 1.1.1\n"
+        "PresentMon version 1.1.2\n"
         "\n"
         "Capture target options:\n"
         "    -captureall                Record all processes (default).\n"
