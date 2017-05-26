@@ -22,17 +22,15 @@ SOFTWARE.
 
 #pragma once
 
+#include <map>
+#include <mutex>
+#include <stdint.h>
+#include <stdio.h>
+#include <string>
+#include <vector>
+
 #include "CommandLine.hpp"
-#include "CommonIncludes.hpp"
-#include "PresentMonTraceConsumer.hpp"
 #include "SwapChainData.hpp"
-
-#include <unordered_map>
-
-struct NTProcessEvent {
-    uint32_t ProcessId;
-    std::string ImageFileName;  // If ImageFileName.empty(), then event is that process ending
-};
 
 struct ProcessInfo {
     uint64_t mLastRefreshTicks = 0; // GetTickCount64
@@ -49,10 +47,6 @@ struct PresentMonData {
     FILE *mOutputFile = nullptr;
     std::map<uint32_t, ProcessInfo> mProcessMap;
     uint32_t mTerminationProcessCount = 0;
-
-    // Process events
-    std::mutex mNTProcessEventMutex;
-    std::vector<NTProcessEvent> mNTProcessEvents;
 };
 
 void EtwConsumingThread(const CommandLineArgs& args);
@@ -60,4 +54,8 @@ void EtwConsumingThread(const CommandLineArgs& args);
 void PresentMon_Init(const CommandLineArgs& args, PresentMonData& data);
 void PresentMon_Update(PresentMonData& data, std::vector<std::shared_ptr<PresentEvent>>& presents, uint64_t perfFreq);
 void PresentMon_Shutdown(PresentMonData& data, bool log_corrupted);
+
+bool EtwThreadsShouldQuit();
+void PostStopRecording();
+void PostQuitProcess();
 

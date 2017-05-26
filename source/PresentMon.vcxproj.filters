@@ -13,7 +13,6 @@
     <ClInclude Include="CommandLine.hpp" />
     <ClInclude Include="PresentMon.hpp" />
     <ClInclude Include="TraceSession.hpp" />
-    <ClInclude Include="CommonIncludes.hpp" />
     <ClInclude Include="PresentMonTraceConsumer.hpp" />
     <ClInclude Include="TraceConsumer.hpp" />
     <ClInclude Include="SwapChainData.hpp" />

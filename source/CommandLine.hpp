@@ -21,6 +21,7 @@ SOFTWARE.
 */
 
 #pragma once
+
 #include <windows.h>
 
 enum class Verbosity {

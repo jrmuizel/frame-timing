@@ -20,14 +20,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
-#include <tdh.h>
+#include <windows.h>
+#include <tdh.h> // must include after windows.h
 
 #include "TraceConsumer.hpp"
 

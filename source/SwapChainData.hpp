@@ -22,7 +22,9 @@ SOFTWARE.
 
 #pragma once
 
-#include "CommonIncludes.hpp"
+#include <deque>
+#include <stdint.h>
+
 #include "PresentMonTraceConsumer.hpp"
 
 struct SwapChainData {

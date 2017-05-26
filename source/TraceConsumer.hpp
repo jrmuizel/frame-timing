@@ -22,9 +22,9 @@ SOFTWARE.
 
 #pragma once
 
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-
+#include <stdio.h>
+#include <string>
 #include <tdh.h>
 
 void PrintEventInformation(FILE* fp, EVENT_RECORD* pEventRecord);

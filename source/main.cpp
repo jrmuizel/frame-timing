@@ -20,11 +20,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include <windows.h>
-
-#include <cstdio>
-#include <mutex>
+#include <assert.h>
 #include <thread>
+#include <windows.h>
 
 #include "CommandLine.hpp"
 #include "PresentMon.hpp"

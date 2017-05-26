@@ -20,9 +20,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include "PresentMon.hpp"
-#include "PresentMonTraceConsumer.hpp"
+#include <algorithm>
 #include <d3d9.h>
+#include <dxgi.h>
+
+#include "PresentMonTraceConsumer.hpp"
+#include "TraceConsumer.hpp"
 
 PresentEvent::PresentEvent(EVENT_HEADER const& hdr, ::Runtime runtime)
     : QpcTime(*(uint64_t*) &hdr.TimeStamp)
@@ -47,6 +50,14 @@ PresentEvent::PresentEvent(EVENT_HEADER const& hdr, ::Runtime runtime)
     , Completed(false)
 {
 }
+
+#ifdef _DEBUG
+static bool gPresentMonTraceConsumer_Exiting = false;
+PresentEvent::~PresentEvent()
+{
+    assert(Completed || gPresentMonTraceConsumer_Exiting);
+}
+#endif
 
 void HandleDXGIEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 {
@@ -676,6 +687,13 @@ void HandleD3D9Event(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
     }
 }
 
+#ifdef _DEBUG
+PMTraceConsumer::~PMTraceConsumer()
+{
+    gPresentMonTraceConsumer_Exiting = true;
+}
+#endif
+
 void PMTraceConsumer::CompletePresent(std::shared_ptr<PresentEvent> p)
 {
     if (p->Completed)
@@ -777,11 +795,9 @@ void PMTraceConsumer::RuntimePresentStart(PresentEvent &event)
     auto& processSwapChainDeque = mPresentsByProcessAndSwapChain[std::make_tuple(event.ProcessId, event.SwapChainAddress)];
     processSwapChainDeque.emplace_back(pEvent);
 
-#if _DEBUG
     // Set the caller's local event instance to completed so the _DEBUG check
     // in ~PresentEvent() doesn't fire when it is destructed.
     event.Completed = true;
-#endif
 }
 
 void PMTraceConsumer::RuntimePresentStop(EVENT_HEADER const& hdr, bool AllowPresentBatching)
@@ -803,7 +819,7 @@ void PMTraceConsumer::RuntimePresentStop(EVENT_HEADER const& hdr, bool AllowPres
     mPresentByThreadId.erase(eventIter);
 }
 
-void HandleNTProcessEvent(PEVENT_RECORD pEventRecord, PresentMonData* pmData)
+void HandleNTProcessEvent(PEVENT_RECORD pEventRecord, PMTraceConsumer* pmConsumer)
 {
     NTProcessEvent event;
 
@@ -821,8 +837,8 @@ void HandleNTProcessEvent(PEVENT_RECORD pEventRecord, PresentMonData* pmData)
     }
 
     {
-        auto lock = scoped_lock(pmData->mNTProcessEventMutex);
-        pmData->mNTProcessEvents.emplace_back(event);
+        auto lock = scoped_lock(pmConsumer->mNTProcessEventMutex);
+        pmConsumer->mNTProcessEvents.emplace_back(event);
     }
 }
 

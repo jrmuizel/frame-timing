@@ -20,15 +20,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include "TraceSession.hpp"
-#include "PresentMon.hpp"
-
-#include <psapi.h>
+#include <algorithm>
 #include <shlwapi.h>
 
-#pragma comment(lib, "psapi.lib")
-#pragma comment(lib, "shlwapi.lib")
-#pragma comment(lib, "tdh.lib")
+#include "TraceSession.hpp"
+#include "PresentMon.hpp"
 
 template <typename Map, typename F>
 static void map_erase_if(Map& m, F pred)
@@ -509,8 +505,8 @@ void EtwConsumingThread(const CommandLineArgs& args)
 
                 if (args.mEtlFileName) {
                     {
-                        auto lock = scoped_lock(data.mNTProcessEventMutex);
-                        ntProcessEvents.swap(data.mNTProcessEvents);
+                        auto lock = scoped_lock(pmConsumer.mNTProcessEventMutex);
+                        ntProcessEvents.swap(pmConsumer.mNTProcessEvents);
                     }
 
                     for (auto ntProcessEvent : ntProcessEvents) {

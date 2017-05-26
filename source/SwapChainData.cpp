@@ -21,7 +21,6 @@ SOFTWARE.
 */
 
 #include "SwapChainData.hpp"
-#include <numeric>
 
 enum {
     MAX_HISTORY_TIME = 2000,

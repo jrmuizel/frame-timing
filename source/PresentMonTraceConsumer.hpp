@@ -22,9 +22,15 @@ SOFTWARE.
 
 #pragma once
 
-#include "CommonIncludes.hpp"
-#include "TraceConsumer.hpp"
-#include <dxgi.h>
+#include <assert.h>
+#include <deque>
+#include <map>
+#include <mutex>
+#include <numeric>
+#include <set>
+#include <vector>
+#include <windows.h>
+#include <evntcons.h> // must include after windows.h
 
 struct __declspec(uuid("{CA11C036-0102-4A2D-A6AD-F03CFED5D3C9}")) DXGI_PROVIDER_GUID_HOLDER;
 struct __declspec(uuid("{802ec45a-1e99-4b83-9920-87c98277ba9d}")) DXGKRNL_PROVIDER_GUID_HOLDER;
@@ -38,10 +44,6 @@ static const auto WIN32K_PROVIDER_GUID = __uuidof(WIN32K_PROVIDER_GUID_HOLDER);
 static const auto DWM_PROVIDER_GUID = __uuidof(DWM_PROVIDER_GUID_HOLDER);
 static const auto D3D9_PROVIDER_GUID = __uuidof(D3D9_PROVIDER_GUID_HOLDER);
 static const auto NT_PROCESS_EVENT_GUID = __uuidof(NT_PROCESS_EVENT_GUID_HOLDER);
-
-bool EtwThreadsShouldQuit();
-void PostStopRecording();
-void PostQuitProcess();
 
 template <typename mutex_t> std::unique_lock<mutex_t> scoped_lock(mutex_t &m)
 {
@@ -72,9 +74,10 @@ enum class Runtime
     DXGI, D3D9, Other
 };
 
-const char* PresentModeToString(PresentMode mode);
-const char* RuntimeToString(Runtime rt);
-const char* FinalStateToDroppedString(PresentResult res);
+struct NTProcessEvent {
+    uint32_t ProcessId;
+    std::string ImageFileName;  // If ImageFileName.empty(), then event is that process ending
+};
 
 struct PresentEvent {
     // Available from DXGI Present
@@ -112,14 +115,17 @@ struct PresentEvent {
 
     PresentEvent(EVENT_HEADER const& hdr, ::Runtime runtime);
 
-#if _DEBUG
-    ~PresentEvent() { assert(Completed || EtwThreadsShouldQuit()); }
+#ifdef _DEBUG
+    ~PresentEvent();
 #endif
 };
 
 struct PMTraceConsumer
 {
     PMTraceConsumer(bool simple) : mSimpleMode(simple) { }
+#ifdef _DEBUG
+    ~PMTraceConsumer();
+#endif
     bool mSimpleMode;
 
     std::mutex mMutex;
@@ -204,6 +210,10 @@ struct PMTraceConsumer
     // Yet another unique way of tracking present history tokens, this time from DxgKrnl -> DWM, only for legacy blit
     std::map<uint64_t, std::shared_ptr<PresentEvent>> mPresentsByLegacyBlitToken;
 
+    // Process events
+    std::mutex mNTProcessEventMutex;
+    std::vector<NTProcessEvent> mNTProcessEvents;
+
     bool DequeuePresents(std::vector<std::shared_ptr<PresentEvent>>& outPresents)
     {
         if (mCompletedPresents.size())
@@ -221,9 +231,7 @@ struct PMTraceConsumer
     void RuntimePresentStop(EVENT_HEADER const& hdr, bool AllowPresentBatching);
 };
 
-struct PresentMonData;
-
-void HandleNTProcessEvent(EVENT_RECORD* pEventRecord, PresentMonData* pmData);
+void HandleNTProcessEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
 void HandleDXGIEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
 void HandleD3D9Event(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
 void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);

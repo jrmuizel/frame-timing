@@ -22,9 +22,7 @@ SOFTWARE.
 
 #pragma once
 
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-
 #include <evntcons.h> // must be after windows.h
 #include <stdint.h>
 #include <unordered_map>

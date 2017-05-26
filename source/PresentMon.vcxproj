@@ -113,6 +113,7 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <TreatLinkerWarningAsErrors>true</TreatLinkerWarningAsErrors>
+      <AdditionalDependencies>shlwapi.lib;tdh.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest />
     <CustomBuildStep>
@@ -136,6 +137,7 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <TreatLinkerWarningAsErrors>true</TreatLinkerWarningAsErrors>
+      <AdditionalDependencies>shlwapi.lib;tdh.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest />
     <CustomBuildStep>
@@ -164,6 +166,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <TreatLinkerWarningAsErrors>true</TreatLinkerWarningAsErrors>
+      <AdditionalDependencies>shlwapi.lib;tdh.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest />
     <CustomBuildStep>
@@ -192,6 +195,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <TreatLinkerWarningAsErrors>true</TreatLinkerWarningAsErrors>
+      <AdditionalDependencies>shlwapi.lib;tdh.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Manifest />
     <CustomBuildStep>
@@ -213,7 +217,6 @@
   <ItemGroup>
     <ClInclude Include="CommandLine.hpp" />
     <ClInclude Include="PresentMon.hpp" />
-    <ClInclude Include="CommonIncludes.hpp" />
     <ClInclude Include="SwapChainData.hpp" />
     <ClInclude Include="PresentMonTraceConsumer.hpp" />
     <ClInclude Include="TraceConsumer.hpp" />
