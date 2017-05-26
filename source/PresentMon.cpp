@@ -20,7 +20,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include "Events.hpp"
 #include "TraceSession.hpp"
 #include "PresentMon.hpp"
 

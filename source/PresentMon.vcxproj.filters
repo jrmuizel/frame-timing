@@ -7,7 +7,6 @@
     <ClCompile Include="TraceSession.cpp" />
     <ClCompile Include="PresentMonTraceConsumer.cpp" />
     <ClCompile Include="TraceConsumer.cpp" />
-    <ClCompile Include="Events.cpp" />
     <ClCompile Include="SwapChainData.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -17,7 +16,6 @@
     <ClInclude Include="CommonIncludes.hpp" />
     <ClInclude Include="PresentMonTraceConsumer.hpp" />
     <ClInclude Include="TraceConsumer.hpp" />
-    <ClInclude Include="Events.hpp" />
     <ClInclude Include="SwapChainData.hpp" />
   </ItemGroup>
 </Project>

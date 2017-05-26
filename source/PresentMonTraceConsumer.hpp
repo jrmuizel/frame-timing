@@ -215,15 +215,18 @@ struct PMTraceConsumer
         return false;
     }
 
-    void OnDXGIEvent(_In_ PEVENT_RECORD pEventRecord);
-    void OnDXGKrnlEvent(_In_ PEVENT_RECORD pEventRecord);
-    void OnWin32kEvent(_In_ PEVENT_RECORD pEventRecord);
-    void OnDWMEvent(_In_ PEVENT_RECORD pEventRecord);
-    void OnD3D9Event(_In_ PEVENT_RECORD pEventRecord);
-
-private:
     void CompletePresent(std::shared_ptr<PresentEvent> p);
     decltype(mPresentByThreadId.begin()) FindOrCreatePresent(EVENT_HEADER const& hdr);
     void RuntimePresentStart(PresentEvent &event);
     void RuntimePresentStop(EVENT_HEADER const& hdr, bool AllowPresentBatching);
 };
+
+struct PresentMonData;
+
+void HandleNTProcessEvent(EVENT_RECORD* pEventRecord, PresentMonData* pmData);
+void HandleDXGIEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
+void HandleD3D9Event(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
+void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
+void HandleWin32kEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
+void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
+

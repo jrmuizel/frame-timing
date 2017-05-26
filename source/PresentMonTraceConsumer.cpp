@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+#include "PresentMon.hpp"
 #include "PresentMonTraceConsumer.hpp"
 #include <d3d9.h>
 
@@ -47,7 +48,7 @@ PresentEvent::PresentEvent(EVENT_HEADER const& hdr, ::Runtime runtime)
 {
 }
 
-void PMTraceConsumer::OnDXGIEvent(PEVENT_RECORD pEventRecord)
+void HandleDXGIEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 {
     enum {
         DXGIPresent_Start = 42,
@@ -67,7 +68,7 @@ void PMTraceConsumer::OnDXGIEvent(PEVENT_RECORD pEventRecord)
         GetEventData(pEventRecord, L"Flags",           &event.PresentFlags);
         GetEventData(pEventRecord, L"SyncInterval",    &event.SyncInterval);
 
-        RuntimePresentStart(event);
+        pmConsumer->RuntimePresentStart(event);
         break;
     }
     case DXGIPresent_Stop:
@@ -75,13 +76,13 @@ void PMTraceConsumer::OnDXGIEvent(PEVENT_RECORD pEventRecord)
     {
         auto result = GetEventData<uint32_t>(pEventRecord, L"Result");
         bool AllowBatching = SUCCEEDED(result) && result != DXGI_STATUS_OCCLUDED && result != DXGI_STATUS_MODE_CHANGE_IN_PROGRESS && result != DXGI_STATUS_NO_DESKTOP_ACCESS;
-        RuntimePresentStop(hdr, AllowBatching);
+        pmConsumer->RuntimePresentStop(hdr, AllowBatching);
         break;
     }
     }
 }
 
-void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
+void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 {
     enum {
         DxgKrnl_Flip = 168,
@@ -110,14 +111,14 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
         // A flip event is emitted during fullscreen present submission.
         // Afterwards, expect an MMIOFlip packet on the same thread, used
         // to trace the flip to screen.
-        auto eventIter = FindOrCreatePresent(hdr);
+        auto eventIter = pmConsumer->FindOrCreatePresent(hdr);
 
         // Check if we might have retrieved a 'stuck' present from a previous frame.
         // The only events that we can expect before a Flip/FlipMPO are a runtime present start, or a previous FlipMPO.
         if (eventIter->second->QueueSubmitSequence != 0 || eventIter->second->SeenDxgkPresent) {
             // It's already progressed further but didn't complete, ignore it and create a new one.
-            mPresentByThreadId.erase(eventIter);
-            eventIter = FindOrCreatePresent(hdr);
+            pmConsumer->mPresentByThreadId.erase(eventIter);
+            eventIter = pmConsumer->FindOrCreatePresent(hdr);
         }
 
         if (eventIter->second->PresentMode != PresentMode::Unknown) {
@@ -139,9 +140,9 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
         }
 
         // If this is the DWM thread, piggyback these pending presents on our fullscreen present
-        if (hdr.ThreadId == DwmPresentThreadId) {
-            std::swap(eventIter->second->DependentPresents, mPresentsWaitingForDWM);
-            DwmPresentThreadId = 0;
+        if (hdr.ThreadId == pmConsumer->DwmPresentThreadId) {
+            std::swap(eventIter->second->DependentPresents, pmConsumer->mPresentsWaitingForDWM);
+            pmConsumer->DwmPresentThreadId = 0;
         }
         break;
     }
@@ -161,14 +162,14 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
         if (Type == DxgKrnl_QueueSubmit_Type::MMIOFlip ||
             Type == DxgKrnl_QueueSubmit_Type::Software ||
             Present) {
-            auto eventIter = mPresentByThreadId.find(hdr.ThreadId);
-            if (eventIter == mPresentByThreadId.end()) {
+            auto eventIter = pmConsumer->mPresentByThreadId.find(hdr.ThreadId);
+            if (eventIter == pmConsumer->mPresentByThreadId.end()) {
                 return;
             }
 
             if (eventIter->second->QueueSubmitSequence == 0) {
                 eventIter->second->QueueSubmitSequence = SubmitSequence;
-                mPresentsBySubmitSequence.emplace(SubmitSequence, eventIter->second);
+                pmConsumer->mPresentsBySubmitSequence.emplace(SubmitSequence, eventIter->second);
             }
         }
 
@@ -177,8 +178,8 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
     case DxgKrnl_QueueComplete:
     {
         auto SubmitSequence = GetEventData<uint32_t>(pEventRecord, L"SubmitSequence");
-        auto eventIter = mPresentsBySubmitSequence.find(SubmitSequence);
-        if (eventIter == mPresentsBySubmitSequence.end()) {
+        auto eventIter = pmConsumer->mPresentsBySubmitSequence.find(SubmitSequence);
+        if (eventIter == pmConsumer->mPresentsBySubmitSequence.end()) {
             return;
         }
 
@@ -193,7 +194,7 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             // In this case, for blit presents, we have no way to differentiate between fullscreen and windowed blits
             // So, defer the completion of this present until we know all events have been fired
             if (pEvent->SeenDxgkPresent) {
-                CompletePresent(pEvent);
+                pmConsumer->CompletePresent(pEvent);
             }
         }
         break;
@@ -213,8 +214,8 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
         auto FlipSubmitSequence = GetEventData<uint32_t>(pEventRecord, L"FlipSubmitSequence");
         auto Flags = GetEventData<DxgKrnl_MMIOFlip_Flags>(pEventRecord, L"Flags");
 
-        auto eventIter = mPresentsBySubmitSequence.find(FlipSubmitSequence);
-        if (eventIter == mPresentsBySubmitSequence.end()) {
+        auto eventIter = pmConsumer->mPresentsBySubmitSequence.find(FlipSubmitSequence);
+        if (eventIter == pmConsumer->mPresentsBySubmitSequence.end()) {
             return;
         }
 
@@ -228,7 +229,7 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             eventIter->second->ScreenTime = *(uint64_t*)&pEventRecord->EventHeader.TimeStamp;
             eventIter->second->SupportsTearing = true;
             if (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Flip) {
-                CompletePresent(eventIter->second);
+                pmConsumer->CompletePresent(eventIter->second);
             }
         }
 
@@ -241,8 +242,8 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
         auto FlipFenceId = GetEventData<uint64_t>(pEventRecord, L"FlipSubmitSequence");
         uint32_t FlipSubmitSequence = (uint32_t)(FlipFenceId >> 32u);
 
-        auto eventIter = mPresentsBySubmitSequence.find(FlipSubmitSequence);
-        if (eventIter == mPresentsBySubmitSequence.end()) {
+        auto eventIter = pmConsumer->mPresentsBySubmitSequence.find(FlipSubmitSequence);
+        if (eventIter == pmConsumer->mPresentsBySubmitSequence.end()) {
             return;
         }
 
@@ -273,7 +274,7 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                     eventIter->second->ScreenTime = *(uint64_t*)&pEventRecord->EventHeader.TimeStamp;
                 }
                 if (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Flip) {
-                    CompletePresent(eventIter->second);
+                    pmConsumer->CompletePresent(eventIter->second);
                 }
             }
         }
@@ -287,15 +288,15 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
         auto FlipFenceId = GetEventData<uint64_t>(pEventRecord, L"FlipFenceId");
 
         uint32_t FlipSubmitSequence = (uint32_t)(FlipFenceId >> 32u);
-        auto eventIter = mPresentsBySubmitSequence.find(FlipSubmitSequence);
-        if (eventIter == mPresentsBySubmitSequence.end()) {
+        auto eventIter = pmConsumer->mPresentsBySubmitSequence.find(FlipSubmitSequence);
+        if (eventIter == pmConsumer->mPresentsBySubmitSequence.end()) {
             return;
         }
 
         eventIter->second->ScreenTime = EventTime;
         eventIter->second->FinalState = PresentResult::Presented;
         if (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Flip) {
-            CompletePresent(eventIter->second);
+            pmConsumer->CompletePresent(eventIter->second);
         }
         break;
     }
@@ -309,8 +310,8 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
         // All other events have already been logged, but this one contains one
         // extra piece of useful information: the hWnd that a present targeted,
         // used to determine when presents are discarded instead of composed.
-        auto eventIter = mPresentByThreadId.find(hdr.ThreadId);
-        if (eventIter == mPresentByThreadId.end()) {
+        auto eventIter = pmConsumer->mPresentByThreadId.find(hdr.ThreadId);
+        if (eventIter == pmConsumer->mPresentByThreadId.end()) {
             return;
         }
 
@@ -321,7 +322,7 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             // The present history token got dropped for some reason. Discard this present.
             eventIter->second->PresentMode = PresentMode::Unknown;
             eventIter->second->FinalState = PresentResult::Discarded;
-            CompletePresent(eventIter->second);
+            pmConsumer->CompletePresent(eventIter->second);
         }
 
         // For all other events, just remember the hWnd, we might need it later
@@ -333,7 +334,7 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             eventIter->second->ScreenTime != 0) {
             // This is a fullscreen blit where all work associated was already done, so it's on-screen
             // It was deferred to here because there was no way to be sure it was really fullscreen until now
-            CompletePresent(eventIter->second);
+            pmConsumer->CompletePresent(eventIter->second);
         }
 
         if (eventIter->second->RuntimeThread != hdr.ThreadId) {
@@ -341,7 +342,7 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
                 eventIter->second->TimeTaken = EventTime - eventIter->second->QpcTime;
             }
             eventIter->second->WasBatched = true;
-            mPresentByThreadId.erase(eventIter);
+            pmConsumer->mPresentByThreadId.erase(eventIter);
         }
         break;
     }
@@ -351,8 +352,8 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
         // In the case of flip and blit model, it is used to find a key to watch for the
         // event which triggers the "ready" state.
         // In the case of blit model, it is also used to distinguish between fs/windowed.
-        auto eventIter = mPresentByThreadId.find(hdr.ThreadId);
-        if (eventIter == mPresentByThreadId.end()) {
+        auto eventIter = pmConsumer->mPresentByThreadId.find(hdr.ThreadId);
+        if (eventIter == pmConsumer->mPresentByThreadId.end()) {
             return;
         }
 
@@ -365,27 +366,27 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             eventIter->second->FinalState = PresentResult::Unknown;
         }
         uint64_t TokenPtr = GetEventData<uint64_t>(pEventRecord, L"Token");
-        mDxgKrnlPresentHistoryTokens[TokenPtr] = eventIter->second;
+        pmConsumer->mDxgKrnlPresentHistoryTokens[TokenPtr] = eventIter->second;
         break;
     }
     case DxgKrnl_SubmitPresentHistory:
     {
         // This event is emitted during submission of other types of windowed presents.
         // It gives us up to two different types of keys to correlate further.
-        auto eventIter = FindOrCreatePresent(hdr);
+        auto eventIter = pmConsumer->FindOrCreatePresent(hdr);
 
         // Check if we might have retrieved a 'stuck' present from a previous frame.
         // This event always results in a classification, though for blts it's a clarifying classification.
         if (eventIter->second->PresentMode != PresentMode::Unknown &&
             eventIter->second->PresentMode != PresentMode::Hardware_Legacy_Copy_To_Front_Buffer) {
             // It's already progressed further but didn't complete, ignore it and create a new one.
-            mPresentByThreadId.erase(eventIter);
-            eventIter = FindOrCreatePresent(hdr);
+            pmConsumer->mPresentByThreadId.erase(eventIter);
+            eventIter = pmConsumer->FindOrCreatePresent(hdr);
         }
 
         if (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Copy_To_Front_Buffer) {
             auto TokenData = GetEventData<uint64_t>(pEventRecord, L"TokenData");
-            mPresentsByLegacyBlitToken[TokenData] = eventIter->second;
+            pmConsumer->mPresentsByLegacyBlitToken[TokenData] = eventIter->second;
 
             eventIter->second->ReadyTime = EventTime;
             eventIter->second->PresentMode = PresentMode::Composed_Copy_CPU_GDI;
@@ -400,7 +401,7 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             if (Model == TokenModel::Composition) {
                 eventIter->second->PresentMode = PresentMode::Composed_Composition_Atlas;
                 uint64_t TokenPtr = GetEventData<uint64_t>(pEventRecord, L"Token");
-                mDxgKrnlPresentHistoryTokens[TokenPtr] = eventIter->second;
+                pmConsumer->mDxgKrnlPresentHistoryTokens[TokenPtr] = eventIter->second;
             }
         }
 
@@ -408,7 +409,7 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             eventIter->second->PresentMode == PresentMode::Composed_Composition_Atlas)
         {
             // We're not expecting any other events from this thread (no DxgKrnl Present or EndPresent runtime event)
-            mPresentByThreadId.erase(eventIter);
+            pmConsumer->mPresentByThreadId.erase(eventIter);
         }
         break;
     }
@@ -416,8 +417,8 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
     {
         // This event is emitted when a token is being handed off to DWM, and is a good way to indicate a ready state
         uint64_t TokenPtr = GetEventData<uint64_t>(pEventRecord, L"Token");
-        auto eventIter = mDxgKrnlPresentHistoryTokens.find(TokenPtr);
-        if (eventIter == mDxgKrnlPresentHistoryTokens.end()) {
+        auto eventIter = pmConsumer->mDxgKrnlPresentHistoryTokens.find(TokenPtr);
+        if (eventIter == pmConsumer->mDxgKrnlPresentHistoryTokens.end()) {
             return;
         }
 
@@ -426,27 +427,27 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
             EventTime : min(ReadyTime, EventTime));
 
         if (eventIter->second->PresentMode == PresentMode::Composed_Composition_Atlas) {
-            mPresentsWaitingForDWM.emplace_back(eventIter->second);
+            pmConsumer->mPresentsWaitingForDWM.emplace_back(eventIter->second);
         }
 
         if (eventIter->second->PresentMode == PresentMode::Composed_Copy_GPU_GDI) {
             // Manipulate the map here
             // When DWM is ready to present, we'll query for the most recent blt targeting this window and take it out of the map
-            mPresentByWindow[eventIter->second->Hwnd] = eventIter->second;
+            pmConsumer->mPresentByWindow[eventIter->second->Hwnd] = eventIter->second;
         }
 
-        mDxgKrnlPresentHistoryTokens.erase(eventIter);
+        pmConsumer->mDxgKrnlPresentHistoryTokens.erase(eventIter);
         break;
     }
     case DxgKrnl_Blit:
     {
-        auto eventIter = FindOrCreatePresent(hdr);
+        auto eventIter = pmConsumer->FindOrCreatePresent(hdr);
 
         // Check if we might have retrieved a 'stuck' present from a previous frame.
         // If the present mode isn't unknown at this point, we've already seen this present progress further
         if (eventIter->second->PresentMode != PresentMode::Unknown) {
-            mPresentByThreadId.erase(eventIter);
-            eventIter = FindOrCreatePresent(hdr);
+            pmConsumer->mPresentByThreadId.erase(eventIter);
+            eventIter = pmConsumer->FindOrCreatePresent(hdr);
         }
 
         eventIter->second->PresentMode = PresentMode::Hardware_Legacy_Copy_To_Front_Buffer;
@@ -456,7 +457,7 @@ void PMTraceConsumer::OnDXGKrnlEvent(PEVENT_RECORD pEventRecord)
     }
 }
 
-void PMTraceConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
+void HandleWin32kEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 {
     enum {
         Win32K_TokenCompositionSurfaceObject = 201,
@@ -471,30 +472,30 @@ void PMTraceConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
     {
     case Win32K_TokenCompositionSurfaceObject:
     {
-        auto eventIter = FindOrCreatePresent(hdr);
+        auto eventIter = pmConsumer->FindOrCreatePresent(hdr);
 
         // Check if we might have retrieved a 'stuck' present from a previous frame.
         // If the present mode isn't unknown at this point, we've already seen this present progress further
         if (eventIter->second->PresentMode != PresentMode::Unknown) {
-            mPresentByThreadId.erase(eventIter);
-            eventIter = FindOrCreatePresent(hdr);
+            pmConsumer->mPresentByThreadId.erase(eventIter);
+            eventIter = pmConsumer->FindOrCreatePresent(hdr);
         }
 
         eventIter->second->PresentMode = PresentMode::Composed_Flip;
 
-        Win32KPresentHistoryTokenKey key(GetEventData<uint64_t>(pEventRecord, L"pCompositionSurfaceObject"),
+        PMTraceConsumer::Win32KPresentHistoryTokenKey key(GetEventData<uint64_t>(pEventRecord, L"pCompositionSurfaceObject"),
             GetEventData<uint64_t>(pEventRecord, L"PresentCount"),
             GetEventData<uint32_t>(pEventRecord, L"SwapChainIndex"));
-        mWin32KPresentHistoryTokens[key] = eventIter->second;
+        pmConsumer->mWin32KPresentHistoryTokens[key] = eventIter->second;
         break;
     }
     case Win32K_TokenStateChanged:
     {
-        Win32KPresentHistoryTokenKey key(GetEventData<uint64_t>(pEventRecord, L"pCompositionSurfaceObject"),
+        PMTraceConsumer::Win32KPresentHistoryTokenKey key(GetEventData<uint64_t>(pEventRecord, L"pCompositionSurfaceObject"),
             GetEventData<uint32_t>(pEventRecord, L"PresentCount"),
             GetEventData<uint32_t>(pEventRecord, L"SwapChainIndex"));
-        auto eventIter = mWin32KPresentHistoryTokens.find(key);
-        if (eventIter == mWin32KPresentHistoryTokens.end()) {
+        auto eventIter = pmConsumer->mWin32KPresentHistoryTokens.find(key);
+        if (eventIter == pmConsumer->mWin32KPresentHistoryTokens.end()) {
             return;
         }
 
@@ -513,9 +514,9 @@ void PMTraceConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
         {
             // InFrame = composition is starting
             if (event.Hwnd) {
-                auto hWndIter = mPresentByWindow.find(event.Hwnd);
-                if (hWndIter == mPresentByWindow.end()) {
-                    mPresentByWindow.emplace(event.Hwnd, eventIter->second);
+                auto hWndIter = pmConsumer->mPresentByWindow.find(event.Hwnd);
+                if (hWndIter == pmConsumer->mPresentByWindow.end()) {
+                    pmConsumer->mPresentByWindow.emplace(event.Hwnd, eventIter->second);
                 }
                 else if (hWndIter->second != eventIter->second) {
                     hWndIter->second->FinalState = PresentResult::Discarded;
@@ -545,7 +546,7 @@ void PMTraceConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
                 }
             }
             if (event.Hwnd) {
-                mPresentByWindow.erase(event.Hwnd);
+                pmConsumer->mPresentByWindow.erase(event.Hwnd);
             }
             break;
         }
@@ -559,13 +560,13 @@ void PMTraceConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
         {
             // Discarded = destroyed - discard if we never got any indication that it was going to screen
             auto sharedPtr = eventIter->second;
-            mWin32KPresentHistoryTokens.erase(eventIter);
+            pmConsumer->mWin32KPresentHistoryTokens.erase(eventIter);
 
             if (event.FinalState == PresentResult::Unknown || event.ScreenTime == 0) {
                 event.FinalState = PresentResult::Discarded;
             }
 
-            CompletePresent(sharedPtr);
+            pmConsumer->CompletePresent(sharedPtr);
             break;
         }
         }
@@ -574,7 +575,7 @@ void PMTraceConsumer::OnWin32kEvent(PEVENT_RECORD pEventRecord)
     }
 }
 
-void PMTraceConsumer::OnDWMEvent(PEVENT_RECORD pEventRecord)
+void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 {
     enum {
         DWM_DwmUpdateWindow = 46,
@@ -592,26 +593,26 @@ void PMTraceConsumer::OnDWMEvent(PEVENT_RECORD pEventRecord)
         auto hWnd = (uint32_t)GetEventData<uint64_t>(pEventRecord, L"hWnd");
 
         // Piggyback on the next DWM present
-        mWindowsBeingComposed.insert(hWnd);
+        pmConsumer->mWindowsBeingComposed.insert(hWnd);
         break;
     }
     case DWM_Schedule_Present_Start:
     {
-        DwmPresentThreadId = hdr.ThreadId;
-        for (auto hWnd : mWindowsBeingComposed)
+        pmConsumer->DwmPresentThreadId = hdr.ThreadId;
+        for (auto hWnd : pmConsumer->mWindowsBeingComposed)
         {
             // Pickup the most recent present from a given window
-            auto hWndIter = mPresentByWindow.find(hWnd);
-            if (hWndIter != mPresentByWindow.end()) {
+            auto hWndIter = pmConsumer->mPresentByWindow.find(hWnd);
+            if (hWndIter != pmConsumer->mPresentByWindow.end()) {
                 if (hWndIter->second->PresentMode != PresentMode::Composed_Copy_GPU_GDI &&
                     hWndIter->second->PresentMode != PresentMode::Composed_Copy_CPU_GDI) {
                     continue;
                 }
-                mPresentsWaitingForDWM.emplace_back(hWndIter->second);
-                mPresentByWindow.erase(hWndIter);
+                pmConsumer->mPresentsWaitingForDWM.emplace_back(hWndIter->second);
+                pmConsumer->mPresentByWindow.erase(hWndIter);
             }
         }
-        mWindowsBeingComposed.clear();
+        pmConsumer->mWindowsBeingComposed.clear();
         break;
     }
     case DWM_FlipChain_Pending:
@@ -623,23 +624,23 @@ void PMTraceConsumer::OnDWMEvent(PEVENT_RECORD pEventRecord)
         uint32_t flipChainId = (uint32_t)GetEventData<uint64_t>(pEventRecord, L"ulFlipChain");
         uint32_t serialNumber = (uint32_t)GetEventData<uint64_t>(pEventRecord, L"ulSerialNumber");
         uint64_t token = ((uint64_t)flipChainId << 32ull) | serialNumber;
-        auto flipIter = mPresentsByLegacyBlitToken.find(token);
-        if (flipIter == mPresentsByLegacyBlitToken.end()) {
+        auto flipIter = pmConsumer->mPresentsByLegacyBlitToken.find(token);
+        if (flipIter == pmConsumer->mPresentsByLegacyBlitToken.end()) {
             return;
         }
 
         // Watch for multiple legacy blits completing against the same window
         auto hWnd = (uint32_t)GetEventData<uint64_t>(pEventRecord, L"hwnd");
-        mPresentByWindow[hWnd] = flipIter->second;
+        pmConsumer->mPresentByWindow[hWnd] = flipIter->second;
 
-        mPresentsByLegacyBlitToken.erase(flipIter);
-        mWindowsBeingComposed.insert(hWnd);
+        pmConsumer->mPresentsByLegacyBlitToken.erase(flipIter);
+        pmConsumer->mWindowsBeingComposed.insert(hWnd);
         break;
     }
     }
 }
 
-void PMTraceConsumer::OnD3D9Event(PEVENT_RECORD pEventRecord)
+void HandleD3D9Event(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 {
     enum {
         D3D9PresentStart = 1,
@@ -662,14 +663,14 @@ void PMTraceConsumer::OnD3D9Event(PEVENT_RECORD pEventRecord)
             event.SyncInterval = 0;
         }
 
-        RuntimePresentStart(event);
+        pmConsumer->RuntimePresentStart(event);
         break;
     }
     case D3D9PresentStop:
     {
         auto result = GetEventData<uint32_t>(pEventRecord, L"Result");
         bool AllowBatching = SUCCEEDED(result) && result != S_PRESENT_OCCLUDED;
-        RuntimePresentStop(hdr, AllowBatching);
+        pmConsumer->RuntimePresentStop(hdr, AllowBatching);
         break;
     }
     }
@@ -801,3 +802,27 @@ void PMTraceConsumer::RuntimePresentStop(EVENT_HEADER const& hdr, bool AllowPres
 
     mPresentByThreadId.erase(eventIter);
 }
+
+void HandleNTProcessEvent(PEVENT_RECORD pEventRecord, PresentMonData* pmData)
+{
+    NTProcessEvent event;
+
+    switch (pEventRecord->EventHeader.EventDescriptor.Opcode) {
+    case EVENT_TRACE_TYPE_START:
+    case EVENT_TRACE_TYPE_DC_START:
+        GetEventData(pEventRecord, L"ProcessId",     &event.ProcessId);
+        GetEventData(pEventRecord, L"ImageFileName", &event.ImageFileName);
+        break;
+
+    case EVENT_TRACE_TYPE_END:
+    case EVENT_TRACE_TYPE_DC_END:
+        GetEventData(pEventRecord, L"ProcessId", &event.ProcessId);
+        break;
+    }
+
+    {
+        auto lock = scoped_lock(pmData->mNTProcessEventMutex);
+        pmData->mNTProcessEvents.emplace_back(event);
+    }
+}
+
