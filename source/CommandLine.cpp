@@ -357,13 +357,36 @@ bool RestartAsAdministrator(
     char exe_path[MAX_PATH] = {};
     GetModuleFileNameA(NULL, exe_path, sizeof(exe_path));
 
-    char args[MAX_PATH] = {};
-    if (!CombineArguments(argc, argv, args, MAX_PATH)) {
+    char args[1024] = {};
+    if (!CombineArguments(argc, argv, args, sizeof(args))) {
+        fprintf(stderr, "internal error: command line arguments too long.\n");
         return false;
     }
 
-    ShellExecuteA(NULL, "runas", exe_path, args, NULL, SW_SHOW);
-    return true;
+#pragma warning(suppress: 4302 4311) // truncate HINSTANCE to int
+    auto ret = (int) ShellExecuteA(NULL, "runas", exe_path, args, NULL, SW_SHOW);
+    if (ret > 32) {
+        return true;
+    }
+    fprintf(stderr, "error: failed to elevate privilege");
+    switch (ret) {
+    case 0:                      fprintf(stderr, " (out of memory)"); break;
+    case ERROR_FILE_NOT_FOUND:   fprintf(stderr, " (file not found)"); break;
+    case ERROR_PATH_NOT_FOUND:   fprintf(stderr, " (path was not found)"); break;
+    case ERROR_BAD_FORMAT:       fprintf(stderr, " (image is invalid)"); break;
+    case SE_ERR_ACCESSDENIED:    fprintf(stderr, " (access denied)"); break;
+    case SE_ERR_ASSOCINCOMPLETE: fprintf(stderr, " (association is incomplete)"); break;
+    case SE_ERR_DDEBUSY:         fprintf(stderr, " (DDE busy)"); break;
+    case SE_ERR_DDEFAIL:         fprintf(stderr, " (DDE transaction failed)"); break;
+    case SE_ERR_DDETIMEOUT:      fprintf(stderr, " (DDE transaction timed out)"); break;
+    case SE_ERR_DLLNOTFOUND:     fprintf(stderr, " (DLL not found)"); break;
+    case SE_ERR_NOASSOC:         fprintf(stderr, " (no association)"); break;
+    case SE_ERR_OOM:             fprintf(stderr, " (out of memory)"); break;
+    case SE_ERR_SHARE:           fprintf(stderr, " (sharing violation)"); break;
+    }
+    fprintf(stderr, ".\n");
+
+    return false;
 }
 
 void SetConsoleTitle(

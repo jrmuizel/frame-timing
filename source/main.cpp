@@ -206,7 +206,6 @@ int main(int argc, char** argv)
         if (args.mTryToElevate) {
             fprintf(stderr, "warning: process requires administrator privilege; attempting to elevate.\n");
             if (!RestartAsAdministrator(argc, argv)) {
-                fprintf(stderr, "error: failed to elevate privilege.\n");
                 return 1;
             }
         } else {
