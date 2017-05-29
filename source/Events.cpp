@@ -45,3 +45,29 @@ void HandleNTProcessEvent(PEVENT_RECORD pEventRecord, PresentMonData* pmData)
         pmData->mNTProcessEvents.emplace_back(event);
     }
 }
+
+void HandleDXGIEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
+{
+    pmConsumer->OnDXGIEvent(pEventRecord);
+}
+
+void HandleD3D9Event(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
+{
+    pmConsumer->OnD3D9Event(pEventRecord);
+}
+
+void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
+{
+    pmConsumer->OnDXGKrnlEvent(pEventRecord);
+}
+
+void HandleWin32kEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
+{
+    pmConsumer->OnWin32kEvent(pEventRecord);
+}
+
+void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
+{
+    pmConsumer->OnDWMEvent(pEventRecord);
+}
+

@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+#include "Events.hpp"
 #include "TraceSession.hpp"
 #include "PresentMon.hpp"
 
@@ -453,9 +454,18 @@ void EtwConsumingThread(const CommandLineArgs& args)
     PMTraceConsumer pmConsumer(args.mVerbosity == Verbosity::Simple);
 
     TraceSession session;
-    session.pmData_ = &data;
-    session.pmTraceConsumer_ = &pmConsumer;
-    if (!session.Initialize(args.mVerbosity == Verbosity::Simple, args.mEtlFileName)) {
+
+    session.AddProvider(DXGI_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 0, 0, (EventHandlerFn) &HandleDXGIEvent, &pmConsumer);
+    session.AddProvider(D3D9_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 0, 0, (EventHandlerFn) &HandleD3D9Event, &pmConsumer);
+    if (args.mVerbosity != Verbosity::Simple) {
+        session.AddProvider(DXGKRNL_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 1,      0, (EventHandlerFn) &HandleDXGKEvent,   &pmConsumer);
+        session.AddProvider(WIN32K_PROVIDER_GUID,  TRACE_LEVEL_INFORMATION, 0x1000, 0, (EventHandlerFn) &HandleWin32kEvent, &pmConsumer);
+        session.AddProvider(DWM_PROVIDER_GUID,     TRACE_LEVEL_VERBOSE,     0,      0, (EventHandlerFn) &HandleDWMEvent,    &pmConsumer);
+    }
+
+    if (!(args.mEtlFileName == nullptr
+        ? session.InitializeRealtime("PresentMon", &EtwThreadsShouldQuit)
+        : session.InitializeEtlFile(args.mEtlFileName, &EtwThreadsShouldQuit))) {
         return;
     }
 

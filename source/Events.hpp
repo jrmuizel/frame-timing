@@ -25,6 +25,12 @@ SOFTWARE.
 #include <windows.h>
 #include <evntcons.h> // must include after windows.h
 #include "PresentMon.hpp"
+#include "PresentMonTraceConsumer.hpp"
 
 void HandleNTProcessEvent(EVENT_RECORD* pEventRecord, PresentMonData* pmData);
+void HandleDXGIEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
+void HandleD3D9Event(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
+void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
+void HandleWin32kEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
+void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
 

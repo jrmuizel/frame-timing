@@ -23,7 +23,6 @@ SOFTWARE.
 #include <cstddef>
 #include <stdio.h>
 
-#include "Events.hpp"
 #include "TraceSession.hpp"
 
 namespace {
@@ -37,105 +36,197 @@ VOID WINAPI EventRecordCallback(EVENT_RECORD* pEventRecord)
         session->startTime_ = hdr.TimeStamp.QuadPart;
     }
 
-         if (hdr.ProviderId == NT_PROCESS_EVENT_GUID) HandleNTProcessEvent(pEventRecord, session->pmData_); 
-    else if (hdr.ProviderId == DXGI_PROVIDER_GUID   ) session->pmTraceConsumer_->OnDXGIEvent(pEventRecord);
-    else if (hdr.ProviderId == D3D9_PROVIDER_GUID   ) session->pmTraceConsumer_->OnD3D9Event(pEventRecord);
-    else if (hdr.ProviderId == DXGKRNL_PROVIDER_GUID) session->pmTraceConsumer_->OnDXGKrnlEvent(pEventRecord);
-    else if (hdr.ProviderId == WIN32K_PROVIDER_GUID ) session->pmTraceConsumer_->OnWin32kEvent(pEventRecord);
-    else if (hdr.ProviderId == DWM_PROVIDER_GUID    ) session->pmTraceConsumer_->OnDWMEvent(pEventRecord);
+    auto iter = session->eventHandler_.find(hdr.ProviderId);
+    if (iter != session->eventHandler_.end()) {
+        auto const& h = iter->second;
+        (*h.fn_)(pEventRecord, h.ctxt_);
+    }
 }
 
 ULONG WINAPI BufferCallback(EVENT_TRACE_LOGFILEA* pLogFile)
 {
-    (void) pLogFile;
-
-    if (EtwThreadsShouldQuit()) {
+    auto session = (TraceSession*) pLogFile->Context;
+    auto shouldStopFn = session->shouldStopProcessingEventsFn_;
+    if (shouldStopFn && (*shouldStopFn)()) {
         return FALSE; // break out of ProcessTrace()
     }
 
     return TRUE; // continue processing events
 }
 
-}
-
-bool TraceSession::Initialize(bool simpleMode, char const* inputEtlPath)
+bool OpenLogger(
+    TraceSession* session,
+    char const* name,
+    bool realtime)
 {
-    // Initialize state
-    EVENT_TRACE_LOGFILEA inputEtl = {};
-    inputEtl.BufferCallback = BufferCallback;
-    inputEtl.EventRecordCallback = EventRecordCallback;
-    inputEtl.Context = this;
+    // Open trace
+    EVENT_TRACE_LOGFILEA loggerInfo = {};
+    /* Filled out below based on realtime:
+    loggerInfo.LogFileName = nullptr;
+    loggerInfo.LoggerName = nullptr;
+    */
+    loggerInfo.ProcessTraceMode = PROCESS_TRACE_MODE_EVENT_RECORD | PROCESS_TRACE_MODE_RAW_TIMESTAMP;
+    loggerInfo.BufferCallback = BufferCallback;
+    loggerInfo.EventRecordCallback = EventRecordCallback;
+    loggerInfo.Context = session;
+    /* Output members (passed also to BufferCallback()):
+    loggerInfo.CurrentTime
+    loggerInfo.BuffersRead
+    loggerInfo.CurrentEvent
+    loggerInfo.LogfileHeader
+    loggerInfo.BufferSize
+    loggerInfo.Filled
+    loggerInfo.IsKernelTrace
+    */
+    /* Not used:
+    loggerInfo.EventsLost
+    */
 
-    // Real-time collection
-    if (inputEtlPath == nullptr) {
-        memset(&properties_, 0, sizeof(properties_));
-
-        properties_.Wnode.BufferSize = (ULONG) offsetof(TraceSession, sessionHandle_);
-      //properties_.Wnode.Guid                 // ETW will create Guid
-        properties_.Wnode.ClientContext = 1;   // Clock resolution to use when logging the timestamp for each event
-                                               // 1 == query performance counter
-        properties_.Wnode.Flags = 0;
-      //properties_.BufferSize = 0;
-        properties_.MinimumBuffers = 200;
-      //properties_.MaximumBuffers = 0;
-      //properties_.MaximumFileSize = 0;
-        properties_.LogFileMode = EVENT_TRACE_REAL_TIME_MODE;
-      //properties_.FlushTimer = 0;
-      //properties_.EnableFlags = 0;
-        properties_.LogFileNameOffset = 0;
-        properties_.LoggerNameOffset = offsetof(TraceSession, loggerName_);
-
-        // Start trace session
-        auto status = StartTraceW(&sessionHandle_, L"PresentMon", &properties_);
-        if (status == ERROR_ALREADY_EXISTS) {
-#ifdef _DEBUG
-            fprintf(stderr, "warning: trying to start trace session that already exists.\n");
-#endif
-            status = ControlTraceW((TRACEHANDLE) 0, L"PresentMon", &properties_, EVENT_TRACE_CONTROL_STOP);
-            if (status == ERROR_SUCCESS) {
-                status = StartTraceW(&sessionHandle_, L"PresentMon", &properties_);
-            }
-        }
-
-        if (status != ERROR_SUCCESS) {
-            fprintf(stderr, "error: failed to start trace session (error=%u).\n", status);
-            return false;
-        }
-
-        // Enable desired providers
-#define ENABLE_PROVIDER(_Guid, _Level, _MatchAny, _MatchAll) \
-        status = EnableTraceEx2(sessionHandle_, &_Guid, EVENT_CONTROL_CODE_ENABLE_PROVIDER, _Level, _MatchAny, _MatchAll, 0, nullptr); \
-        if (status != ERROR_SUCCESS) { \
-            fprintf(stderr, "error: failed to enable " #_Guid ".\n"); \
-            Finalize(); \
-            return false; \
-        }
-
-        ENABLE_PROVIDER(DXGI_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 0, 0);
-        ENABLE_PROVIDER(D3D9_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 0, 0);
-        if (!simpleMode) {
-            ENABLE_PROVIDER(DXGKRNL_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 1, 0);
-            ENABLE_PROVIDER(WIN32K_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 0x1000, 0);
-            ENABLE_PROVIDER(DWM_PROVIDER_GUID, TRACE_LEVEL_VERBOSE, 0, 0);
-        }
-
-        inputEtl.LoggerName = "PresentMon";
-        inputEtl.ProcessTraceMode = PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD | PROCESS_TRACE_MODE_RAW_TIMESTAMP;
-
-    // ETL file collection
+    if (realtime) {
+        loggerInfo.LoggerName = (LPSTR) name;
+        loggerInfo.ProcessTraceMode |= PROCESS_TRACE_MODE_REAL_TIME;
     } else {
-        inputEtl.LogFileName = (LPSTR) inputEtlPath;
-        inputEtl.ProcessTraceMode = PROCESS_TRACE_MODE_EVENT_RECORD | PROCESS_TRACE_MODE_RAW_TIMESTAMP;
+        loggerInfo.LogFileName = (LPSTR) name;
     }
 
-    traceHandle_ = OpenTraceA(&inputEtl);
-    if (traceHandle_ == INVALID_PROCESSTRACE_HANDLE) {
-        fprintf(stderr, "error: failed to open trace.\n");
+    session->traceHandle_ = OpenTraceA(&loggerInfo);
+    if (session->traceHandle_ == INVALID_PROCESSTRACE_HANDLE) {
+        fprintf(stderr, "error: failed to open trace");
+        auto lastError = GetLastError();
+        switch (lastError) {
+        case ERROR_INVALID_PARAMETER: fprintf(stderr, " (Logfile is NULL)"); break;
+        case ERROR_BAD_PATHNAME:      fprintf(stderr, " (invalid LoggerName)"); break;
+        case ERROR_ACCESS_DENIED:     fprintf(stderr, " (access denied)"); break;
+        default:                      fprintf(stderr, " (error=%u)", lastError); break;
+        }
+        fprintf(stderr, ".\n");
+        return false;
+    }
+
+    // Copy desired state from loggerInfo
+    session->frequency_ = loggerInfo.LogfileHeader.PerfFreq.QuadPart;
+    return true;
+}
+
+}
+
+size_t TraceSession::GUIDHash::operator()(GUID const& g) const
+{
+    static_assert((sizeof(g) % sizeof(size_t)) == 0, "sizeof(GUID) must be multiple of sizeof(size_t)");
+    auto p = (size_t const*) &g;
+    auto h = (size_t) 0;
+    for (size_t i = 0; i < sizeof(g) / sizeof(size_t); ++i) {
+        h ^= p[i];
+    }
+    return h;
+}
+
+bool TraceSession::GUIDEqual::operator()(GUID const& lhs, GUID const& rhs) const
+{
+    return IsEqualGUID(lhs, rhs) != FALSE;
+}
+
+bool TraceSession::AddProvider(GUID providerId, UCHAR level,
+                               ULONGLONG matchAnyKeyword, ULONGLONG matchAllKeyword,
+                               EventHandlerFn handlerFn, void* handlerContext)
+{
+    auto p = eventHandler_.emplace(std::make_pair(providerId, Handler()));
+    if (!p.second) {
+        return false;
+    }
+
+    auto h = &p.first->second;
+    h->fn_       = handlerFn;
+    h->ctxt_     = handlerContext;
+    h->matchAny_ = matchAnyKeyword;
+    h->matchAll_ = matchAllKeyword;
+    h->level_    = level;
+    return true;
+}
+
+bool TraceSession::RemoveProvider(GUID providerId)
+{
+    if (sessionHandle_ != 0) {
+        auto status = EnableTraceEx2(sessionHandle_, &providerId, EVENT_CONTROL_CODE_DISABLE_PROVIDER, 0, 0, 0, 0, nullptr);
+        (void) status;
+    }
+
+    return eventHandler_.erase(providerId) != 0;
+}
+
+bool TraceSession::InitializeEtlFile(char const* inputEtlPath, ShouldStopProcessingEventsFn shouldStopFn)
+{
+    // Open the trace
+    if (!OpenLogger(this, inputEtlPath, false)) {
         Finalize();
         return false;
     }
 
-    frequency_ = inputEtl.LogfileHeader.PerfFreq.QuadPart;
+    // Initialize state
+    shouldStopProcessingEventsFn_ = shouldStopFn;
+    eventsLostCount_ = 0;
+    buffersLostCount_ = 0;
+    return true;
+}
+
+bool TraceSession::InitializeRealtime(char const* traceSessionName, ShouldStopProcessingEventsFn shouldStopFn)
+{
+    // Set up and start a real-time collection session
+    memset(&properties_, 0, sizeof(properties_));
+
+    properties_.Wnode.BufferSize = (ULONG) offsetof(TraceSession, sessionHandle_);
+  //properties_.Wnode.Guid                 // ETW will create Guid
+    properties_.Wnode.ClientContext = 1;   // Clock resolution to use when logging the timestamp for each event
+                                           // 1 == query performance counter
+    properties_.Wnode.Flags = 0;
+  //properties_.BufferSize = 0;
+    properties_.MinimumBuffers = 200;
+  //properties_.MaximumBuffers = 0;
+  //properties_.MaximumFileSize = 0;
+    properties_.LogFileMode = EVENT_TRACE_REAL_TIME_MODE;
+  //properties_.FlushTimer = 0;
+  //properties_.EnableFlags = 0;
+    properties_.LogFileNameOffset = 0;
+    properties_.LoggerNameOffset = offsetof(TraceSession, loggerName_);
+
+    auto status = StartTraceA(&sessionHandle_, traceSessionName, &properties_);
+    if (status == ERROR_ALREADY_EXISTS) {
+#ifdef _DEBUG
+        fprintf(stderr, "warning: trying to start trace session that already exists.\n");
+#endif
+        status = ControlTraceA((TRACEHANDLE) 0, traceSessionName, &properties_, EVENT_TRACE_CONTROL_STOP);
+        if (status == ERROR_SUCCESS) {
+            status = StartTraceA(&sessionHandle_, traceSessionName, &properties_);
+        }
+    }
+    if (status != ERROR_SUCCESS) {
+        fprintf(stderr, "error: failed to start trace session (error=%u).\n", status);
+        return false;
+    }
+
+    // Enable desired providers
+    for (auto const& p : eventHandler_) {
+        auto pGuid = &p.first;
+        auto const& h = p.second;
+
+        status = EnableTraceEx2(sessionHandle_, pGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER, h.level_, h.matchAny_, h.matchAll_, 0, nullptr);
+        if (status != ERROR_SUCCESS) {
+            fprintf(stderr, "error: failed to enable provider {%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}.\n",
+                pGuid->Data1, pGuid->Data2, pGuid->Data3, pGuid->Data4[0], pGuid->Data4[1], pGuid->Data4[2],
+                pGuid->Data4[3], pGuid->Data4[4], pGuid->Data4[5], pGuid->Data4[6], pGuid->Data4[7]);
+            Finalize();
+            return false;
+        }
+    }
+
+    // Open the trace
+    if (!OpenLogger(this, traceSessionName, true)) {
+        Finalize();
+        return false;
+    }
+
+    // Initialize state
+    shouldStopProcessingEventsFn_ = shouldStopFn;
     eventsLostCount_ = 0;
     buffersLostCount_ = 0;
 
@@ -154,14 +245,9 @@ void TraceSession::Finalize()
     if (sessionHandle_ != 0) {
         status = ControlTraceW(sessionHandle_, nullptr, &properties_, EVENT_TRACE_CONTROL_STOP);
 
-#define DISABLE_PROVIDER(_Guid) \
-        status = EnableTraceEx2(sessionHandle_, &_Guid, EVENT_CONTROL_CODE_DISABLE_PROVIDER, 0, 0, 0, 0, nullptr)
-
-        DISABLE_PROVIDER(DXGI_PROVIDER_GUID);
-        DISABLE_PROVIDER(D3D9_PROVIDER_GUID);
-        DISABLE_PROVIDER(DXGKRNL_PROVIDER_GUID);
-        DISABLE_PROVIDER(WIN32K_PROVIDER_GUID);
-        DISABLE_PROVIDER(DWM_PROVIDER_GUID);
+        while (!eventHandler_.empty()) {
+            RemoveProvider(eventHandler_.begin()->first);
+        }
 
         sessionHandle_ = 0;
     }
