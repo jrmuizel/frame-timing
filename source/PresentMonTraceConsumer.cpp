@@ -51,11 +51,16 @@ PresentEvent::PresentEvent(EVENT_HEADER const& hdr, ::Runtime runtime)
 {
 }
 
-#ifdef _DEBUG
+#ifndef NDEBUG
 static bool gPresentMonTraceConsumer_Exiting = false;
 PresentEvent::~PresentEvent()
 {
     assert(Completed || gPresentMonTraceConsumer_Exiting);
+}
+
+PMTraceConsumer::~PMTraceConsumer()
+{
+    gPresentMonTraceConsumer_Exiting = true;
 }
 #endif
 
@@ -687,13 +692,6 @@ void HandleD3D9Event(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
     }
 }
 
-#ifdef _DEBUG
-PMTraceConsumer::~PMTraceConsumer()
-{
-    gPresentMonTraceConsumer_Exiting = true;
-}
-#endif
-
 void PMTraceConsumer::CompletePresent(std::shared_ptr<PresentEvent> p)
 {
     if (p->Completed)
@@ -795,7 +793,7 @@ void PMTraceConsumer::RuntimePresentStart(PresentEvent &event)
     auto& processSwapChainDeque = mPresentsByProcessAndSwapChain[std::make_tuple(event.ProcessId, event.SwapChainAddress)];
     processSwapChainDeque.emplace_back(pEvent);
 
-    // Set the caller's local event instance to completed so the _DEBUG check
+    // Set the caller's local event instance to completed so the assert
     // in ~PresentEvent() doesn't fire when it is destructed.
     event.Completed = true;
 }

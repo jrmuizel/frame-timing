@@ -115,7 +115,7 @@ struct PresentEvent {
 
     PresentEvent(EVENT_HEADER const& hdr, ::Runtime runtime);
 
-#ifdef _DEBUG
+#ifndef NDEBUG
     ~PresentEvent();
 #endif
 };
@@ -123,7 +123,7 @@ struct PresentEvent {
 struct PMTraceConsumer
 {
     PMTraceConsumer(bool simple) : mSimpleMode(simple) { }
-#ifdef _DEBUG
+#ifndef NDEBUG
     ~PMTraceConsumer();
 #endif
     bool mSimpleMode;
