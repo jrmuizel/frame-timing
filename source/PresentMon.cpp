@@ -217,7 +217,7 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
             }
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(pm.mOutputFile, ",%d", curr.WasBatched);
+                fprintf(pm.mOutputFile, ",%d,%d", curr.WasBatched, curr.DwmNotified);
             }
             fprintf(pm.mOutputFile, ",%s,%.6lf,%.3lf", FinalStateToDroppedString(curr.FinalState), timeInSeconds, deltaMilliseconds);
             if (pm.mArgs->mVerbosity > Verbosity::Simple)
@@ -295,7 +295,7 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
             }
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(pm.mOutputFile, ",WasBatched");
+                fprintf(pm.mOutputFile, ",WasBatched,DwmNotified");
             }
             fprintf(pm.mOutputFile, ",Dropped,TimeInSeconds,MsBetweenPresents");
             if (pm.mArgs->mVerbosity > Verbosity::Simple)
@@ -379,6 +379,14 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
 
                 if (chain.second.mLastPresentMode == PresentMode::Hardware_Composed_Independent_Flip) {
                     _snprintf_s(str, _TRUNCATE, ": Plane %d", chain.second.mLastPlane);
+                    display += str;
+                }
+
+                if ((chain.second.mLastPresentMode == PresentMode::Hardware_Composed_Independent_Flip ||
+                     chain.second.mLastPresentMode == PresentMode::Hardware_Independent_Flip) &&
+                    pm.mArgs->mVerbosity >= Verbosity::Verbose &&
+                    chain.second.mDwmNotified) {
+                    _snprintf_s(str, _TRUNCATE, ", DWM notified");
                     display += str;
                 }
 

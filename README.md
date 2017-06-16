@@ -84,5 +84,6 @@ Columns output with the -verbose command line option.
 
 | CSV Column Header | CSV Data Description |
 |---|---|
-| WasBatched | The frame was submitted by the driver on a different thread than the app |
+| WasBatched  | The frame was submitted by the driver on a different thread than the app |
+| DwmNotified | The desktop compositor was notified about the frame. |
 

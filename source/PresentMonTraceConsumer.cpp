@@ -38,6 +38,7 @@ PresentEvent::PresentEvent(EVENT_HEADER const& hdr, ::Runtime runtime)
     , MMIO(false)
     , SeenDxgkPresent(false)
     , WasBatched(false)
+    , DwmNotified(false)
     , Runtime(runtime)
     , TimeTaken(0)
     , ReadyTime(0)
@@ -499,17 +500,17 @@ void HandleWin32kEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 
         eventIter->second->PresentMode = PresentMode::Composed_Flip;
 
-        PMTraceConsumer::Win32KPresentHistoryTokenKey key(GetEventData<uint64_t>(pEventRecord, L"pCompositionSurfaceObject"),
+        PMTraceConsumer::Win32KPresentHistoryTokenKey key(GetEventData<uint64_t>(pEventRecord, L"CompositionSurfaceLuid"),
             GetEventData<uint64_t>(pEventRecord, L"PresentCount"),
-            GetEventData<uint32_t>(pEventRecord, L"SwapChainIndex"));
+            GetEventData<uint64_t>(pEventRecord, L"BindId"));
         pmConsumer->mWin32KPresentHistoryTokens[key] = eventIter->second;
         break;
     }
     case Win32K_TokenStateChanged:
     {
-        PMTraceConsumer::Win32KPresentHistoryTokenKey key(GetEventData<uint64_t>(pEventRecord, L"pCompositionSurfaceObject"),
+        PMTraceConsumer::Win32KPresentHistoryTokenKey key(GetEventData<uint64_t>(pEventRecord, L"CompositionSurfaceLuid"),
             GetEventData<uint32_t>(pEventRecord, L"PresentCount"),
-            GetEventData<uint32_t>(pEventRecord, L"SwapChainIndex"));
+            GetEventData<uint64_t>(pEventRecord, L"BindId"));
         auto eventIter = pmConsumer->mWin32KPresentHistoryTokens.find(key);
         if (eventIter == pmConsumer->mWin32KPresentHistoryTokens.end()) {
             return;
@@ -599,6 +600,7 @@ void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         DWM_FlipChain_Pending = 69,
         DWM_FlipChain_Complete = 70,
         DWM_FlipChain_Dirty = 101,
+        DWM_Schedule_SurfaceUpdate = 196,
     };
 
     auto& hdr = pEventRecord->EventHeader;
@@ -625,6 +627,7 @@ void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
                     continue;
                 }
                 pmConsumer->mPresentsWaitingForDWM.emplace_back(hWndIter->second);
+                hWndIter->second->DwmNotified = true;
                 pmConsumer->mPresentByWindow.erase(hWndIter);
             }
         }
@@ -648,9 +651,21 @@ void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         // Watch for multiple legacy blits completing against the same window
         auto hWnd = (uint32_t)GetEventData<uint64_t>(pEventRecord, L"hwnd");
         pmConsumer->mPresentByWindow[hWnd] = flipIter->second;
+        flipIter->second->DwmNotified = true;
 
         pmConsumer->mPresentsByLegacyBlitToken.erase(flipIter);
         pmConsumer->mWindowsBeingComposed.insert(hWnd);
+        break;
+    }
+    case DWM_Schedule_SurfaceUpdate:
+    {
+        PMTraceConsumer::Win32KPresentHistoryTokenKey key(GetEventData<uint64_t>(pEventRecord, L"luidSurface"),
+                                                          GetEventData<uint64_t>(pEventRecord, L"PresentCount"),
+                                                          GetEventData<uint64_t>(pEventRecord, L"bindId"));
+        auto eventIter = pmConsumer->mWin32KPresentHistoryTokens.find(key);
+        if (eventIter != pmConsumer->mWin32KPresentHistoryTokens.end()) {
+            eventIter->second->DwmNotified = true;
+        }
         break;
     }
     }

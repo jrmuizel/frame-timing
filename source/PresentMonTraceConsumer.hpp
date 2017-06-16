@@ -92,6 +92,7 @@ struct PresentEvent {
     bool MMIO;
     bool SeenDxgkPresent;
     bool WasBatched;
+    bool DwmNotified;
 
     Runtime Runtime;
 
@@ -187,7 +188,7 @@ struct PMTraceConsumer
     // Win32K present history tokens are uniquely identified by (composition surface pointer, present count, bind id)
     // Using a tuple instead of named struct simply to have auto-generated comparison operators
     // These tokens are used for "flip model" presents (windowed flip, dFlip, iFlip) only
-    typedef std::tuple<uint64_t, uint64_t, uint32_t> Win32KPresentHistoryTokenKey;
+    typedef std::tuple<uint64_t, uint64_t, uint64_t> Win32KPresentHistoryTokenKey;
     std::map<Win32KPresentHistoryTokenKey, std::shared_ptr<PresentEvent>> mWin32KPresentHistoryTokens;
 
     // DxgKrnl present history tokens are uniquely identified by a single pointer
