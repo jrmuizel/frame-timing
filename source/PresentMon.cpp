@@ -465,6 +465,9 @@ void EtwConsumingThread(const CommandLineArgs& args)
         session.AddProvider(WIN32K_PROVIDER_GUID,  TRACE_LEVEL_INFORMATION, 0x1000, 0, (EventHandlerFn) &HandleWin32kEvent, &pmConsumer);
         session.AddProvider(DWM_PROVIDER_GUID,     TRACE_LEVEL_VERBOSE,     0,      0, (EventHandlerFn) &HandleDWMEvent,    &pmConsumer);
     }
+    if (args.mEtlFileName != nullptr) {
+        session.AddProvider(NT_PROCESS_EVENT_GUID, TRACE_LEVEL_NONE, 0, 0, (EventHandlerFn) &HandleNTProcessEvent, &pmConsumer);
+    }
 
     if (!(args.mEtlFileName == nullptr
         ? session.InitializeRealtime("PresentMon", &EtwThreadsShouldQuit)

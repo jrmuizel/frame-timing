@@ -595,7 +595,7 @@ void HandleWin32kEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 {
     enum {
-        DWM_DwmUpdateWindow = 46,
+        DWM_GetPresentHistory = 64,
         DWM_Schedule_Present_Start = 15,
         DWM_FlipChain_Pending = 69,
         DWM_FlipChain_Complete = 70,
@@ -606,32 +606,25 @@ void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
     auto& hdr = pEventRecord->EventHeader;
     switch (hdr.EventDescriptor.Id)
     {
-    case DWM_DwmUpdateWindow:
+    case DWM_GetPresentHistory:
     {
-        auto hWnd = (uint32_t)GetEventData<uint64_t>(pEventRecord, L"hWnd");
-
-        // Piggyback on the next DWM present
-        pmConsumer->mWindowsBeingComposed.insert(hWnd);
+        for (auto& hWndPair : pmConsumer->mPresentByWindow)
+        {
+            auto& present = hWndPair.second;
+            // Pickup the most recent present from a given window
+            if (present->PresentMode != PresentMode::Composed_Copy_GPU_GDI &&
+                present->PresentMode != PresentMode::Composed_Copy_CPU_GDI) {
+                continue;
+            }
+            present->DwmNotified = true;
+            pmConsumer->mPresentsWaitingForDWM.emplace_back(present);
+        }
+        pmConsumer->mPresentByWindow.clear();
         break;
     }
     case DWM_Schedule_Present_Start:
     {
         pmConsumer->DwmPresentThreadId = hdr.ThreadId;
-        for (auto hWnd : pmConsumer->mWindowsBeingComposed)
-        {
-            // Pickup the most recent present from a given window
-            auto hWndIter = pmConsumer->mPresentByWindow.find(hWnd);
-            if (hWndIter != pmConsumer->mPresentByWindow.end()) {
-                if (hWndIter->second->PresentMode != PresentMode::Composed_Copy_GPU_GDI &&
-                    hWndIter->second->PresentMode != PresentMode::Composed_Copy_CPU_GDI) {
-                    continue;
-                }
-                pmConsumer->mPresentsWaitingForDWM.emplace_back(hWndIter->second);
-                hWndIter->second->DwmNotified = true;
-                pmConsumer->mPresentByWindow.erase(hWndIter);
-            }
-        }
-        pmConsumer->mWindowsBeingComposed.clear();
         break;
     }
     case DWM_FlipChain_Pending:
@@ -654,7 +647,6 @@ void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         flipIter->second->DwmNotified = true;
 
         pmConsumer->mPresentsByLegacyBlitToken.erase(flipIter);
-        pmConsumer->mWindowsBeingComposed.insert(hWnd);
         break;
     }
     case DWM_Schedule_SurfaceUpdate:
