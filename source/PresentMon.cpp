@@ -189,7 +189,7 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
 
     auto& chain = proc.mChainMap[p.SwapChainAddress];
     chain.AddPresentToSwapChain(p);
-    
+
     if (pm.mOutputFile && (p.FinalState == PresentResult::Presented || !pm.mArgs->mExcludeDropped)) {
         auto len = chain.mPresentHistory.size();
         auto displayedLen = chain.mDisplayedPresentHistory.size();
