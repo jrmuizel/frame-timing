@@ -74,28 +74,28 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
     <OutDir>..\build\debug\bin\</OutDir>
-    <IntDir>..\build\debug\obj\x86\</IntDir>
+    <IntDir>..\build\debug\obj\x86\PresentMon\</IntDir>
     <TargetName>$(ProjectName)32-$(PresentMonVersion)</TargetName>
     <CustomBuildBeforeTargets>ClCompile</CustomBuildBeforeTargets>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
     <OutDir>..\build\debug\bin\</OutDir>
-    <IntDir>..\build\debug\obj\x64\</IntDir>
+    <IntDir>..\build\debug\obj\x64\PresentMon\</IntDir>
     <TargetName>$(ProjectName)64-$(PresentMonVersion)</TargetName>
     <CustomBuildBeforeTargets>ClCompile</CustomBuildBeforeTargets>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
     <OutDir>..\build\release\bin\</OutDir>
-    <IntDir>..\build\release\obj\x86\</IntDir>
+    <IntDir>..\build\release\obj\x86\PresentMon\</IntDir>
     <TargetName>$(ProjectName)32-$(PresentMonVersion)</TargetName>
     <CustomBuildBeforeTargets>ClCompile</CustomBuildBeforeTargets>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
     <OutDir>..\build\release\bin\</OutDir>
-    <IntDir>..\build\release\obj\x64\</IntDir>
+    <IntDir>..\build\release\obj\x64\PresentMon\</IntDir>
     <TargetName>$(ProjectName)64-$(PresentMonVersion)</TargetName>
     <CustomBuildBeforeTargets>ClCompile</CustomBuildBeforeTargets>
   </PropertyGroup>
@@ -107,13 +107,15 @@
       <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>$(IntDir)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <TreatWarningAsError>true</TreatWarningAsError>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <TreatLinkerWarningAsErrors>true</TreatLinkerWarningAsErrors>
-      <AdditionalDependencies>shlwapi.lib;tdh.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\build\debug\lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>advapi32.lib;shell32.lib;shlwapi.lib;tdh.lib;PresentData32.lib;user32.lib</AdditionalDependencies>
     </Link>
     <Manifest />
     <CustomBuildStep>
@@ -131,13 +133,15 @@
       <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>$(IntDir)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <TreatWarningAsError>true</TreatWarningAsError>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <TreatLinkerWarningAsErrors>true</TreatLinkerWarningAsErrors>
-      <AdditionalDependencies>shlwapi.lib;tdh.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\build\debug\lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>advapi32.lib;shell32.lib;shlwapi.lib;tdh.lib;PresentData64.lib;user32.lib</AdditionalDependencies>
     </Link>
     <Manifest />
     <CustomBuildStep>
@@ -166,7 +170,8 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <TreatLinkerWarningAsErrors>true</TreatLinkerWarningAsErrors>
-      <AdditionalDependencies>shlwapi.lib;tdh.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\build\release\lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>advapi32.lib;shell32.lib;shlwapi.lib;tdh.lib;PresentData32.lib;user32.lib</AdditionalDependencies>
     </Link>
     <Manifest />
     <CustomBuildStep>
@@ -195,7 +200,8 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <TreatLinkerWarningAsErrors>true</TreatLinkerWarningAsErrors>
-      <AdditionalDependencies>shlwapi.lib;tdh.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\build\release\lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>advapi32.lib;shell32.lib;shlwapi.lib;tdh.lib;PresentData64.lib;user32.lib</AdditionalDependencies>
     </Link>
     <Manifest />
     <CustomBuildStep>
@@ -215,11 +221,6 @@
     <ClInclude Include="CommandLine.hpp" />
     <ClInclude Include="PresentMon.hpp" />
     <ClInclude Include="TraceSession.hpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="PresentData\PresentData.vcxproj">
-      <Project>{892028e5-32f6-45fc-8ab2-90fcbcac4bf6}</Project>
-    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
