@@ -115,18 +115,14 @@ struct PresentEvent {
     bool Completed;
 
     PresentEvent(EVENT_HEADER const& hdr, ::Runtime runtime);
-
-#ifndef NDEBUG
     ~PresentEvent();
-#endif
 };
 
 struct PMTraceConsumer
 {
     PMTraceConsumer(bool simple) : mSimpleMode(simple) { }
-#ifndef NDEBUG
     ~PMTraceConsumer();
-#endif
+
     bool mSimpleMode;
 
     std::mutex mMutex;

@@ -54,6 +54,8 @@ PresentEvent::PresentEvent(EVENT_HEADER const& hdr, ::Runtime runtime)
 
 #ifndef NDEBUG
 static bool gPresentMonTraceConsumer_Exiting = false;
+#endif
+
 PresentEvent::~PresentEvent()
 {
     assert(Completed || gPresentMonTraceConsumer_Exiting);
@@ -61,9 +63,10 @@ PresentEvent::~PresentEvent()
 
 PMTraceConsumer::~PMTraceConsumer()
 {
+#ifndef NDEBUG
     gPresentMonTraceConsumer_Exiting = true;
-}
 #endif
+}
 
 void HandleDXGIEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 {
