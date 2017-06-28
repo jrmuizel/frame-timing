@@ -30,7 +30,7 @@ SOFTWARE.
 #include <vector>
 
 #include "CommandLine.hpp"
-#include "PresentData\SwapChainData.hpp"
+#include "..\PresentData\SwapChainData.hpp"
 
 struct ProcessInfo {
     uint64_t mLastRefreshTicks = 0; // GetTickCount64

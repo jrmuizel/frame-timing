@@ -71,26 +71,26 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
-    <OutDir>..\..\build\debug\lib\</OutDir>
-    <IntDir>..\..\build\debug\obj\x86\PresentData\</IntDir>
+    <OutDir>..\build\debug\lib\</OutDir>
+    <IntDir>..\build\debug\obj\x86\PresentData\</IntDir>
     <TargetName>$(ProjectName)32</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <OutDir>..\..\build\debug\lib\</OutDir>
-    <IntDir>..\..\build\debug\obj\x64\PresentData\</IntDir>
+    <OutDir>..\build\debug\lib\</OutDir>
+    <IntDir>..\build\debug\obj\x64\PresentData\</IntDir>
     <TargetName>$(ProjectName)64</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
-    <OutDir>..\..\build\release\lib\</OutDir>
-    <IntDir>..\..\build\release\obj\x86\PresentData\</IntDir>
+    <OutDir>..\build\release\lib\</OutDir>
+    <IntDir>..\build\release\obj\x86\PresentData\</IntDir>
     <TargetName>$(ProjectName)32</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <OutDir>..\..\build\release\lib\</OutDir>
-    <IntDir>..\..\build\release\obj\x64\PresentData\</IntDir>
+    <OutDir>..\build\release\lib\</OutDir>
+    <IntDir>..\build\release\obj\x64\PresentData\</IntDir>
     <TargetName>$(ProjectName)64</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
