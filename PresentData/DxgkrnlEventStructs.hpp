@@ -57,6 +57,7 @@ struct DxgkVSyncDPCEventArgs : DxgkEventBase
 struct DxgkSubmitPresentHistoryEventArgs : DxgkEventBase
 {
     uint64_t Token;
+    uint64_t TokenData;
     PresentMode KnownPresentMode;
 };
 

@@ -51,6 +51,7 @@ PresentEvent::PresentEvent(EVENT_HEADER const& hdr, ::Runtime runtime)
     , QueueSubmitSequence(0)
     , RuntimeThread(hdr.ThreadId)
     , Hwnd(0)
+    , TokenPtr(0)
     , Completed(false)
 {
 }
@@ -286,6 +287,7 @@ void PMTraceConsumer::HandleDxgkSubmitPresentHistoryEventArgs(DxgkSubmitPresentH
     eventIter->second->ReadyTime = eventIter->second->ScreenTime = 0;
     eventIter->second->SupportsTearing = false;
     eventIter->second->FinalState = PresentResult::Unknown;
+    eventIter->second->TokenPtr = args.Token;
 
     if (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Copy_To_Front_Buffer)
     {
@@ -304,6 +306,15 @@ void PMTraceConsumer::HandleDxgkSubmitPresentHistoryEventArgs(DxgkSubmitPresentH
             // present in some traces - don't let presents get stuck/dropped just because we can't track them perfectly.
             assert(!eventIter->second->SeenWin32KEvents);
             eventIter->second->PresentMode = PresentMode::Composed_Flip;
+        }
+    }
+    else if (eventIter->second->PresentMode == PresentMode::Composed_Copy_CPU_GDI) {
+        if (args.TokenData == 0) {
+            // This is the best we can do, we won't be able to tell how many frames are actually displayed.
+            mPresentsWaitingForDWM.emplace_back(eventIter->second);
+        }
+        else {
+            mPresentsByLegacyBlitToken[args.TokenData] = eventIter->second;
         }
     }
     mDxgKrnlPresentHistoryTokens[args.Token] = eventIter->second;
@@ -512,10 +523,14 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
     {
         DxgkSubmitPresentHistoryEventArgs Args = {};
         Args.pEventHeader = &hdr;
-        Args.Token = GetEventData<uint64_t>(pEventRecord, L"TokenData");
-        Args.KnownPresentMode = D3DKMT_TokenModel_ToPresentMode(
-            GetEventData<D3DKMT_PRESENT_MODEL>(pEventRecord, L"Model"));
-        pmConsumer->HandleDxgkSubmitPresentHistoryEventArgs(Args);
+        Args.Token = GetEventData<uint64_t>(pEventRecord, L"Token");
+        Args.TokenData = GetEventData<uint64_t>(pEventRecord, L"TokenData");
+        auto KMTPresentModel = GetEventData<D3DKMT_PRESENT_MODEL>(pEventRecord, L"Model");
+        Args.KnownPresentMode = D3DKMT_TokenModel_ToPresentMode(KMTPresentModel);
+        if (KMTPresentModel != D3DKMT_PM_REDIRECTED_GDI)
+        {
+            pmConsumer->HandleDxgkSubmitPresentHistoryEventArgs(Args);
+        }
         break;
     }
     case DxgKrnl_PropagatePresentHistory:
@@ -523,6 +538,7 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         DxgkPropagatePresentHistoryEventArgs Args = {};
         Args.pEventHeader = &hdr;
         Args.Token = GetEventData<uint64_t>(pEventRecord, L"Token");
+        pmConsumer->HandleDxgkPropagatePresentHistoryEventArgs(Args);
         break;
     }
     case DxgKrnl_Blit:
@@ -561,19 +577,20 @@ void HandleDxgkFlip(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 
 void HandleDxgkPresentHistory(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 {
+    auto pPresentHistoryEvent = reinterpret_cast<DXGKETW_PRESENTHISTORYEVENT*>(pEventRecord->UserData);
     if (pEventRecord->EventHeader.EventDescriptor.Opcode == EVENT_TRACE_TYPE_START)
     {
         DxgkSubmitPresentHistoryEventArgs Args = {};
         Args.pEventHeader = &pEventRecord->EventHeader;
         Args.KnownPresentMode = PresentMode::Unknown;
-        Args.Token = reinterpret_cast<DXGKETW_PRESENTHISTORYEVENT*>(pEventRecord->UserData)->Token;
+        Args.Token = pPresentHistoryEvent->Token;
         pmConsumer->HandleDxgkSubmitPresentHistoryEventArgs(Args);
     }
     else if (pEventRecord->EventHeader.EventDescriptor.Opcode == EVENT_TRACE_TYPE_INFO)
     {
         DxgkPropagatePresentHistoryEventArgs Args = {};
         Args.pEventHeader = &pEventRecord->EventHeader;
-        Args.Token = reinterpret_cast<DXGKETW_PRESENTHISTORYEVENT*>(pEventRecord->UserData)->Token;
+        Args.Token = pPresentHistoryEvent->Token;
         pmConsumer->HandleDxgkPropagatePresentHistoryEventArgs(Args);
     }
 }
@@ -658,8 +675,7 @@ void HandleWin32kEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         auto eventIter = pmConsumer->FindOrCreatePresent(hdr);
 
         // Check if we might have retrieved a 'stuck' present from a previous frame.
-        // If the present mode isn't unknown at this point, we've already seen this present progress further
-        if (eventIter->second->PresentMode != PresentMode::Unknown) {
+        if (eventIter->second->SeenWin32KEvents) {
             pmConsumer->mPresentByThreadId.erase(eventIter);
             eventIter = pmConsumer->FindOrCreatePresent(hdr);
         }
@@ -764,6 +780,9 @@ void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
     enum {
         DWM_GetPresentHistory = 64,
         DWM_Schedule_Present_Start = 15,
+        DWM_FlipChain_Pending = 69,
+        DWM_FlipChain_Complete = 70,
+        DWM_FlipChain_Dirty = 101,
         DWM_Schedule_SurfaceUpdate = 196,
     };
 
@@ -789,6 +808,30 @@ void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
     case DWM_Schedule_Present_Start:
     {
         pmConsumer->DwmPresentThreadId = hdr.ThreadId;
+        break;
+    }
+    case DWM_FlipChain_Pending:
+    case DWM_FlipChain_Complete:
+    case DWM_FlipChain_Dirty:
+    {
+        if (InlineIsEqualGUID(hdr.ProviderId, Win7::DWM_PROVIDER_GUID)) {
+            return;
+        }
+        // As it turns out, the 64-bit token data from the PHT submission is actually two 32-bit data chunks,		
+        // corresponding to a "flip chain" id and present id		
+        uint32_t flipChainId = (uint32_t)GetEventData<uint64_t>(pEventRecord, L"ulFlipChain");
+        uint32_t serialNumber = (uint32_t)GetEventData<uint64_t>(pEventRecord, L"ulSerialNumber");
+        uint64_t token = ((uint64_t)flipChainId << 32ull) | serialNumber;
+        auto flipIter = pmConsumer->mDxgKrnlPresentHistoryTokens.find(token);
+        if (flipIter == pmConsumer->mDxgKrnlPresentHistoryTokens.end()) {
+            return;
+        }
+
+        // Watch for multiple legacy blits completing against the same window		
+        auto hWnd = GetEventData<uint64_t>(pEventRecord, L"hwnd");
+        pmConsumer->mPresentByWindow[hWnd] = flipIter->second;
+        flipIter->second->DwmNotified = true;
+        pmConsumer->mPresentsByLegacyBlitToken.erase(flipIter);
         break;
     }
     case DWM_Schedule_SurfaceUpdate:

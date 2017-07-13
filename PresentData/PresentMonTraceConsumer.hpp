@@ -55,6 +55,7 @@ namespace Win7
     struct __declspec(uuid("{295e0d8e-51ec-43b8-9cc6-9f79331d27d6}")) DXGKQUEUEPACKET_GUID_HOLDER;
     struct __declspec(uuid("{5ccf1378-6b2c-4c0f-bd56-8eeb9e4c5c77}")) DXGKVSYNCDPC_GUID_HOLDER;
     struct __declspec(uuid("{547820fe-5666-4b41-93dc-6cfd5dea28cc}")) DXGKMMIOFLIP_GUID_HOLDER;
+    struct __declspec(uuid("{8c9dd1ad-e6e5-4b07-b455-684a9d879900}")) DWM_PROVIDER_GUID_HOLDER;
     static const auto DXGKRNL_PROVIDER_GUID = __uuidof(DXGKRNL_PROVIDER_GUID_HOLDER);
     static const auto DXGKBLT_GUID = __uuidof(DXGKBLT_GUID_HOLDER);
     static const auto DXGKFLIP_GUID = __uuidof(DXGKFLIP_GUID_HOLDER);
@@ -62,6 +63,7 @@ namespace Win7
     static const auto DXGKQUEUEPACKET_GUID = __uuidof(DXGKQUEUEPACKET_GUID_HOLDER);
     static const auto DXGKVSYNCDPC_GUID = __uuidof(DXGKVSYNCDPC_GUID_HOLDER);
     static const auto DXGKMMIOFLIP_GUID = __uuidof(DXGKMMIOFLIP_GUID_HOLDER);
+    static const auto DWM_PROVIDER_GUID = __uuidof(DWM_PROVIDER_GUID_HOLDER);
 };
 
 // Forward-declare structs that will be used by both modern and legacy dxgkrnl events.
@@ -234,6 +236,9 @@ struct PMTraceConsumer
     std::deque<std::shared_ptr<PresentEvent>> mPresentsWaitingForDWM;
     // Used to understand that a flip event is coming from the DWM
     uint32_t DwmPresentThreadId = 0;
+
+    // Yet another unique way of tracking present history tokens, this time from DxgKrnl -> DWM, only for legacy blit
+    std::map<uint64_t, std::shared_ptr<PresentEvent>> mPresentsByLegacyBlitToken;
 
     // Process events
     std::mutex mNTProcessEventMutex;
