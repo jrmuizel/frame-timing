@@ -15,7 +15,7 @@ goto run
 :usage
     echo usage: prune_processes.cmd path_to_csv.csv process_name [process2_name ...] 1>&2
     echo. 1>&2
-    echo CSV will be output to stdout with data from listed processes excluded. 1>&2
+    echo CSV will be output to stdout with data from non-listed processes excluded. 1>&2
     echo. 1>&2
     echo e.g.: prune_processes.cmd PresentMon.csv foo.exe bar.exe ^> PresentMon-pruned.csv 1>&2
     exit /b 1
@@ -35,6 +35,10 @@ exit /b 0
 :print_line
     set line=%~1
     set process=%~2
-    call set ps=%%processes:%process%=%%
-    if "%ps%"=="%processes%" echo %line%
-    exit /b 0
+    for %%c in (%processes%) do (
+        if "%process%"=="%%c" (
+            echo %line%
+            exit /b 0
+        )
+    )
+    exit /b 1
