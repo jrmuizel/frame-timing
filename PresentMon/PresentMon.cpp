@@ -167,6 +167,35 @@ const char* FinalStateToDroppedString(PresentResult res)
     }
 }
 
+void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p, uint64_t now, uint64_t perfFreq)
+{
+	auto& proc = pm.mProcessMap[p.ProcessId];
+	if (!proc.mLastRefreshTicks && !pm.mArgs->mEtlFileName) {
+		UpdateProcessInfo_Realtime(proc, now, p.ProcessId);
+	}
+
+	if (pm.mArgs->mTargetProcessName != nullptr && _stricmp(pm.mArgs->mTargetProcessName, proc.mModuleName.c_str()) != 0) {
+		// process name does not match
+		return;
+	}
+	if (pm.mArgs->mTargetPid && p.ProcessId != pm.mArgs->mTargetPid) {
+		return;
+	}
+
+	if (pm.mArgs->mTerminateOnProcExit && !proc.mTerminationProcess) {
+		proc.mTerminationProcess = true;
+		++pm.mTerminationProcessCount;
+	}
+
+	proc.mLateStageReprojectionData.AddLateStageReprojection(p);
+
+	UNREFERENCED_PARAMETER(perfFreq);
+
+	// TODO sebmerry: Excel file output.
+
+	proc.mLateStageReprojectionData.UpdateLateStageReprojectionInfo(now, perfFreq);
+}
+
 void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perfFreq)
 {
     auto& proc = pm.mProcessMap[p.ProcessId];
@@ -312,7 +341,7 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
     }
 }
 
-void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEvent>>& presents, uint64_t perfFreq)
+void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEvent>>& presents, std::vector<std::shared_ptr<LateStageReprojectionEvent>>& lsrs, uint64_t perfFreq)
 {
     std::string display;
     uint64_t now = GetTickCount64();
@@ -322,6 +351,12 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
     {
         AddPresent(pm, *p, now, perfFreq);
     }
+
+	// store the new lsrs into processes
+	for (auto& p : lsrs)
+	{
+		AddLateStageReprojection(pm, *p, now, perfFreq);
+	}
 
     // update all processes
     for (auto& proc : pm.mProcessMap)
@@ -348,8 +383,73 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
         }
 
         char str[256] = {};
-        _snprintf_s(str, _TRUNCATE, "%s[%d]:\n", proc.second.mModuleName.c_str(),proc.first);
+        _snprintf_s(str, _TRUNCATE, "\n%s[%d]:\n", proc.second.mModuleName.c_str(),proc.first);
         display += str;
+
+		// Conditionally print LSR info
+		{
+			auto& lsrData = proc.second.mLateStageReprojectionData;
+			if (lsrData.HasData())
+			{
+				_snprintf_s(str, _TRUNCATE, "\tMixed Reality:%s\n",
+					lsrData.IsStale(now) ? " [STALE]" : "");
+				display += str;
+
+				const LateStageReprojectionRuntimeStats runtimeStats = lsrData.ComputeRuntimeStats(perfFreq);
+
+				{
+					// App
+					_snprintf_s(str, _TRUNCATE, "\t\tApp: %.2lf ms pose latency\n",
+						runtimeStats.mAppPoseLatency.mAvg);
+					display += str;
+
+					_snprintf_s(str, _TRUNCATE, "\t\t\tMissed frames: %Iu total in last %.1lf seconds (%Iu total observed)\n",
+						runtimeStats.mAppMissedFrames,
+						runtimeStats.mDurationInSec,
+						lsrData.mLifetimeAppMissedFrames);
+					display += str;
+				}
+
+				{
+					// LSR
+					_snprintf_s(str, _TRUNCATE, "\t\tLSR: %.2lf ms pose latency (%.2lf ms to VSync) | %.2lf ms/frame (%.1lf fps, %.1lf displayed fps)\n",
+						runtimeStats.mLsrPoseLatency.mAvg,
+						runtimeStats.mLSRInputLatchToVsync.mAvg,
+						1000.0 / runtimeStats.fps,
+						runtimeStats.fps,
+						runtimeStats.displayedFps);
+					display += str;
+
+					_snprintf_s(str, _TRUNCATE, "\t\t\tMissed frames: %Iu consecutive, %Iu total in last %.1lf seconds (%Iu total observed)\n",
+						runtimeStats.mLsrConsecutiveMissedFrames,
+						runtimeStats.mLsrMissedFrames,
+						runtimeStats.mDurationInSec,
+						lsrData.mLifetimeLsrMissedFrames);
+					display += str;
+
+					_snprintf_s(str, _TRUNCATE, "\t\t\tReprojection: %.2lf ms/frame gpu preemption (%.2lf ms max) | %.2lf ms/frame gpu execution (%.2lf ms max)\n",
+						runtimeStats.mGPUPreemptionInMs.mAvg,
+						runtimeStats.mGPUPreemptionInMs.mMax,
+						runtimeStats.mGPUExecutionInMs.mAvg,
+						runtimeStats.mGPUExecutionInMs.mMax);
+					display += str;
+
+					if (runtimeStats.mCopyExecutionInMs.mAvg > 0.0)
+					{
+						_snprintf_s(str, _TRUNCATE, "\t\t\tHybrid copy: %.2lf ms/frame gpu preemption (%.2lf ms max) | %.2lf ms/frame gpu execution (%.2lf ms max)\n",
+							runtimeStats.mCopyPreemptionInMs.mAvg,
+							runtimeStats.mCopyPreemptionInMs.mMax,
+							runtimeStats.mCopyExecutionInMs.mAvg,
+							runtimeStats.mCopyExecutionInMs.mMax);
+						display += str;
+					}
+
+					_snprintf_s(str, _TRUNCATE, "\n");
+					display += str;
+				}
+			}
+		}
+
         for (auto& chain : proc.second.mChainMap)
         {
             double fps = chain.second.ComputeFps(perfFreq);
@@ -455,8 +555,11 @@ void EtwConsumingThread(const CommandLineArgs& args)
 
     PresentMonData data;
     PMTraceConsumer pmConsumer(args.mVerbosity == Verbosity::Simple);
+	MRTraceConsumer mrConsumer(args.mVerbosity == Verbosity::Simple);
 
     TraceSession session;
+
+	session.AddProviderAndHandler(DHD_PROVIDER_GUID, TRACE_LEVEL_VERBOSE, 0x800000, 0, (EventHandlerFn)&HandleDHDEvent, &mrConsumer);
 
     session.AddProviderAndHandler(DXGI_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 0, 0, (EventHandlerFn) &HandleDXGIEvent, &pmConsumer);
     session.AddProviderAndHandler(D3D9_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 0, 0, (EventHandlerFn) &HandleD3D9Event, &pmConsumer);
@@ -501,6 +604,7 @@ void EtwConsumingThread(const CommandLineArgs& args)
             auto timerEnd = GetTickCount64() + args.mTimer * 1000;
 
             std::vector<std::shared_ptr<PresentEvent>> presents;
+			std::vector<std::shared_ptr<LateStageReprojectionEvent>> lsrs;
             std::vector<NTProcessEvent> ntProcessEvents;
 
             bool log_corrupted = false;
@@ -512,6 +616,7 @@ void EtwConsumingThread(const CommandLineArgs& args)
 #endif
 
                 presents.clear();
+				lsrs.clear();
                 ntProcessEvents.clear();
 
                 // If we are reading events from ETL file set start time to match time stamp of first event
@@ -537,12 +642,17 @@ void EtwConsumingThread(const CommandLineArgs& args)
                 }
 
                 pmConsumer.DequeuePresents(presents);
-                if (args.mScrollLockToggle && (GetKeyState(VK_SCROLL) & 1) == 0) {
-                    presents.clear();
-                }
+				if (args.mScrollLockToggle && (GetKeyState(VK_SCROLL) & 1) == 0) {
+					presents.clear();
+				}
+
+				mrConsumer.DequeueLSRs(lsrs);
+				if (args.mScrollLockToggle && (GetKeyState(VK_SCROLL) & 1) == 0) {
+					lsrs.clear();
+				}
 
                 auto doneProcessingEvents = g_EtwProcessingThreadProcessing ? false : true;
-                PresentMon_Update(data, presents, session.frequency_);
+                PresentMon_Update(data, presents, lsrs, session.frequency_);
 
                 if (args.mEtlFileName) {
                     for (auto ntProcessEvent : ntProcessEvents) {

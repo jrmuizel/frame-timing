@@ -154,6 +154,25 @@ void PrintEventInformation(FILE* fp, EVENT_RECORD* pEventRecord)
     }
 }
 
+std::wstring GetEventTaskName(EVENT_RECORD* pEventRecord)
+{
+	ULONG bufferSize = 0;
+	auto status = TdhGetEventInformation(pEventRecord, 0, nullptr, nullptr, &bufferSize);
+	if (status == ERROR_INSUFFICIENT_BUFFER) {
+		auto bufferAddr = (uintptr_t)malloc(bufferSize);
+
+		auto info = (TRACE_EVENT_INFO*)bufferAddr;
+		status = TdhGetEventInformation(pEventRecord, 0, nullptr, info, &bufferSize);
+		if (status == ERROR_SUCCESS) {
+			return (wchar_t*)(bufferAddr + info->TaskNameOffset);
+		}
+
+		free((void*)bufferAddr);
+	}
+
+	return L"";
+}
+
 template <>
 bool GetEventData<std::string>(EVENT_RECORD* pEventRecord, wchar_t const* name, std::string* out)
 {
