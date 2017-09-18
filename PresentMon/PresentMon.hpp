@@ -40,12 +40,20 @@ struct ProcessInfo {
     bool mProcessExists = false;
 };
 
+struct FilePath {
+    char mDrive[_MAX_DRIVE] = {};
+    char mDirectory[_MAX_DIR] = {};
+    char mName[_MAX_FNAME] = {};
+    char mExt[_MAX_EXT] = {};
+};
+
 struct PresentMonData {
     const CommandLineArgs *mArgs = nullptr;
     uint64_t mStartupQpcTime;
-    char mOutputFilePath[MAX_PATH];
+    FilePath mOutputFilePath;
     FILE *mOutputFile = nullptr;
     std::map<uint32_t, ProcessInfo> mProcessMap;
+    std::map<uint32_t, FILE*> mOutputFileMap; // for multi_csv option
     uint32_t mTerminationProcessCount = 0;
 };
 

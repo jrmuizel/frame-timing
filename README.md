@@ -42,6 +42,8 @@ Capture target options:
 
 Output options:
     -no_csv                    Do not create any output file.
+    -multi_csv                 Create a separate PresentMon-PROCESSNAME-TIME.csv file for each
+                               recorded process. Use -output_file to specify the path.
     -output_file [path]        Write CSV output to specified path. Otherwise, the default is
                                PresentMon-PROCESSNAME-TIME.csv.
 

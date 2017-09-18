@@ -228,6 +228,8 @@ void PrintHelp()
         "\n"
         "Output options:\n"
         "    -no_csv                    Do not create any output file.\n"
+        "    -multi_csv                 Create a separate PresentMon-PROCESSNAME-TIME.csv file for each\n"
+        "                               recorded process. Use -output_file to specify the path.\n"
         "    -output_file [path]        Write CSV output to specified path. Otherwise, the default is\n"
         "                               PresentMon-PROCESSNAME-TIME.csv.\n"
         "\n"
@@ -282,6 +284,7 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
 
         // Output options
         else ARG1("-no_csv",                 args->mOutputFile          = false)
+        else ARG1("-multi_csv",              args->mMultiCsv            = true)
         else ARG2("-output_file",            args->mOutputFileName      = argv[i])
 
         // Control and filtering options
@@ -317,6 +320,12 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
 
     if (args->mEtlFileName && args->mHotkeySupport) {
         fprintf(stderr, "error: -etl_file and -hotkey arguments are not compatible.\n");
+        PrintHelp();
+        return false;
+    }
+
+    if (args->mMultiCsv && !args->mOutputFile) {
+        fprintf(stderr, "error: -multi_csv and -no_csv arguments are not compatible.\n");
         PrintHelp();
         return false;
     }

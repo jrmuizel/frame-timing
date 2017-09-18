@@ -167,6 +167,56 @@ const char* FinalStateToDroppedString(PresentResult res)
     }
 }
 
+FILE* CreateOutputFile(const CommandLineArgs& args, const char* outputFilePath)
+{
+    FILE* outputFile = nullptr;
+    // Open output file and print CSV header
+    fopen_s(&outputFile, outputFilePath, "w");
+    if (outputFile) {
+        fprintf(outputFile, "Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags");
+        if (args.mVerbosity > Verbosity::Simple)
+        {
+            fprintf(outputFile, ",AllowsTearing,PresentMode");
+        }
+        if (args.mVerbosity >= Verbosity::Verbose)
+        {
+            fprintf(outputFile, ",WasBatched,DwmNotified");
+        }
+        fprintf(outputFile, ",Dropped,TimeInSeconds,MsBetweenPresents");
+        if (args.mVerbosity > Verbosity::Simple)
+        {
+            fprintf(outputFile, ",MsBetweenDisplayChange");
+        }
+        fprintf(outputFile, ",MsInPresentAPI");
+        if (args.mVerbosity > Verbosity::Simple)
+        {
+            fprintf(outputFile, ",MsUntilRenderComplete,MsUntilDisplayed");
+        }
+        fprintf(outputFile, "\n");
+    }
+    return outputFile;
+}
+
+tm GetTime()
+{
+    time_t time_now = time(NULL);
+    struct tm tm;
+    localtime_s(&tm, &time_now);
+    return tm;
+}
+
+FILE* CreateMultiCsvFile(const PresentMonData& pm, const ProcessInfo& info)
+{
+    const auto tm = GetTime();
+    char outputFilePath[MAX_PATH];
+    _snprintf_s(outputFilePath, _TRUNCATE, "%s%sPresentMon-%s-%4d-%02d-%02dT%02d%02d%02d.csv", // ISO 8601
+        pm.mOutputFilePath.mDrive, pm.mOutputFilePath.mDirectory,
+        info.mModuleName.c_str(),
+        tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+        tm.tm_hour, tm.tm_min, tm.tm_sec);
+   return CreateOutputFile(*pm.mArgs, outputFilePath);
+}
+
 void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perfFreq)
 {
     auto& proc = pm.mProcessMap[p.ProcessId];
@@ -190,7 +240,18 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
     auto& chain = proc.mChainMap[p.SwapChainAddress];
     chain.AddPresentToSwapChain(p);
 
-    if (pm.mOutputFile && (p.FinalState == PresentResult::Presented || !pm.mArgs->mExcludeDropped)) {
+    auto file = pm.mOutputFile;
+    if (pm.mArgs->mMultiCsv)
+    {
+        file = pm.mOutputFileMap[p.ProcessId];
+        if (!file)
+        {
+            file = CreateMultiCsvFile(pm, proc);
+            pm.mOutputFileMap[p.ProcessId] = file;
+        }
+    }
+
+    if (file && (p.FinalState == PresentResult::Presented || !pm.mArgs->mExcludeDropped)) {
         auto len = chain.mPresentHistory.size();
         auto displayedLen = chain.mDisplayedPresentHistory.size();
         if (len > 1) {
@@ -209,27 +270,27 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
             }
 
             double timeInSeconds = (double)(int64_t)(p.QpcTime - pm.mStartupQpcTime) / perfFreq;
-            fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%s,%d,%d",
+            fprintf(file, "%s,%d,0x%016llX,%s,%d,%d",
                     proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime), curr.SyncInterval, curr.PresentFlags);
             if (pm.mArgs->mVerbosity > Verbosity::Simple)
             {
-                fprintf(pm.mOutputFile, ",%d,%s", curr.SupportsTearing, PresentModeToString(curr.PresentMode));
+                fprintf(file, ",%d,%s", curr.SupportsTearing, PresentModeToString(curr.PresentMode));
             }
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(pm.mOutputFile, ",%d,%d", curr.WasBatched, curr.DwmNotified);
+                fprintf(file, ",%d,%d", curr.WasBatched, curr.DwmNotified);
             }
-            fprintf(pm.mOutputFile, ",%s,%.6lf,%.3lf", FinalStateToDroppedString(curr.FinalState), timeInSeconds, deltaMilliseconds);
+            fprintf(file, ",%s,%.6lf,%.3lf", FinalStateToDroppedString(curr.FinalState), timeInSeconds, deltaMilliseconds);
             if (pm.mArgs->mVerbosity > Verbosity::Simple)
             {
-                fprintf(pm.mOutputFile, ",%.3lf", timeSincePreviousDisplayed);
+                fprintf(file, ",%.3lf", timeSincePreviousDisplayed);
             }
-            fprintf(pm.mOutputFile, ",%.3lf", timeTakenMilliseconds);
+            fprintf(file, ",%.3lf", timeTakenMilliseconds);
             if (pm.mArgs->mVerbosity > Verbosity::Simple)
             {
-                fprintf(pm.mOutputFile, ",%.3lf,%.3lf", deltaReady, deltaDisplayed);
+                fprintf(file, ",%.3lf,%.3lf", deltaReady, deltaDisplayed);
             }
-            fprintf(pm.mOutputFile, "\n");
+            fprintf(file, "\n");
         }
     }
 
@@ -250,7 +311,7 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
         // later from first event in the file.
         pm.mStartupQpcTime = 0;
     }
-
+    
     if (args.mOutputFile) {
         // Figure out what file name to use:
         //    FILENAME.EXT                     If FILENAME.EXT specified on command line
@@ -258,56 +319,37 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
         //    PresentMon-PROCESSNAME-TIME.csv  If targetting a process by name
         //    PresentMon-TIME.csv              Otherwise
         if (args.mOutputFileName) {
-            if (!args.mHotkeySupport) {
-                _snprintf_s(pm.mOutputFilePath, _TRUNCATE, "%s", args.mOutputFileName);
-            } else {
-                char drive[_MAX_DRIVE] = {};
-                char dir[_MAX_DIR] = {};
-                char name[_MAX_FNAME] = {};
-                char ext[_MAX_EXT] = {};
-                _splitpath_s(args.mOutputFileName, drive, dir, name, ext);
-                _snprintf_s(pm.mOutputFilePath, _TRUNCATE, "%s%s%s-%d%s", drive, dir, name, args.mRecordingCount, ext);
-            }
-        } else {
-            struct tm tm;
-            time_t time_now = time(NULL);
-            localtime_s(&tm, &time_now);
+            _splitpath_s(args.mOutputFileName, pm.mOutputFilePath.mDrive, pm.mOutputFilePath.mDirectory, 
+                pm.mOutputFilePath.mName, pm.mOutputFilePath.mExt);
 
+            if (args.mHotkeySupport) {
+                _snprintf_s(pm.mOutputFilePath.mName, _TRUNCATE, "%s-%d", pm.mOutputFilePath.mName, args.mRecordingCount);
+            }
+        }
+        else {
+            _snprintf_s(pm.mOutputFilePath.mExt, _TRUNCATE, ".csv");
+            const auto tm = GetTime();
             if (args.mTargetProcessName == nullptr) {
-                _snprintf_s(pm.mOutputFilePath, _TRUNCATE, "PresentMon-%4d-%02d-%02dT%02d%02d%02d.csv", // ISO 8601
+                _snprintf_s(pm.mOutputFilePath.mName, _TRUNCATE, "PresentMon-%4d-%02d-%02dT%02d%02d%02d", // ISO 8601
                     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
                     tm.tm_hour, tm.tm_min, tm.tm_sec);
-            } else {
-                _snprintf_s(pm.mOutputFilePath, _TRUNCATE, "PresentMon-%s-%4d-%02d-%02dT%02d%02d%02d.csv", // ISO 8601
+            }
+            else {
+                // PresentMon-PROCESSNAME-TIME.csv
+                _snprintf_s(pm.mOutputFilePath.mName, _TRUNCATE, "PresentMon-%s-%4d-%02d-%02dT%02d%02d%02d", // ISO 8601
                     args.mTargetProcessName,
                     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
                     tm.tm_hour, tm.tm_min, tm.tm_sec);
             }
         }
 
-        // Open output file and print CSV header
-        fopen_s(&pm.mOutputFile, pm.mOutputFilePath, "w");
-        if (pm.mOutputFile) {
-            fprintf(pm.mOutputFile, "Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags");
-            if (pm.mArgs->mVerbosity > Verbosity::Simple)
-            {
-                fprintf(pm.mOutputFile, ",AllowsTearing,PresentMode");
-            }
-            if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
-            {
-                fprintf(pm.mOutputFile, ",WasBatched,DwmNotified");
-            }
-            fprintf(pm.mOutputFile, ",Dropped,TimeInSeconds,MsBetweenPresents");
-            if (pm.mArgs->mVerbosity > Verbosity::Simple)
-            {
-                fprintf(pm.mOutputFile, ",MsBetweenDisplayChange");
-            }
-            fprintf(pm.mOutputFile, ",MsInPresentAPI");
-            if (pm.mArgs->mVerbosity > Verbosity::Simple)
-            {
-                fprintf(pm.mOutputFile, ",MsUntilRenderComplete,MsUntilDisplayed");
-            }
-            fprintf(pm.mOutputFile, "\n");
+        if (!args.mMultiCsv)
+        {
+            char outputFilePath[MAX_PATH];
+            _snprintf_s(outputFilePath, _TRUNCATE, "%s%s%s%s", 
+                pm.mOutputFilePath.mDrive, pm.mOutputFilePath.mDirectory,
+                pm.mOutputFilePath.mName, pm.mOutputFilePath.mExt);
+            pm.mOutputFile = CreateOutputFile(args, outputFilePath);
         }
     }
 }
@@ -415,7 +457,12 @@ void PresentMon_Shutdown(PresentMonData& pm, bool log_corrupted)
     {
         if (log_corrupted) {
             fclose(pm.mOutputFile);
-            fopen_s(&pm.mOutputFile, pm.mOutputFilePath, "w");
+
+            char outputFilePath[MAX_PATH];
+            _snprintf_s(outputFilePath, _TRUNCATE, "%s%s%s%s",
+                pm.mOutputFilePath.mDrive, pm.mOutputFilePath.mDirectory,
+                pm.mOutputFilePath.mName, pm.mOutputFilePath.mExt);
+            fopen_s(&pm.mOutputFile, outputFilePath, "w");
             if (pm.mOutputFile) {
                 fprintf(pm.mOutputFile, "Error: Some ETW packets were lost. Collected data is unreliable.\n");
             }
@@ -425,6 +472,16 @@ void PresentMon_Shutdown(PresentMonData& pm, bool log_corrupted)
             pm.mOutputFile = nullptr;
         }
     }
+    
+    for (auto& filePair : pm.mOutputFileMap)
+    {
+        if (filePair.second)
+        {
+            fclose(filePair.second);
+        }
+    }
+    
+    pm.mOutputFileMap.clear();
     pm.mProcessMap.clear();
 
     if (pm.mArgs->mSimpleConsole == false) {
@@ -532,6 +589,10 @@ void EtwConsumingThread(const CommandLineArgs& args)
                             processInfo.mModuleName = ntProcessEvent.ImageFileName;
 
                             data.mProcessMap[ntProcessEvent.ProcessId] = processInfo;
+                            if (args.mMultiCsv && args.mOutputFile)
+                            {
+                                data.mOutputFileMap[ntProcessEvent.ProcessId] = CreateMultiCsvFile(data, processInfo);
+                            }
                         }
                     }
                 }
@@ -548,6 +609,15 @@ void EtwConsumingThread(const CommandLineArgs& args)
                     for (auto ntProcessEvent : ntProcessEvents) {
                         if (ntProcessEvent.ImageFileName.empty()) {
                             data.mProcessMap.erase(ntProcessEvent.ProcessId);
+                            if (args.mMultiCsv)
+                            {
+                                auto it = data.mOutputFileMap.find(ntProcessEvent.ProcessId);
+                                if (it != data.mOutputFileMap.end())
+                                {
+                                    fclose(it->second);
+                                    data.mOutputFileMap.erase(it);
+                                }
+                            }
                         }
                     }
                 }
@@ -603,4 +673,3 @@ void EtwConsumingThread(const CommandLineArgs& args)
         printf("Stopping recording.\n");
     }
 }
-
