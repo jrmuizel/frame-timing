@@ -46,6 +46,7 @@ LateStageReprojectionEvent::LateStageReprojectionEvent(EVENT_HEADER const& hdr)
 	, AppPredictionLatencyMs(0)
     , ProcessId(hdr.ProcessId)
     , FinalState(LateStageReprojectionResult::Unknown)
+	, MissedVsyncCount(0)
     , Completed(false)
 	, UserNoticedHitch(false)
 {
@@ -123,6 +124,19 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
 		event.Completed = true;
 
 	}
+	else if (taskName.compare(L"LsrThread_UnaccountedForVsyncsBetweenStatGathering") == 0)
+	{
+		// Update the active LSR.
+		auto& pEvent = mrConsumer->mActiveLSR;
+
+		// We have missed some extra Vsyncs.
+		uint32_t MissedVSyncCount = 0;
+		GetEventData(pEventRecord, L"unaccountedForVsyncsBetweenStatGathering", &MissedVSyncCount);
+		if (MissedVSyncCount > 1)
+		{
+			pEvent->MissedVsyncCount += (MissedVSyncCount - 1);	// -1 since we account for one missed frame with the LatePresentationTiming event.
+		}
+	}
 	else if (taskName.compare(L"OnTimePresentationTiming") == 0 || taskName.compare(L"LatePresentationTiming") == 0)
 	{
 		// Update the active LSR.
@@ -146,7 +160,16 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
 
 			bool bFrameSubmittedOnSchedule = false;
 			GetEventData(pEventRecord, L"frameSubmittedOnSchedule", &bFrameSubmittedOnSchedule);
-			pEvent->FinalState = bFrameSubmittedOnSchedule ? LateStageReprojectionResult::Presented : LateStageReprojectionResult::Missed;
+			if (bFrameSubmittedOnSchedule)
+			{
+				pEvent->FinalState = LateStageReprojectionResult::Presented;
+				assert(pEvent->MissedVsyncCount == 0);
+			}
+			else
+			{
+				pEvent->FinalState = LateStageReprojectionResult::Missed;
+				pEvent->MissedVsyncCount++; // We missed at least one frame. The other missed vsyncs are added in the LsrThread_UnaccountedForVsyncsBetweenStatGathering event.
+			}
 		}
 	}
 }

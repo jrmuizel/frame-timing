@@ -46,7 +46,7 @@ void LateStageReprojectionData::AddLateStageReprojection(LateStageReprojectionEv
     }
 	else if(p.FinalState == LateStageReprojectionResult::Missed)
 	{
-		mLifetimeLsrMissedFrames++;
+		mLifetimeLsrMissedFrames += p.MissedVsyncCount;
 	}
 
 	if (!p.NewSourceLatched)
@@ -120,6 +120,7 @@ LateStageReprojectionRuntimeStats LateStageReprojectionData::ComputeRuntimeStats
 	stats.mDurationInSec = ComputeHistoryTime(qpcFreq);
 
 	auto count = mLSRHistory.size() - 1;
+	stats.mTotalLsrFrames = mLSRHistory.size();
 	for (size_t i = 0; i <= count; i++)
 	{
 		LateStageReprojectionEvent& current = mLSRHistory[i];
@@ -166,7 +167,13 @@ LateStageReprojectionRuntimeStats LateStageReprojectionData::ComputeRuntimeStats
 
 		if (current.FinalState == LateStageReprojectionResult::Missed)
 		{
-			stats.mLsrMissedFrames++;
+			assert(current.MissedVsyncCount >= 1);
+			stats.mLsrMissedFrames += current.MissedVsyncCount;
+			if (current.MissedVsyncCount > 1)
+			{
+				// We always expect a count of at least 1, but if we missed multiple vsyncs during a single LSR period we need to account for that.
+				stats.mLsrConsecutiveMissedFrames += (current.MissedVsyncCount - 1);
+			}
 			if (i > 0 && (mLSRHistory[i - 1].FinalState == LateStageReprojectionResult::Missed))
 			{
 				stats.mLsrConsecutiveMissedFrames++;

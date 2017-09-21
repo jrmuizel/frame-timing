@@ -76,6 +76,7 @@ struct LateStageReprojectionEvent {
 
     uint32_t ProcessId;
 	LateStageReprojectionResult FinalState;
+	uint32_t MissedVsyncCount;
 
     // Additional transient state
     bool Completed;

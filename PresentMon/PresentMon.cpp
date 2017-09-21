@@ -205,10 +205,10 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
 	if (pm.mLsrOutputFile) {
 		double timeInSeconds = (double)(int64_t)(p.QpcTime - pm.mStartupQpcTime) / perfFreq;
 		//double targetVsyncTimeInSeconds = (double)(int64_t)(p.TargetVBlankQPC - pm.mStartupQpcTime) / perfFreq;
-		fprintf(pm.mLsrOutputFile, "%s,%d,%.6lf,%d,%d,%s,%d,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%d,%d\n",
+		fprintf(pm.mLsrOutputFile, "%s,%d,%.6lf,%d,%d,%d,%s,%d,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%d,%d\n",
 			proc.mModuleName.c_str(), p.ProcessId,
 			timeInSeconds,
-			!p.NewSourceLatched, p.FinalState == LateStageReprojectionResult::Missed, LateStageReprojectionResultToString(p.FinalState), p.UserNoticedHitch,
+			!p.NewSourceLatched, p.FinalState == LateStageReprojectionResult::Missed, p.MissedVsyncCount, LateStageReprojectionResultToString(p.FinalState), p.UserNoticedHitch,
 			p.AppPredictionLatencyMs, p.LsrPredictionLatencyMs, p.AppMispredictionMs,
 			p.TimeUntilVsyncMs,
 			p.WakeupErrorMs,
@@ -402,7 +402,7 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
 		// Open output file and print CSV header
 		fopen_s(&pm.mLsrOutputFile, pm.mLsrOutputFilePath, "w");
 		if (pm.mLsrOutputFile) {
-			fprintf(pm.mLsrOutputFile, "Application,ProcessID,TimeInSeconds,AppMissed,LsrMissed,LsrResult,UserNotedHitch,MsAppPoseLatency,MsLsrPoseLatency,MsAppMisprediction,MsTimeUntilVsync,MSThreadWakeupError,MSThreadWakeupToCpuRenderFrameStart,MsCpuRenderFrameStartToHeadPoseCallbackStart,MsGetHeadPose,MsHeadPoseCallbackStopToInputLatch,MsInputLatchToGPUSubmission,MsLsrPreemption,MsLsrExecution,MsCopyPreemption,MsCopyExecution,MsCopyStopToVsync,SuspendedThreadBeforeLSR,EarlyLSRDueToInvalidFence\n");
+			fprintf(pm.mLsrOutputFile, "Application,ProcessID,TimeInSeconds,AppMissed,LsrMissed,LsrMissedVsyncs,LsrResult,UserNotedHitch,MsAppPoseLatency,MsLsrPoseLatency,MsAppMisprediction,MsTimeUntilVsync,MSThreadWakeupError,MSThreadWakeupToCpuRenderFrameStart,MsCpuRenderFrameStartToHeadPoseCallbackStart,MsGetHeadPose,MsHeadPoseCallbackStopToInputLatch,MsInputLatchToGPUSubmission,MsLsrPreemption,MsLsrExecution,MsCopyPreemption,MsCopyExecution,MsCopyStopToVsync,SuspendedThreadBeforeLSR,EarlyLSRDueToInvalidFence\n");
 		}
     }
 }
@@ -465,8 +465,9 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
 
 				{
 					// App
-					_snprintf_s(str, _TRUNCATE, "\t\tApp: %.2lf ms pose latency\n",
-						runtimeStats.mAppPoseLatency.mAvg);
+					_snprintf_s(str, _TRUNCATE, "\t\tApp: %.2lf ms pose latency | %.1lf%% of LSR framerate\n",
+						runtimeStats.mAppPoseLatency.mAvg,
+						(runtimeStats.mTotalLsrFrames - runtimeStats.mAppMissedFrames) / (1.0f * runtimeStats.mTotalLsrFrames) * 100.0f);
 					display += str;
 
 					_snprintf_s(str, _TRUNCATE, "\t\t\tMissed frames: %Iu total in last %.1lf seconds (%Iu total observed)\n",

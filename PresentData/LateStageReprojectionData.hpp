@@ -45,6 +45,7 @@ struct LateStageReprojectionRuntimeStats {
 	size_t mAppMissedFrames = 0;
 	size_t mLsrMissedFrames = 0;
 	size_t mLsrConsecutiveMissedFrames = 0;
+	size_t mTotalLsrFrames = 0;
 	double mDurationInSec = 0.0;
 };
 
