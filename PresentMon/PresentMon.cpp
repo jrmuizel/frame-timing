@@ -133,6 +133,17 @@ static void UpdateProcessInfo_Realtime(ProcessInfo& info, uint64_t now, uint32_t
     });
 }
 
+const char* LateStageReprojectionResultToString(LateStageReprojectionResult result)
+{
+	switch (result)
+	{
+	case LateStageReprojectionResult::Error: return "Error";
+	case LateStageReprojectionResult::Missed: return "Missed (Late)";
+	case LateStageReprojectionResult::Presented: return "Presented (Ontime)";
+	default: return "Unknown";
+	}
+}
+
 const char* PresentModeToString(PresentMode mode)
 {
     switch (mode) {
@@ -191,7 +202,29 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
 
 	UNREFERENCED_PARAMETER(perfFreq);
 
-	// TODO sebmerry: Excel file output.
+	if (pm.mLsrOutputFile) {
+		double timeInSeconds = (double)(int64_t)(p.QpcTime - pm.mStartupQpcTime) / perfFreq;
+		//double targetVsyncTimeInSeconds = (double)(int64_t)(p.TargetVBlankQPC - pm.mStartupQpcTime) / perfFreq;
+		fprintf(pm.mLsrOutputFile, "%s,%d,%.6lf,%d,%d,%s,%d,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%d,%d\n",
+			proc.mModuleName.c_str(), p.ProcessId,
+			timeInSeconds,
+			!p.NewSourceLatched, p.FinalState == LateStageReprojectionResult::Missed, LateStageReprojectionResultToString(p.FinalState), p.UserNoticedHitch,
+			p.AppPredictionLatencyMs, p.LsrPredictionLatencyMs, p.AppMispredictionMs,
+			p.TimeUntilVsyncMs,
+			p.WakeupErrorMs,
+			p.ThreadWakeupToCpuRenderFrameStartInMs,
+			p.CpuRenderFrameStartToHeadPoseCallbackStartInMs,
+			p.HeadPoseCallbackStartToHeadPoseCallbackStopInMs,
+			p.HeadPoseCallbackStopToInputLatchInMs,
+			p.InputLatchToGPUSubmissionInMs,
+			p.GpuSubmissionToGpuStartInMs,
+			p.GpuStartToGpuStopInMs,
+			p.GpuStopToCopyStartInMs,
+			p.CopyStartToCopyStopInMs,
+			p.CopyStopToVsyncInMs,
+			p.SuspendedThreadBeforeLSR,
+			p.EarlyLSRDueToInvalidFence);
+	}
 
 	proc.mLateStageReprojectionData.UpdateLateStageReprojectionInfo(now, perfFreq);
 }
@@ -296,6 +329,7 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
                 char ext[_MAX_EXT] = {};
                 _splitpath_s(args.mOutputFileName, drive, dir, name, ext);
                 _snprintf_s(pm.mOutputFilePath, _TRUNCATE, "%s%s%s-%d%s", drive, dir, name, args.mRecordingCount, ext);
+				_snprintf_s(pm.mLsrOutputFilePath, _TRUNCATE, "%s%s%s-%d%s_LSR", drive, dir, name, args.mRecordingCount, ext);
             }
         } else {
             struct tm tm;
@@ -306,11 +340,18 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
                 _snprintf_s(pm.mOutputFilePath, _TRUNCATE, "PresentMon-%4d-%02d-%02dT%02d%02d%02d.csv", // ISO 8601
                     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
                     tm.tm_hour, tm.tm_min, tm.tm_sec);
+				_snprintf_s(pm.mLsrOutputFilePath, _TRUNCATE, "PresentMon-%4d-%02d-%02dT%02d%02d%02d_LSR.csv", // ISO 8601
+					tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+					tm.tm_hour, tm.tm_min, tm.tm_sec);
             } else {
                 _snprintf_s(pm.mOutputFilePath, _TRUNCATE, "PresentMon-%s-%4d-%02d-%02dT%02d%02d%02d.csv", // ISO 8601
                     args.mTargetProcessName,
                     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
                     tm.tm_hour, tm.tm_min, tm.tm_sec);
+				_snprintf_s(pm.mLsrOutputFilePath, _TRUNCATE, "PresentMon-%s-%4d-%02d-%02dT%02d%02d%02d_LSR.csv", // ISO 8601
+					args.mTargetProcessName,
+					tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+					tm.tm_hour, tm.tm_min, tm.tm_sec);
             }
         }
 
@@ -338,6 +379,31 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
             }
             fprintf(pm.mOutputFile, "\n");
         }
+		/*fprintf(pm.mLsrOutputFile, "%s,%d,%.6lf,%d,%d,%s,%d,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%d,%d\n",
+			proc.mModuleName.c_str(), p.ProcessId,
+			timeInSeconds,
+			!p.NewSourceLatched, p.FinalState == LateStageReprojectionResult::Missed, LateStageReprojectionResultToString(p.FinalState), p.UserNoticedHitch,
+			p.AppPredictionLatencyMs, p.LsrPredictionLatencyMs, p.AppMispredictionMs,
+			p.TimeUntilVsyncMs,
+			p.WakeupErrorMs,
+			p.ThreadWakeupToCpuRenderFrameStartInMs,
+			p.CpuRenderFrameStartToHeadPoseCallbackStartInMs,
+			p.HeadPoseCallbackStartToHeadPoseCallbackStopInMs,
+			p.HeadPoseCallbackStopToInputLatchInMs,
+			p.InputLatchToGPUSubmissionInMs,
+			p.GpuSubmissionToGpuStartInMs,
+			p.GpuStartToGpuStopInMs,
+			p.GpuStopToCopyStartInMs,
+			p.CopyStartToCopyStopInMs,
+			p.CopyStopToVsyncInMs,
+			p.SuspendedThreadBeforeLSR,
+			p.EarlyLSRDueToInvalidFence);*/
+
+		// Open output file and print CSV header
+		fopen_s(&pm.mLsrOutputFile, pm.mLsrOutputFilePath, "w");
+		if (pm.mLsrOutputFile) {
+			fprintf(pm.mLsrOutputFile, "Application,ProcessID,TimeInSeconds,AppMissed,LsrMissed,LsrResult,UserNotedHitch,MsAppPoseLatency,MsLsrPoseLatency,MsAppMisprediction,MsTimeUntilVsync,MSThreadWakeupError,MSThreadWakeupToCpuRenderFrameStart,MsCpuRenderFrameStartToHeadPoseCallbackStart,MsGetHeadPose,MsHeadPoseCallbackStopToInputLatch,MsInputLatchToGPUSubmission,MsLsrPreemption,MsLsrExecution,MsCopyPreemption,MsCopyExecution,MsCopyStopToVsync,SuspendedThreadBeforeLSR,EarlyLSRDueToInvalidFence\n");
+		}
     }
 }
 
@@ -525,7 +591,22 @@ void PresentMon_Shutdown(PresentMonData& pm, bool log_corrupted)
             pm.mOutputFile = nullptr;
         }
     }
-    pm.mProcessMap.clear();
+
+	if (pm.mLsrOutputFile)
+	{
+		if (log_corrupted) {
+			fclose(pm.mLsrOutputFile);
+			fopen_s(&pm.mLsrOutputFile, pm.mOutputFilePath, "w");
+			if (pm.mLsrOutputFile) {
+				fprintf(pm.mOutputFile, "Error: Some ETW packets were lost. Collected data is unreliable.\n");
+			}
+		}
+		if (pm.mLsrOutputFile) {
+			fclose(pm.mLsrOutputFile);
+			pm.mLsrOutputFile = nullptr;
+		}
+	}
+	pm.mProcessMap.clear();
 
     if (pm.mArgs->mSimpleConsole == false) {
         SetConsoleText("");
@@ -555,7 +636,7 @@ void EtwConsumingThread(const CommandLineArgs& args)
 
     PresentMonData data;
     PMTraceConsumer pmConsumer(args.mVerbosity == Verbosity::Simple);
-	MRTraceConsumer mrConsumer(args.mVerbosity == Verbosity::Simple);
+	MRTraceConsumer mrConsumer(args.mVerbosity == Verbosity::Simple, args.mLogUserHitches);
 
     TraceSession session;
 

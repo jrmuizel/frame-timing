@@ -47,7 +47,9 @@ struct PresentMonData {
     const CommandLineArgs *mArgs = nullptr;
     uint64_t mStartupQpcTime;
     char mOutputFilePath[MAX_PATH];
+	char mLsrOutputFilePath[MAX_PATH];
     FILE *mOutputFile = nullptr;
+	FILE *mLsrOutputFile = nullptr;
     std::map<uint32_t, ProcessInfo> mProcessMap;
     uint32_t mTerminationProcessCount = 0;
 };

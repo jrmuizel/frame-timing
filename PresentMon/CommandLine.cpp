@@ -297,6 +297,7 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
         else ARG1("-verbose",                verbose                    = true)
         else ARG1("-dont_restart_as_admin",  args->mTryToElevate        = false)
         else ARG1("-no_top",                 args->mSimpleConsole       = true)
+		else ARG1("-loguserhitches",           args->mLogUserHitches      = true)
 
         // Provided argument wasn't recognized
         else fprintf(stderr, "error: %s '%s'.\n",

@@ -47,6 +47,7 @@ LateStageReprojectionEvent::LateStageReprojectionEvent(EVENT_HEADER const& hdr)
     , ProcessId(hdr.ProcessId)
     , FinalState(LateStageReprojectionResult::Unknown)
     , Completed(false)
+	, UserNoticedHitch(false)
 {
 }
 
@@ -93,14 +94,27 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
 			}
 			
 			GetEventData(pEventRecord, L"PredictionSampleTimeToPhotonsVisibleMs", &pEvent->AppPredictionLatencyMs);
+			GetEventData(pEventRecord, L"MispredictionMs", &pEvent->AppMispredictionMs);
 
 			assert(pEvent->FinalState == LateStageReprojectionResult::Presented || pEvent->FinalState == LateStageReprojectionResult::Missed);
+			
+			if (mrConsumer->mLogUserHitches)
+			{
+				const bool bSpacePressed = (GetAsyncKeyState(VK_SPACE) & 1) == 1;
+				if (bSpacePressed)
+				{
+					pEvent->UserNoticedHitch = true;
+				}
+			}
+			
 			mrConsumer->CompleteLSR(pEvent);
 		}
 
 		// Start a new LSR
 		LateStageReprojectionEvent event(hdr);
 		GetEventData(pEventRecord, L"NewSourceLatched", &event.NewSourceLatched);
+		//GetEventData(pEventRecord, L"TargetVBlankQPC", &event.TargetVBlankQPC);
+		GetEventData(pEventRecord, L"TimeUntilVblankMs", &event.TimeUntilVsyncMs);
 
 		pEvent = std::make_shared<LateStageReprojectionEvent>(event);
 
@@ -125,6 +139,10 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
 			GetEventData(pEventRecord, L"gpuStopToCopyStartInMs", &pEvent->GpuStopToCopyStartInMs);
 			GetEventData(pEventRecord, L"copyStartToCopyStopInMs", &pEvent->CopyStartToCopyStopInMs);
 			GetEventData(pEventRecord, L"copyStopToVsyncInMs", &pEvent->CopyStopToVsyncInMs);
+
+			GetEventData(pEventRecord, L"wakeupErrorInMs", &pEvent->WakeupErrorMs);
+			GetEventData(pEventRecord, L"earlyLSRDueToInvalidFence", &pEvent->EarlyLSRDueToInvalidFence);
+			GetEventData(pEventRecord, L"suspendedThreadBeforeLSR", &pEvent->SuspendedThreadBeforeLSR);
 
 			bool bFrameSubmittedOnSchedule = false;
 			GetEventData(pEventRecord, L"frameSubmittedOnSchedule", &bFrameSubmittedOnSchedule);

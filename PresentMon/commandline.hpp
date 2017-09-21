@@ -50,6 +50,7 @@ struct CommandLineArgs {
     bool mScrollLockIndicator = false;
     bool mExcludeDropped = false;
     Verbosity mVerbosity = Verbosity::Normal;
+	bool mLogUserHitches = false;
     bool mSimpleConsole = false;
     bool mTerminateOnProcExit = false;
     bool mTerminateAfterTimer = false;

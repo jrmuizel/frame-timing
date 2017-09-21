@@ -51,6 +51,7 @@ enum class LateStageReprojectionResult
 struct LateStageReprojectionEvent {
     // Available from DHD
 	uint64_t QpcTime;
+	//uint64_t TargetVBlankQPC;
 	
 	bool NewSourceLatched;
 	float ThreadWakeupToCpuRenderFrameStartInMs;
@@ -66,12 +67,19 @@ struct LateStageReprojectionEvent {
 
 	float LsrPredictionLatencyMs;
 	float AppPredictionLatencyMs;
+	float AppMispredictionMs;
+	float WakeupErrorMs;
+	float TimeUntilVsyncMs;
+
+	bool EarlyLSRDueToInvalidFence;
+	bool SuspendedThreadBeforeLSR;
 
     uint32_t ProcessId;
 	LateStageReprojectionResult FinalState;
 
     // Additional transient state
     bool Completed;
+	bool UserNoticedHitch;
 
 	LateStageReprojectionEvent(EVENT_HEADER const& hdr);
     ~LateStageReprojectionEvent();
@@ -79,10 +87,14 @@ struct LateStageReprojectionEvent {
 
 struct MRTraceConsumer
 {
-	MRTraceConsumer(bool simple) : mSimpleMode(simple) { }
+	MRTraceConsumer(bool simple, bool logUserHitches) 
+		: mSimpleMode(simple)
+		, mLogUserHitches(logUserHitches)
+	{ }
     ~MRTraceConsumer();
 
     bool mSimpleMode;
+	bool mLogUserHitches;
 
     std::mutex mMutex;
     // A set of LSRs that are "completed":
