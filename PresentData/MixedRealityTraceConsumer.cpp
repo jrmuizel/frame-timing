@@ -167,8 +167,8 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
 			}
 			else
 			{
-				pEvent->FinalState = LateStageReprojectionResult::Missed;
 				pEvent->MissedVsyncCount++; // We missed at least one frame. The other missed vsyncs are added in the LsrThread_UnaccountedForVsyncsBetweenStatGathering event.
+				pEvent->FinalState = (pEvent->MissedVsyncCount > 1) ? LateStageReprojectionResult::MissedMultiple : LateStageReprojectionResult::Missed;
 			}
 		}
 	}

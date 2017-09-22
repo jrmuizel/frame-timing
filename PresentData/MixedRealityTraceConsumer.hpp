@@ -45,7 +45,7 @@ struct DHDPresentationTimingArgs;
 
 enum class LateStageReprojectionResult
 {
-	Unknown, Presented, Missed, Error
+	Unknown, Presented, Missed, MissedMultiple, Error
 };
 
 struct LateStageReprojectionEvent {
