@@ -380,25 +380,6 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
             }
             fprintf(pm.mOutputFile, "\n");
         }
-		/*fprintf(pm.mLsrOutputFile, "%s,%d,%.6lf,%d,%d,%s,%d,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%d,%d\n",
-			proc.mModuleName.c_str(), p.ProcessId,
-			timeInSeconds,
-			!p.NewSourceLatched, p.FinalState == LateStageReprojectionResult::Missed, LateStageReprojectionResultToString(p.FinalState), p.UserNoticedHitch,
-			p.AppPredictionLatencyMs, p.LsrPredictionLatencyMs, p.AppMispredictionMs,
-			p.TimeUntilVsyncMs,
-			p.WakeupErrorMs,
-			p.ThreadWakeupToCpuRenderFrameStartInMs,
-			p.CpuRenderFrameStartToHeadPoseCallbackStartInMs,
-			p.HeadPoseCallbackStartToHeadPoseCallbackStopInMs,
-			p.HeadPoseCallbackStopToInputLatchInMs,
-			p.InputLatchToGPUSubmissionInMs,
-			p.GpuSubmissionToGpuStartInMs,
-			p.GpuStartToGpuStopInMs,
-			p.GpuStopToCopyStartInMs,
-			p.CopyStartToCopyStopInMs,
-			p.CopyStopToVsyncInMs,
-			p.SuspendedThreadBeforeLSR,
-			p.EarlyLSRDueToInvalidFence);*/
 
 		// Open output file and print CSV header
 		fopen_s(&pm.mLsrOutputFile, pm.mLsrOutputFilePath, "w");
@@ -642,7 +623,7 @@ void EtwConsumingThread(const CommandLineArgs& args)
 
     TraceSession session;
 
-	session.AddProviderAndHandler(DHD_PROVIDER_GUID, TRACE_LEVEL_VERBOSE, 0x800000, 0, (EventHandlerFn)&HandleDHDEvent, &mrConsumer);
+	session.AddProviderAndHandler(DHD_PROVIDER_GUID, TRACE_LEVEL_VERBOSE, 0x1C00000, 0, (EventHandlerFn)&HandleDHDEvent, &mrConsumer);
 
     session.AddProviderAndHandler(DXGI_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 0, 0, (EventHandlerFn) &HandleDXGIEvent, &pmConsumer);
     session.AddProviderAndHandler(D3D9_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 0, 0, (EventHandlerFn) &HandleD3D9Event, &pmConsumer);

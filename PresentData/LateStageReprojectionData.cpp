@@ -40,12 +40,14 @@ void LateStageReprojectionData::PruneDeque(std::deque<LateStageReprojectionEvent
 
 void LateStageReprojectionData::AddLateStageReprojection(LateStageReprojectionEvent& p)
 {
-    if (p.FinalState == LateStageReprojectionResult::Presented)
+    if (LateStageReprojectionPresented(p.FinalState))
     {
+		assert(p.MissedVsyncCount == 0);
 		mDisplayedLSRHistory.push_back(p);
     }
-	else if(p.FinalState == LateStageReprojectionResult::Missed)
+	else if(LateStageReprojectionMissed(p.FinalState))
 	{
+		assert(p.MissedVsyncCount >= 1);
 		mLifetimeLsrMissedFrames += p.MissedVsyncCount;
 	}
 
@@ -165,16 +167,15 @@ LateStageReprojectionRuntimeStats LateStageReprojectionData::ComputeRuntimeStats
 			stats.mAppMissedFrames++;
 		}
 
-		if (current.FinalState == LateStageReprojectionResult::Missed)
+		if (LateStageReprojectionMissed(current.FinalState))
 		{
-			assert(current.MissedVsyncCount >= 1);
 			stats.mLsrMissedFrames += current.MissedVsyncCount;
 			if (current.MissedVsyncCount > 1)
 			{
 				// We always expect a count of at least 1, but if we missed multiple vsyncs during a single LSR period we need to account for that.
 				stats.mLsrConsecutiveMissedFrames += (current.MissedVsyncCount - 1);
 			}
-			if (i > 0 && (mLSRHistory[i - 1].FinalState == LateStageReprojectionResult::Missed))
+			if (i > 0 && LateStageReprojectionMissed((mLSRHistory[i - 1].FinalState)))
 			{
 				stats.mLsrConsecutiveMissedFrames++;
 			}

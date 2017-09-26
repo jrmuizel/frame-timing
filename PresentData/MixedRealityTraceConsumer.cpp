@@ -71,7 +71,7 @@ MRTraceConsumer::~MRTraceConsumer()
 void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
 {
     auto const& hdr = pEventRecord->EventHeader;
-	std::wstring taskName = GetEventTaskName(pEventRecord);
+	const std::wstring taskName = GetEventTaskName(pEventRecord);
 
 	if (taskName.compare(L"LsrThread_BeginLsrProcessing") == 0)
 	{
@@ -79,26 +79,6 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
 		auto& pEvent = mrConsumer->mActiveLSR;
 		if (pEvent)
 		{
-			static bool bOldEventSchema = false;
-			bool bGetEventDataResult = false;
-			if (!bOldEventSchema)
-			{
-				// Try getting the new events.
-				bGetEventDataResult = GetEventData(pEventRecord, L"TimeUntilPhotonsMiddleMs", &pEvent->LsrPredictionLatencyMs);
-			}
-
-			if (!bGetEventDataResult)
-			{
-				// Fall back to the old events.
-				bOldEventSchema = true;
-				bGetEventDataResult = GetEventData(pEventRecord, L"TimeUntilPhotonsTopMs", &pEvent->LsrPredictionLatencyMs);
-			}
-			
-			GetEventData(pEventRecord, L"PredictionSampleTimeToPhotonsVisibleMs", &pEvent->AppPredictionLatencyMs);
-			GetEventData(pEventRecord, L"MispredictionMs", &pEvent->AppMispredictionMs);
-
-			assert(pEvent->FinalState == LateStageReprojectionResult::Presented || pEvent->FinalState == LateStageReprojectionResult::Missed);
-			
 			if (mrConsumer->mLogUserHitches)
 			{
 				const bool bSpacePressed = (GetAsyncKeyState(VK_SPACE) & 1) == 1;
@@ -116,25 +96,58 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
 		GetEventData(pEventRecord, L"NewSourceLatched", &event.NewSourceLatched);
 		//GetEventData(pEventRecord, L"TargetVBlankQPC", &event.TargetVBlankQPC);
 		GetEventData(pEventRecord, L"TimeUntilVblankMs", &event.TimeUntilVsyncMs);
+		//GetEventData(pEventRecord, L"TimeUntilPhotonsMiddleMs", &pEvent->TimeUntilPhotonsMiddleMs);
+		GetEventData(pEventRecord, L"PredictionSampleTimeToPhotonsVisibleMs", &event.AppPredictionLatencyMs);
+		GetEventData(pEventRecord, L"MispredictionMs", &event.AppMispredictionMs);
 
 		pEvent = std::make_shared<LateStageReprojectionEvent>(event);
 
 		// Set the caller's local event instance to completed so the assert
 		// in ~PresentEvent() doesn't fire when it is destructed.
 		event.Completed = true;
+	}
+	else if (taskName.compare(L"LsrThread_LatchedInput") == 0)
+	{
+		// Update the active LSR.
+		auto& pEvent = mrConsumer->mActiveLSR;
+		if (pEvent)
+		{
+			// New pose latched.
+			float TimeUntilTopPhotonsMs = 0.0f;
+			float TimeUntilBottomPhotonsMs = 0.0f;
+			GetEventData(pEventRecord, L"TimeUntilTopPhotonsMs", &TimeUntilTopPhotonsMs);
+			GetEventData(pEventRecord, L"TimeUntilBottomPhotonsMs", &TimeUntilBottomPhotonsMs);
 
+			const float TimeUntilMiddlePhotonsMs = (TimeUntilTopPhotonsMs + TimeUntilBottomPhotonsMs) / 2;
+			pEvent->LsrPredictionLatencyMs = TimeUntilMiddlePhotonsMs;
+		}
 	}
 	else if (taskName.compare(L"LsrThread_UnaccountedForVsyncsBetweenStatGathering") == 0)
 	{
 		// Update the active LSR.
 		auto& pEvent = mrConsumer->mActiveLSR;
-
-		// We have missed some extra Vsyncs.
-		uint32_t MissedVSyncCount = 0;
-		GetEventData(pEventRecord, L"unaccountedForVsyncsBetweenStatGathering", &MissedVSyncCount);
-		if (MissedVSyncCount > 1)
+		if (pEvent)
 		{
-			pEvent->MissedVsyncCount += (MissedVSyncCount - 1);	// -1 since we account for one missed frame with the LatePresentationTiming event.
+			// We have missed some extra Vsyncs we need to account for.
+			uint32_t UnAccountedForMissedVSyncCount = 0;
+			GetEventData(pEventRecord, L"unaccountedForVsyncsBetweenStatGathering", &UnAccountedForMissedVSyncCount);
+			assert(UnAccountedForMissedVSyncCount >= 1);
+			pEvent->MissedVsyncCount += UnAccountedForMissedVSyncCount;
+		}
+	}
+	else if (taskName.compare(L"MissedPresentation") == 0)
+	{
+		// Update the active LSR.
+		auto& pEvent = mrConsumer->mActiveLSR;
+		if (pEvent)
+		{
+			// If the missed reason is for Present, increment our missed Vsync count.
+			uint32_t MissedReason = static_cast<uint32_t>(-1);
+			GetEventData(pEventRecord, L"reason", &MissedReason);
+			if (MissedReason == 0)
+			{
+				pEvent->MissedVsyncCount++;
+			}
 		}
 	}
 	else if (taskName.compare(L"OnTimePresentationTiming") == 0 || taskName.compare(L"LatePresentationTiming") == 0)
@@ -163,11 +176,9 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
 			if (bFrameSubmittedOnSchedule)
 			{
 				pEvent->FinalState = LateStageReprojectionResult::Presented;
-				assert(pEvent->MissedVsyncCount == 0);
 			}
 			else
 			{
-				pEvent->MissedVsyncCount++; // We missed at least one frame. The other missed vsyncs are added in the LsrThread_UnaccountedForVsyncsBetweenStatGathering event.
 				pEvent->FinalState = (pEvent->MissedVsyncCount > 1) ? LateStageReprojectionResult::MissedMultiple : LateStageReprojectionResult::Missed;
 			}
 		}
@@ -176,6 +187,8 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
 
 void MRTraceConsumer::CompleteLSR(std::shared_ptr<LateStageReprojectionEvent> p)
 {
+	assert(p->FinalState != LateStageReprojectionResult::Unknown);
+
 	if (p->Completed)
 	{
 		p->FinalState = LateStageReprojectionResult::Error;

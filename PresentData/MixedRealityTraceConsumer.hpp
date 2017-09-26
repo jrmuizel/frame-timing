@@ -48,6 +48,23 @@ enum class LateStageReprojectionResult
 	Unknown, Presented, Missed, MissedMultiple, Error
 };
 
+inline bool LateStageReprojectionPresented(LateStageReprojectionResult result)
+{
+	return (result == LateStageReprojectionResult::Presented) ? true : false;
+}
+
+inline bool LateStageReprojectionMissed(LateStageReprojectionResult result)
+{
+	switch (result)
+	{
+	case LateStageReprojectionResult::Missed:
+	case LateStageReprojectionResult::MissedMultiple:
+		return true;
+	}
+
+	return false;
+}
+
 struct LateStageReprojectionEvent {
     // Available from DHD
 	uint64_t QpcTime;
