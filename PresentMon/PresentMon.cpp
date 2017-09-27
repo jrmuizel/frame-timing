@@ -210,7 +210,7 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
 			proc.mModuleName.c_str(), p.ProcessId,
 			timeInSeconds,
 			!p.NewSourceLatched, p.MissedVsyncCount, LateStageReprojectionResultToString(p.FinalState), p.UserNoticedHitch,
-			p.AppPredictionLatencyMs, p.LsrPredictionLatencyMs, p.AppMispredictionMs,
+			p.AppPredictionLatencyMs, p.AppMispredictionMs, p.LsrPredictionLatencyMs,
 			p.TimeUntilVsyncMs,
 			p.WakeupErrorMs,
 			p.ThreadWakeupToCpuRenderFrameStartInMs,
@@ -384,7 +384,7 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
 		// Open output file and print CSV header
 		fopen_s(&pm.mLsrOutputFile, pm.mLsrOutputFilePath, "w");
 		if (pm.mLsrOutputFile) {
-			fprintf(pm.mLsrOutputFile, "Application,ProcessID,TimeInSeconds,AppMissed,LsrMissed,LsrResult,UserNotedHitch,MsAppPoseLatency,MsLsrPoseLatency,MsAppMisprediction,MsTimeUntilVsync,MSThreadWakeupError,MSThreadWakeupToCpuRenderFrameStart,MsCpuRenderFrameStartToHeadPoseCallbackStart,MsGetHeadPose,MsHeadPoseCallbackStopToInputLatch,MsInputLatchToGPUSubmission,MsLsrPreemption,MsLsrExecution,MsCopyPreemption,MsCopyExecution,MsCopyStopToVsync,SuspendedThreadBeforeLSR,EarlyLSRDueToInvalidFence\n");
+			fprintf(pm.mLsrOutputFile, "Application,ProcessID,TimeInSeconds,AppMissed,LsrMissed,LsrResult,UserNotedHitch,MsAppPoseLatency,MsAppMisprediction,MsLsrPoseLatency,MsTimeUntilVsync,MSThreadWakeupError,MSThreadWakeupToCpuRenderFrameStart,MsCpuRenderFrameStartToHeadPoseCallbackStart,MsGetHeadPose,MsHeadPoseCallbackStopToInputLatch,MsInputLatchToGPUSubmission,MsLsrPreemption,MsLsrExecution,MsCopyPreemption,MsCopyExecution,MsCopyStopToVsync,SuspendedThreadBeforeLSR,EarlyLSRDueToInvalidFence\n");
 		}
     }
 }
@@ -439,7 +439,7 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
 			auto& lsrData = proc.second.mLateStageReprojectionData;
 			if (lsrData.HasData())
 			{
-				_snprintf_s(str, _TRUNCATE, "\tMixed Reality:%s\n",
+				_snprintf_s(str, _TRUNCATE, "\tWindows Mixed Reality:%s\n",
 					lsrData.IsStale(now) ? " [STALE]" : "");
 				display += str;
 
@@ -447,36 +447,44 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
 
 				{
 					// App
-					_snprintf_s(str, _TRUNCATE, "\t\tApp: %.2lf ms pose latency | %.1lf%% of LSR frame rate\n",
-						runtimeStats.mAppPoseLatency.mAvg,
+					_snprintf_s(str, _TRUNCATE, "\t\tApp:\n\t\t\t%.2lf ms/frame (%.1lf fps, %.1lf%% of Compositor frame rate)\n",
+						1000.0 / runtimeStats.mAppFps,
+						runtimeStats.mAppFps,
 						(runtimeStats.mTotalLsrFrames - runtimeStats.mAppMissedFrames) / (1.0f * runtimeStats.mTotalLsrFrames) * 100.0f);
 					display += str;
 
-					_snprintf_s(str, _TRUNCATE, "\t\t\tMissed frames: %Iu total in last %.1lf seconds (%Iu total observed)\n",
+					_snprintf_s(str, _TRUNCATE, "\t\t\tMissed Present: %Iu total in last %.1lf seconds (%Iu total observed)\n",
 						runtimeStats.mAppMissedFrames,
 						runtimeStats.mDurationInSec,
 						lsrData.mLifetimeAppMissedFrames);
 					display += str;
+
+					//_snprintf_s(str, _TRUNCATE, "\t\t\tPose Latency: %.2lf ms to Mid-Photon\n",
+					//	runtimeStats.mAppPoseLatency.mAvg);
+					//display += str;
 				}
 
 				{
 					// LSR
-					_snprintf_s(str, _TRUNCATE, "\t\tLSR: %.2lf ms pose latency (%.2lf ms to VSync) | %.2lf ms/frame (%.1lf fps, %.1lf displayed fps)\n",
-						runtimeStats.mLsrPoseLatency.mAvg,
-						runtimeStats.mLSRInputLatchToVsync.mAvg,
-						1000.0 / runtimeStats.fps,
-						runtimeStats.fps,
-						runtimeStats.displayedFps);
+					_snprintf_s(str, _TRUNCATE, "\t\tCompositor:\n\t\t\t%.2lf ms/frame (%.1lf fps, %.1lf displayed fps)\n",
+						1000.0 / runtimeStats.mFps,
+						runtimeStats.mFps,
+						runtimeStats.mDisplayedFps);
 					display += str;
 
-					_snprintf_s(str, _TRUNCATE, "\t\t\tMissed frames: %Iu consecutive, %Iu total in last %.1lf seconds (%Iu total observed)\n",
+					_snprintf_s(str, _TRUNCATE, "\t\t\tMissed V-Sync: %Iu consecutive, %Iu total in last %.1lf seconds (%Iu total observed)\n",
 						runtimeStats.mLsrConsecutiveMissedFrames,
 						runtimeStats.mLsrMissedFrames,
 						runtimeStats.mDurationInSec,
 						lsrData.mLifetimeLsrMissedFrames);
 					display += str;
 
-					_snprintf_s(str, _TRUNCATE, "\t\t\tReprojection: %.2lf ms/frame gpu preemption (%.2lf ms max) | %.2lf ms/frame gpu execution (%.2lf ms max)\n",
+					//_snprintf_s(str, _TRUNCATE, "\t\t\tPose Latency: %.2lf ms to Mid-Photon (%.2lf ms to V-Sync)\n",
+					//	runtimeStats.mLsrPoseLatency.mAvg,
+					//	runtimeStats.mLSRInputLatchToVsync.mAvg);
+					//display += str;
+
+					_snprintf_s(str, _TRUNCATE, "\t\t\tReprojection: %.2lf ms gpu preemption (%.2lf ms max) | %.2lf ms gpu execution (%.2lf ms max)\n",
 						runtimeStats.mGPUPreemptionInMs.mAvg,
 						runtimeStats.mGPUPreemptionInMs.mMax,
 						runtimeStats.mGPUExecutionInMs.mAvg,
@@ -485,7 +493,7 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
 
 					if (runtimeStats.mCopyExecutionInMs.mAvg > 0.0)
 					{
-						_snprintf_s(str, _TRUNCATE, "\t\t\tHybrid copy: %.2lf ms/frame gpu preemption (%.2lf ms max) | %.2lf ms/frame gpu execution (%.2lf ms max)\n",
+						_snprintf_s(str, _TRUNCATE, "\t\t\tHybrid Copy: %.2lf ms gpu preemption (%.2lf ms max) | %.2lf ms gpu execution (%.2lf ms max)\n",
 							runtimeStats.mCopyPreemptionInMs.mAvg,
 							runtimeStats.mCopyPreemptionInMs.mMax,
 							runtimeStats.mCopyExecutionInMs.mAvg,
@@ -493,9 +501,29 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
 						display += str;
 					}
 
-					_snprintf_s(str, _TRUNCATE, "\n");
+					_snprintf_s(str, _TRUNCATE, "\t\t\tGpu-End to V-Sync: %.2lf ms\n",
+						runtimeStats.mGPUEndToVsync);
 					display += str;
 				}
+
+				{
+					// Latency
+					_snprintf_s(str, _TRUNCATE, "\t\tPose Latency:\n\t\t\tApp Motion-to-Mid-Photon: %.2lf ms\n",
+						runtimeStats.mAppPoseLatency.mAvg);
+					display += str;
+
+					_snprintf_s(str, _TRUNCATE, "\t\t\tCompositor Motion-to-Mid-Photon: %.2lf ms (%.2lf ms to V-Sync)\n",
+						runtimeStats.mLsrPoseLatency.mAvg,
+						runtimeStats.mLSRInputLatchToVsync.mAvg);
+					display += str;
+
+					_snprintf_s(str, _TRUNCATE, "\t\t\tV-Sync to Mid-Photon: %.2lf ms\n",
+						runtimeStats.mVsyncToPhotonsMiddle);
+					display += str;
+				}
+
+				_snprintf_s(str, _TRUNCATE, "\n");
+				display += str;
 			}
 		}
 

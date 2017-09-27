@@ -44,6 +44,12 @@ LateStageReprojectionEvent::LateStageReprojectionEvent(EVENT_HEADER const& hdr)
 	, CopyStopToVsyncInMs(0)
 	, LsrPredictionLatencyMs(0)
 	, AppPredictionLatencyMs(0)
+	, AppMispredictionMs(0)
+	, WakeupErrorMs(0)
+	, TimeUntilVsyncMs(0)
+	, TimeUntilPhotonsMiddleMs(0)
+	, EarlyLSRDueToInvalidFence(false)
+	, SuspendedThreadBeforeLSR(false)
     , ProcessId(hdr.ProcessId)
     , FinalState(LateStageReprojectionResult::Unknown)
 	, MissedVsyncCount(0)
@@ -94,9 +100,8 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
 		// Start a new LSR
 		LateStageReprojectionEvent event(hdr);
 		GetEventData(pEventRecord, L"NewSourceLatched", &event.NewSourceLatched);
-		//GetEventData(pEventRecord, L"TargetVBlankQPC", &event.TargetVBlankQPC);
 		GetEventData(pEventRecord, L"TimeUntilVblankMs", &event.TimeUntilVsyncMs);
-		//GetEventData(pEventRecord, L"TimeUntilPhotonsMiddleMs", &pEvent->TimeUntilPhotonsMiddleMs);
+		GetEventData(pEventRecord, L"TimeUntilPhotonsMiddleMs", &event.TimeUntilPhotonsMiddleMs);
 		GetEventData(pEventRecord, L"PredictionSampleTimeToPhotonsVisibleMs", &event.AppPredictionLatencyMs);
 		GetEventData(pEventRecord, L"MispredictionMs", &event.AppMispredictionMs);
 
@@ -113,13 +118,13 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
 		if (pEvent)
 		{
 			// New pose latched.
-			float TimeUntilTopPhotonsMs = 0.0f;
-			float TimeUntilBottomPhotonsMs = 0.0f;
-			GetEventData(pEventRecord, L"TimeUntilTopPhotonsMs", &TimeUntilTopPhotonsMs);
-			GetEventData(pEventRecord, L"TimeUntilBottomPhotonsMs", &TimeUntilBottomPhotonsMs);
+			float TimeUntilPhotonsTopMs = 0.0f;
+			float TimeUntilPhotonsBottomMs = 0.0f;
+			GetEventData(pEventRecord, L"TimeUntilTopPhotonsMs", &TimeUntilPhotonsTopMs);
+			GetEventData(pEventRecord, L"TimeUntilBottomPhotonsMs", &TimeUntilPhotonsBottomMs);
 
-			const float TimeUntilMiddlePhotonsMs = (TimeUntilTopPhotonsMs + TimeUntilBottomPhotonsMs) / 2;
-			pEvent->LsrPredictionLatencyMs = TimeUntilMiddlePhotonsMs;
+			const float TimeUntilPhotonsMiddleMs = (TimeUntilPhotonsTopMs + TimeUntilPhotonsBottomMs) / 2;
+			pEvent->LsrPredictionLatencyMs = TimeUntilPhotonsMiddleMs;
 		}
 	}
 	else if (taskName.compare(L"LsrThread_UnaccountedForVsyncsBetweenStatGathering") == 0)
@@ -187,7 +192,10 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
 
 void MRTraceConsumer::CompleteLSR(std::shared_ptr<LateStageReprojectionEvent> p)
 {
-	assert(p->FinalState != LateStageReprojectionResult::Unknown);
+	if (p->FinalState == LateStageReprojectionResult::Unknown)
+	{
+		return;
+	}
 
 	if (p->Completed)
 	{

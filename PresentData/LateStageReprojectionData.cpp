@@ -51,7 +51,11 @@ void LateStageReprojectionData::AddLateStageReprojection(LateStageReprojectionEv
 		mLifetimeLsrMissedFrames += p.MissedVsyncCount;
 	}
 
-	if (!p.NewSourceLatched)
+	if (p.NewSourceLatched)
+	{
+		mAppHistory.push_back(p);
+	}
+	else
 	{
 		mLifetimeAppMissedFrames++;
 	}
@@ -65,6 +69,7 @@ void LateStageReprojectionData::AddLateStageReprojection(LateStageReprojectionEv
 
 void LateStageReprojectionData::UpdateLateStageReprojectionInfo(uint64_t now, uint64_t perfFreq)
 {
+	PruneDeque(mAppHistory, perfFreq, MAX_HISTORY_TIME, MAX_LSRS_IN_DEQUE);
     PruneDeque(mDisplayedLSRHistory, perfFreq, MAX_HISTORY_TIME, MAX_LSRS_IN_DEQUE);
     PruneDeque(mLSRHistory, perfFreq, MAX_HISTORY_TIME, MAX_LSRS_IN_DEQUE);
 
@@ -100,6 +105,11 @@ double LateStageReprojectionData::ComputeFps(const std::deque<LateStageReproject
     return count / deltaT;
 }
 
+double LateStageReprojectionData::ComputeAppFps(uint64_t qpcFreq)
+{
+	return ComputeFps(mAppHistory, qpcFreq);
+}
+
 double LateStageReprojectionData::ComputeDisplayedFps(uint64_t qpcFreq)
 {
     return ComputeFps(mDisplayedLSRHistory, qpcFreq);
@@ -117,8 +127,9 @@ LateStageReprojectionRuntimeStats LateStageReprojectionData::ComputeRuntimeStats
 		stats;
 	}
 
-	stats.fps = ComputeFps(qpcFreq);
-	stats.displayedFps = ComputeDisplayedFps(qpcFreq);
+	stats.mAppFps = ComputeAppFps(qpcFreq);
+	stats.mFps = ComputeFps(qpcFreq);
+	stats.mDisplayedFps = ComputeDisplayedFps(qpcFreq);
 	stats.mDurationInSec = ComputeHistoryTime(qpcFreq);
 
 	auto count = mLSRHistory.size() - 1;
@@ -154,6 +165,9 @@ LateStageReprojectionRuntimeStats LateStageReprojectionData::ComputeRuntimeStats
 		pRuntimeStat->mAvg += lsrInputLatchToVsync;
 		pRuntimeStat->mMax = std::max<double>(pRuntimeStat->mMax, lsrInputLatchToVsync);
 
+		stats.mGPUEndToVsync += current.CopyStopToVsyncInMs;
+		stats.mVsyncToPhotonsMiddle += (current.TimeUntilPhotonsMiddleMs - current.TimeUntilVsyncMs);
+
 		pRuntimeStat = &stats.mLsrPoseLatency;
 		pRuntimeStat->mAvg += current.LsrPredictionLatencyMs;
 		pRuntimeStat->mMax = std::max<double>(pRuntimeStat->mMax, current.LsrPredictionLatencyMs);
@@ -187,6 +201,8 @@ LateStageReprojectionRuntimeStats LateStageReprojectionData::ComputeRuntimeStats
 	stats.mCopyPreemptionInMs.mAvg /= count;
 	stats.mCopyExecutionInMs.mAvg /= count;
 	stats.mLSRInputLatchToVsync.mAvg /= count;
+	stats.mGPUEndToVsync /= count;
+	stats.mVsyncToPhotonsMiddle /= count;
 	stats.mLsrPoseLatency.mAvg /= count;
 	stats.mAppPoseLatency.mAvg /= count;
 

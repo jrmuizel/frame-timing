@@ -33,8 +33,11 @@ struct LateStageReprojectionRuntimeStats {
 		double mMax = 0.0;
 	};
 
-	double fps = 0.0;
-	double displayedFps = 0.0;
+	double mAppFps = 0.0;
+	double mFps = 0.0;
+	double mDisplayedFps = 0.0;
+	double mGPUEndToVsync = 0.0;
+	double mVsyncToPhotonsMiddle = 0.0;
 	RuntimeStat mGPUPreemptionInMs;
 	RuntimeStat mGPUExecutionInMs;
 	RuntimeStat mCopyPreemptionInMs;
@@ -55,12 +58,13 @@ struct LateStageReprojectionData {
     uint64_t mLastUpdateTicks = 0;
     std::deque<LateStageReprojectionEvent> mLSRHistory;
     std::deque<LateStageReprojectionEvent> mDisplayedLSRHistory;
-	std::deque<LateStageReprojectionEvent> mMissedLSRHistory;
+	std::deque<LateStageReprojectionEvent> mAppHistory;
 
     void PruneDeque(std::deque<LateStageReprojectionEvent> &lsrHistory, uint64_t perfFreq, uint32_t msTimeDiff, uint32_t maxHistLen);
     void AddLateStageReprojection(LateStageReprojectionEvent& p);
     void UpdateLateStageReprojectionInfo(uint64_t now, uint64_t perfFreq);
 	double ComputeHistoryTime(uint64_t qpcFreq);
+	double ComputeAppFps(uint64_t qpcFreq);
     double ComputeDisplayedFps(uint64_t qpcFreq);
     double ComputeFps(uint64_t qpcFreq);
 	LateStageReprojectionRuntimeStats ComputeRuntimeStats(uint64_t qpcFreq);

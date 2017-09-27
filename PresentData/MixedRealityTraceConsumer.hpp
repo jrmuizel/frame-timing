@@ -87,6 +87,7 @@ struct LateStageReprojectionEvent {
 	float AppMispredictionMs;
 	float WakeupErrorMs;
 	float TimeUntilVsyncMs;
+	float TimeUntilPhotonsMiddleMs;
 
 	bool EarlyLSRDueToInvalidFence;
 	bool SuspendedThreadBeforeLSR;
