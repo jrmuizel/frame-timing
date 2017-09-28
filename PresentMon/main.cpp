@@ -210,7 +210,7 @@ bool SetPrivilege(HANDLE hToken, LPCSTR lpszPrivilege, bool bEnablePrivilege)
 
 bool AdjustPrivileges()
 {
-    // DWM processes run under a separate account.
+    // On some versions of Windows, DWM processes run under a separate account.
     // We need permissions to get data about a process owned by another account.
     bool bPrivilegesSet = false;
     typedef BOOL(WINAPI *OpenProcessTokenProc)(HANDLE ProcessHandle, DWORD DesiredAccess, PHANDLE TokenHandle);
@@ -281,7 +281,7 @@ int main(int argc, char** argv)
 
     // Adjust process privileges for real-time
     if (!args.mEtlFileName && !AdjustPrivileges()) {
-        fprintf(stderr, "error: process requires special privileges.\n");
+        fprintf(stderr, "warning: some processes may not show up because we don't have sufficient privileges.\n");
     }
 
     int ret = 0;
