@@ -133,18 +133,6 @@ static void UpdateProcessInfo_Realtime(ProcessInfo& info, uint64_t now, uint32_t
     });
 }
 
-const char* LateStageReprojectionResultToString(LateStageReprojectionResult result)
-{
-	switch (result)
-	{
-	case LateStageReprojectionResult::Error: return "Error";
-	case LateStageReprojectionResult::Missed: return "Missed (Late)";
-	case LateStageReprojectionResult::MissedMultiple: return "Missed multiple VSyncs (Late)";
-	case LateStageReprojectionResult::Presented: return "Presented (On time)";
-	default: return "Unknown";
-	}
-}
-
 const char* PresentModeToString(PresentMode mode)
 {
     switch (mode) {
@@ -203,28 +191,56 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
 
 	UNREFERENCED_PARAMETER(perfFreq);
 
-	if (pm.mLsrOutputFile) {
-		double timeInSeconds = (double)(int64_t)(p.QpcTime - pm.mStartupQpcTime) / perfFreq;
-		//double targetVsyncTimeInSeconds = (double)(int64_t)(p.TargetVBlankQPC - pm.mStartupQpcTime) / perfFreq;
-		fprintf(pm.mLsrOutputFile, "%s,%d,%.6lf,%d,%d,%s,%d,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%.6lf,%d,%d\n",
-			proc.mModuleName.c_str(), p.ProcessId,
-			timeInSeconds,
-			!p.NewSourceLatched, p.MissedVsyncCount, LateStageReprojectionResultToString(p.FinalState), p.UserNoticedHitch,
-			p.AppPredictionLatencyMs, p.AppMispredictionMs, p.LsrPredictionLatencyMs,
-			p.TimeUntilVsyncMs,
-			p.WakeupErrorMs,
-			p.ThreadWakeupToCpuRenderFrameStartInMs,
-			p.CpuRenderFrameStartToHeadPoseCallbackStartInMs,
-			p.HeadPoseCallbackStartToHeadPoseCallbackStopInMs,
-			p.HeadPoseCallbackStopToInputLatchInMs,
-			p.InputLatchToGPUSubmissionInMs,
-			p.GpuSubmissionToGpuStartInMs,
-			p.GpuStartToGpuStopInMs,
-			p.GpuStopToCopyStartInMs,
-			p.CopyStartToCopyStopInMs,
-			p.CopyStopToVsyncInMs,
-			p.SuspendedThreadBeforeLSR,
-			p.EarlyLSRDueToInvalidFence);
+	if (pm.mLsrOutputFile && (p.FinalState == LateStageReprojectionResult::Presented || !pm.mArgs->mExcludeDropped)) {
+		auto len = proc.mLateStageReprojectionData.mLSRHistory.size();
+		//auto displayedLen = proc.mLateStageReprojectionData.mDisplayedLSRHistory.size();
+		if (len > 1) {
+			auto& curr = proc.mLateStageReprojectionData.mLSRHistory[len - 1];
+			auto& prev = proc.mLateStageReprojectionData.mLSRHistory[len - 2];
+			double deltaMilliseconds = 1000 * double(curr.QpcTime - prev.QpcTime) / perfFreq;
+			double timeInSeconds = (double)(int64_t)(p.QpcTime - pm.mStartupQpcTime) / perfFreq;
+
+			fprintf(pm.mLsrOutputFile, "%s,%d,%.6lf,%.6lf,%.6lf,%d,%d",
+				proc.mModuleName.c_str(), curr.ProcessId,
+				timeInSeconds,
+				0.0f, // TODO: Time between App Presents
+				deltaMilliseconds,
+				!curr.NewSourceLatched, curr.MissedVsyncCount);
+			if (pm.mArgs->mLogUserHitches)
+			{
+				fprintf(pm.mLsrOutputFile, ",%d", curr.UserNoticedHitch);
+			}
+			fprintf(pm.mLsrOutputFile, ",%.6lf", curr.AppPredictionLatencyMs);
+			if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+			{
+				fprintf(pm.mLsrOutputFile, ",%.6lf", curr.AppMispredictionMs);
+			}
+			fprintf(pm.mLsrOutputFile, ",%.6lf,%.6lf,%.6lf,%.6lf",
+				curr.LsrPredictionLatencyMs,
+				curr.TimeUntilVsyncMs,
+				curr.GetThreadWakeupToGpuEndMs(),
+				curr.WakeupErrorMs);
+			if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+			{
+				fprintf(pm.mLsrOutputFile, ",%.6lf,%.6lf,%.6lf,%.6lf,%.6lf",
+					curr.ThreadWakeupToCpuRenderFrameStartInMs,
+					curr.CpuRenderFrameStartToHeadPoseCallbackStartInMs,
+					curr.HeadPoseCallbackStartToHeadPoseCallbackStopInMs,
+					curr.HeadPoseCallbackStopToInputLatchInMs,
+					curr.InputLatchToGPUSubmissionInMs);
+			}
+			fprintf(pm.mLsrOutputFile, ",%.6lf,%.6lf,%.6lf,%.6lf,%.6lf",
+				curr.GpuSubmissionToGpuStartInMs,
+				curr.GpuStartToGpuStopInMs,
+				curr.GpuStopToCopyStartInMs,
+				curr.CopyStartToCopyStopInMs,
+				curr.CopyStopToVsyncInMs);
+			if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+			{
+				fprintf(pm.mLsrOutputFile, ",%d,%d", curr.SuspendedThreadBeforeLSR, curr.EarlyLSRDueToInvalidFence);
+			}
+			fprintf(pm.mLsrOutputFile, "\n");
+		}
 	}
 
 	proc.mLateStageReprojectionData.UpdateLateStageReprojectionInfo(now, perfFreq);
@@ -384,7 +400,27 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
 		// Open output file and print CSV header
 		fopen_s(&pm.mLsrOutputFile, pm.mLsrOutputFilePath, "w");
 		if (pm.mLsrOutputFile) {
-			fprintf(pm.mLsrOutputFile, "Application,ProcessID,TimeInSeconds,AppMissed,LsrMissed,LsrResult,UserNotedHitch,MsAppPoseLatency,MsAppMisprediction,MsLsrPoseLatency,MsTimeUntilVsync,MSThreadWakeupError,MSThreadWakeupToCpuRenderFrameStart,MsCpuRenderFrameStartToHeadPoseCallbackStart,MsGetHeadPose,MsHeadPoseCallbackStopToInputLatch,MsInputLatchToGPUSubmission,MsLsrPreemption,MsLsrExecution,MsCopyPreemption,MsCopyExecution,MsCopyStopToVsync,SuspendedThreadBeforeLSR,EarlyLSRDueToInvalidFence\n");
+			fprintf(pm.mLsrOutputFile, "Application,ProcessID,TimeInSeconds,MsBetweenAppPresents,MsBetweenLsrs,MsAppMissed,LsrMissed");
+			if (pm.mArgs->mLogUserHitches)
+			{
+				fprintf(pm.mLsrOutputFile, ",UserNotedHitch");
+			}
+			fprintf(pm.mLsrOutputFile, ",MsAppPoseLatency");
+			if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+			{
+				fprintf(pm.mLsrOutputFile, ",MsAppMisprediction");
+			}
+			fprintf(pm.mLsrOutputFile, ",MsLsrPoseLatency,MsTimeUntilVsync,MsLsrThreadWakeupToGpuEnd,MsLsrThreadWakeupError");
+			if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+			{
+				fprintf(pm.mLsrOutputFile, ",MsLsrThreadWakeupToCpuRenderFrameStart,MsCpuRenderFrameStartToHeadPoseCallbackStart,MsGetHeadPose,MsHeadPoseCallbackStopToInputLatch,MsInputLatchToGPUSubmission");
+			}
+			fprintf(pm.mLsrOutputFile, ",MsLsrPreemption,MsLsrExecution,MsCopyPreemption,MsCopyExecution,MsGpuEndToVsync");
+			if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+			{
+				fprintf(pm.mLsrOutputFile, ",SuspendedThreadBeforeLSR,EarlyLSRDueToInvalidFence");
+			}
+			fprintf(pm.mLsrOutputFile, "\n");
 		}
     }
 }
@@ -437,84 +473,85 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
 		// Conditionally print LSR info
 		{
 			auto& lsrData = proc.second.mLateStageReprojectionData;
-			if (lsrData.HasData())
-			{
+			if (lsrData.HasData()) {
 				_snprintf_s(str, _TRUNCATE, "\tWindows Mixed Reality:%s\n",
 					lsrData.IsStale(now) ? " [STALE]" : "");
 				display += str;
 
-				const LateStageReprojectionRuntimeStats runtimeStats = lsrData.ComputeRuntimeStats(perfFreq);
+				const LateStageReprojectionRuntimeStats runtimeStats = lsrData.ComputeRuntimeStats();
+				const double historyTime = lsrData.ComputeHistoryTime(perfFreq);
 
 				{
 					// App
+					const double fps = lsrData.ComputeSourceFps(perfFreq);
+					const size_t historySize = lsrData.ComputeHistorySize();
+
 					_snprintf_s(str, _TRUNCATE, "\t\tApp:\n\t\t\t%.2lf ms/frame (%.1lf fps, %.1lf%% of Compositor frame rate)\n",
-						1000.0 / runtimeStats.mAppFps,
-						runtimeStats.mAppFps,
-						(runtimeStats.mTotalLsrFrames - runtimeStats.mAppMissedFrames) / (1.0f * runtimeStats.mTotalLsrFrames) * 100.0f);
+						1000.0 / fps,
+						fps,
+						double(historySize - runtimeStats.mAppMissedFrames) / (historySize) * 100.0f);
 					display += str;
 
 					_snprintf_s(str, _TRUNCATE, "\t\t\tMissed Present: %Iu total in last %.1lf seconds (%Iu total observed)\n",
 						runtimeStats.mAppMissedFrames,
-						runtimeStats.mDurationInSec,
+						historyTime,
 						lsrData.mLifetimeAppMissedFrames);
 					display += str;
-
-					//_snprintf_s(str, _TRUNCATE, "\t\t\tPose Latency: %.2lf ms to Mid-Photon\n",
-					//	runtimeStats.mAppPoseLatency.mAvg);
-					//display += str;
 				}
 
 				{
 					// LSR
-					_snprintf_s(str, _TRUNCATE, "\t\tCompositor:\n\t\t\t%.2lf ms/frame (%.1lf fps, %.1lf displayed fps)\n",
-						1000.0 / runtimeStats.mFps,
-						runtimeStats.mFps,
-						runtimeStats.mDisplayedFps);
+					const double fps = lsrData.ComputeFps(perfFreq);
+
+					_snprintf_s(str, _TRUNCATE, "\t\tCompositor:\n\t\t\t%.2lf ms/frame (%.1lf fps",
+						1000.0 / fps,
+						fps);
 					display += str;
 
-					_snprintf_s(str, _TRUNCATE, "\t\t\tMissed V-Sync: %Iu consecutive, %Iu total in last %.1lf seconds (%Iu total observed)\n",
-						runtimeStats.mLsrConsecutiveMissedFrames,
-						runtimeStats.mLsrMissedFrames,
-						runtimeStats.mDurationInSec,
-						lsrData.mLifetimeLsrMissedFrames);
-					display += str;
-
-					//_snprintf_s(str, _TRUNCATE, "\t\t\tPose Latency: %.2lf ms to Mid-Photon (%.2lf ms to V-Sync)\n",
-					//	runtimeStats.mLsrPoseLatency.mAvg,
-					//	runtimeStats.mLSRInputLatchToVsync.mAvg);
-					//display += str;
-
-					_snprintf_s(str, _TRUNCATE, "\t\t\tReprojection: %.2lf ms gpu preemption (%.2lf ms max) | %.2lf ms gpu execution (%.2lf ms max)\n",
-						runtimeStats.mGPUPreemptionInMs.mAvg,
-						runtimeStats.mGPUPreemptionInMs.mMax,
-						runtimeStats.mGPUExecutionInMs.mAvg,
-						runtimeStats.mGPUExecutionInMs.mMax);
-					display += str;
-
-					if (runtimeStats.mCopyExecutionInMs.mAvg > 0.0)
-					{
-						_snprintf_s(str, _TRUNCATE, "\t\t\tHybrid Copy: %.2lf ms gpu preemption (%.2lf ms max) | %.2lf ms gpu execution (%.2lf ms max)\n",
-							runtimeStats.mCopyPreemptionInMs.mAvg,
-							runtimeStats.mCopyPreemptionInMs.mMax,
-							runtimeStats.mCopyExecutionInMs.mAvg,
-							runtimeStats.mCopyExecutionInMs.mMax);
+					if (pm.mArgs->mVerbosity > Verbosity::Simple) {
+						_snprintf_s(str, _TRUNCATE, ", %.1lf displayed fps", lsrData.ComputeDisplayedFps(perfFreq));
 						display += str;
 					}
 
-					_snprintf_s(str, _TRUNCATE, "\t\t\tGpu-End to V-Sync: %.2lf ms\n",
-						runtimeStats.mGPUEndToVsync);
+					_snprintf_s(str, _TRUNCATE, ")\n\t\t\tMissed V-Sync: %Iu consecutive, %Iu total in last %.1lf seconds (%Iu total observed)\n",
+						runtimeStats.mLsrConsecutiveMissedFrames,
+						runtimeStats.mLsrMissedFrames,
+						historyTime,
+						lsrData.mLifetimeLsrMissedFrames);
 					display += str;
+
+					if (pm.mArgs->mVerbosity > Verbosity::Simple) {
+						_snprintf_s(str, _TRUNCATE, "\t\t\tReprojection: %.2lf ms gpu preemption (%.2lf ms max) | %.2lf ms gpu execution (%.2lf ms max)\n",
+							runtimeStats.mGPUPreemptionInMs.GetAverage(),
+							runtimeStats.mGPUPreemptionInMs.GetMax(),
+							runtimeStats.mGPUExecutionInMs.GetAverage(),
+							runtimeStats.mGPUExecutionInMs.GetMax());
+						display += str;
+
+						if (runtimeStats.mCopyExecutionInMs.GetAverage() > 0.0) {
+							_snprintf_s(str, _TRUNCATE, "\t\t\tHybrid Copy: %.2lf ms gpu preemption (%.2lf ms max) | %.2lf ms gpu execution (%.2lf ms max)\n",
+								runtimeStats.mCopyPreemptionInMs.GetAverage(),
+								runtimeStats.mCopyPreemptionInMs.GetMax(),
+								runtimeStats.mCopyExecutionInMs.GetAverage(),
+								runtimeStats.mCopyExecutionInMs.GetMax());
+							display += str;
+						}
+
+						_snprintf_s(str, _TRUNCATE, "\t\t\tGpu-End to V-Sync: %.2lf ms\n",
+							runtimeStats.mGPUEndToVsync);
+						display += str;
+					}					
 				}
 
 				{
 					// Latency
 					_snprintf_s(str, _TRUNCATE, "\t\tPose Latency:\n\t\t\tApp Motion-to-Mid-Photon: %.2lf ms\n",
-						runtimeStats.mAppPoseLatency.mAvg);
+						runtimeStats.mAppPoseLatency);
 					display += str;
 
 					_snprintf_s(str, _TRUNCATE, "\t\t\tCompositor Motion-to-Mid-Photon: %.2lf ms (%.2lf ms to V-Sync)\n",
-						runtimeStats.mLsrPoseLatency.mAvg,
-						runtimeStats.mLSRInputLatchToVsync.mAvg);
+						runtimeStats.mLsrPoseLatency,
+						runtimeStats.mLSRInputLatchToVsync.GetAverage());
 					display += str;
 
 					_snprintf_s(str, _TRUNCATE, "\t\t\tV-Sync to Mid-Photon: %.2lf ms\n",
@@ -734,12 +771,9 @@ void EtwConsumingThread(const CommandLineArgs& args)
                 }
 
                 pmConsumer.DequeuePresents(presents);
-				if (args.mScrollLockToggle && (GetKeyState(VK_SCROLL) & 1) == 0) {
-					presents.clear();
-				}
-
 				mrConsumer.DequeueLSRs(lsrs);
 				if (args.mScrollLockToggle && (GetKeyState(VK_SCROLL) & 1) == 0) {
+					presents.clear();
 					lsrs.clear();
 				}
 

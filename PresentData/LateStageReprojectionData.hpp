@@ -28,28 +28,43 @@ SOFTWARE.
 #include "MixedRealityTraceConsumer.hpp"
 
 struct LateStageReprojectionRuntimeStats {
-	struct RuntimeStat {
-		double mAvg = 0.0;
-		double mMax = 0.0;
+	template <typename T>
+	class RuntimeStat {
+		T mAvg = 0.0;
+		T mMax = 0.0;
+		size_t mCount = 0;
+
+	public:
+		void AddValue(const T& value)
+		{
+			mAvg += value;
+			mMax = std::max<T>(mMax, value);
+			mCount++;
+		}
+
+		inline T GetAverage() const
+		{
+			return mAvg / mCount;
+		}
+
+		inline T GetMax() const
+		{
+			return mMax;
+		}
 	};
 
-	double mAppFps = 0.0;
-	double mFps = 0.0;
-	double mDisplayedFps = 0.0;
+	RuntimeStat<double> mGPUPreemptionInMs;
+	RuntimeStat<double> mGPUExecutionInMs;
+	RuntimeStat<double> mCopyPreemptionInMs;
+	RuntimeStat<double> mCopyExecutionInMs;
+	RuntimeStat<double> mLSRInputLatchToVsync;
 	double mGPUEndToVsync = 0.0;
 	double mVsyncToPhotonsMiddle = 0.0;
-	RuntimeStat mGPUPreemptionInMs;
-	RuntimeStat mGPUExecutionInMs;
-	RuntimeStat mCopyPreemptionInMs;
-	RuntimeStat mCopyExecutionInMs;
-	RuntimeStat mLSRInputLatchToVsync;
-	RuntimeStat mLsrPoseLatency;
-	RuntimeStat mAppPoseLatency;
+	double mLsrPoseLatency = 0.0;
+	double mAppPoseLatency = 0.0;
 	size_t mAppMissedFrames = 0;
 	size_t mLsrMissedFrames = 0;
 	size_t mLsrConsecutiveMissedFrames = 0;
-	size_t mTotalLsrFrames = 0;
-	double mDurationInSec = 0.0;
 };
 
 struct LateStageReprojectionData {
@@ -58,16 +73,17 @@ struct LateStageReprojectionData {
     uint64_t mLastUpdateTicks = 0;
     std::deque<LateStageReprojectionEvent> mLSRHistory;
     std::deque<LateStageReprojectionEvent> mDisplayedLSRHistory;
-	std::deque<LateStageReprojectionEvent> mAppHistory;
+	std::deque<LateStageReprojectionEvent> mSourceHistory;
 
     void PruneDeque(std::deque<LateStageReprojectionEvent> &lsrHistory, uint64_t perfFreq, uint32_t msTimeDiff, uint32_t maxHistLen);
     void AddLateStageReprojection(LateStageReprojectionEvent& p);
     void UpdateLateStageReprojectionInfo(uint64_t now, uint64_t perfFreq);
 	double ComputeHistoryTime(uint64_t qpcFreq);
-	double ComputeAppFps(uint64_t qpcFreq);
+	double ComputeSourceFps(uint64_t qpcFreq);
     double ComputeDisplayedFps(uint64_t qpcFreq);
     double ComputeFps(uint64_t qpcFreq);
-	LateStageReprojectionRuntimeStats ComputeRuntimeStats(uint64_t qpcFreq);
+	size_t ComputeHistorySize();
+	LateStageReprojectionRuntimeStats ComputeRuntimeStats();
 
     bool IsStale(uint64_t now) const;
 	bool HasData() const { return !mLSRHistory.empty(); }

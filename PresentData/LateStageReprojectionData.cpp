@@ -53,7 +53,7 @@ void LateStageReprojectionData::AddLateStageReprojection(LateStageReprojectionEv
 
 	if (p.NewSourceLatched)
 	{
-		mAppHistory.push_back(p);
+		mSourceHistory.push_back(p);
 	}
 	else
 	{
@@ -69,7 +69,7 @@ void LateStageReprojectionData::AddLateStageReprojection(LateStageReprojectionEv
 
 void LateStageReprojectionData::UpdateLateStageReprojectionInfo(uint64_t now, uint64_t perfFreq)
 {
-	PruneDeque(mAppHistory, perfFreq, MAX_HISTORY_TIME, MAX_LSRS_IN_DEQUE);
+	PruneDeque(mSourceHistory, perfFreq, MAX_HISTORY_TIME, MAX_LSRS_IN_DEQUE);
     PruneDeque(mDisplayedLSRHistory, perfFreq, MAX_HISTORY_TIME, MAX_LSRS_IN_DEQUE);
     PruneDeque(mLSRHistory, perfFreq, MAX_HISTORY_TIME, MAX_LSRS_IN_DEQUE);
 
@@ -85,6 +85,15 @@ double LateStageReprojectionData::ComputeHistoryTime(const std::deque<LateStageR
 	auto start = lsrHistory.front().QpcTime;
 	auto end = lsrHistory.back().QpcTime;
 	return double(end - start) / qpcFreq;
+}
+
+size_t LateStageReprojectionData::ComputeHistorySize()
+{
+	if (mLSRHistory.size() < 2) {
+		return 0;
+	}
+
+	return mLSRHistory.size();
 }
 
 double LateStageReprojectionData::ComputeHistoryTime(uint64_t qpcFreq)
@@ -105,9 +114,9 @@ double LateStageReprojectionData::ComputeFps(const std::deque<LateStageReproject
     return count / deltaT;
 }
 
-double LateStageReprojectionData::ComputeAppFps(uint64_t qpcFreq)
+double LateStageReprojectionData::ComputeSourceFps(uint64_t qpcFreq)
 {
-	return ComputeFps(mAppHistory, qpcFreq);
+	return ComputeFps(mSourceHistory, qpcFreq);
 }
 
 double LateStageReprojectionData::ComputeDisplayedFps(uint64_t qpcFreq)
@@ -120,41 +129,23 @@ double LateStageReprojectionData::ComputeFps(uint64_t qpcFreq)
     return ComputeFps(mLSRHistory, qpcFreq);
 }
 
-LateStageReprojectionRuntimeStats LateStageReprojectionData::ComputeRuntimeStats(uint64_t qpcFreq)
+LateStageReprojectionRuntimeStats LateStageReprojectionData::ComputeRuntimeStats()
 {
 	LateStageReprojectionRuntimeStats stats = {};
 	if (mLSRHistory.size() < 2) {
-		stats;
+		return stats;
 	}
 
-	stats.mAppFps = ComputeAppFps(qpcFreq);
-	stats.mFps = ComputeFps(qpcFreq);
-	stats.mDisplayedFps = ComputeDisplayedFps(qpcFreq);
-	stats.mDurationInSec = ComputeHistoryTime(qpcFreq);
-
-	auto count = mLSRHistory.size() - 1;
-	stats.mTotalLsrFrames = mLSRHistory.size();
-	for (size_t i = 0; i <= count; i++)
+	const size_t count = mLSRHistory.size();
+	for (size_t i = 0; i < count; i++)
 	{
 		LateStageReprojectionEvent& current = mLSRHistory[i];
 
-		LateStageReprojectionRuntimeStats::RuntimeStat* pRuntimeStat = &stats.mGPUPreemptionInMs;
-		pRuntimeStat->mAvg += current.GpuSubmissionToGpuStartInMs;
-		pRuntimeStat->mMax = std::max<double>(pRuntimeStat->mMax, current.GpuSubmissionToGpuStartInMs);
+		stats.mGPUPreemptionInMs.AddValue(current.GpuSubmissionToGpuStartInMs);
+		stats.mGPUExecutionInMs.AddValue(current.GpuStartToGpuStopInMs);
+		stats.mCopyPreemptionInMs.AddValue(current.GpuStopToCopyStartInMs);
+		stats.mCopyExecutionInMs.AddValue(current.CopyStartToCopyStopInMs);
 
-		pRuntimeStat = &stats.mGPUExecutionInMs;
-		pRuntimeStat->mAvg += current.GpuStartToGpuStopInMs;
-		pRuntimeStat->mMax = std::max<double>(pRuntimeStat->mMax, current.GpuStartToGpuStopInMs);
-
-		pRuntimeStat = &stats.mCopyPreemptionInMs;
-		pRuntimeStat->mAvg += current.GpuStopToCopyStartInMs;
-		pRuntimeStat->mMax = std::max<double>(pRuntimeStat->mMax, current.GpuStopToCopyStartInMs);
-
-		pRuntimeStat = &stats.mCopyExecutionInMs;
-		pRuntimeStat->mAvg += current.CopyStartToCopyStopInMs;
-		pRuntimeStat->mMax = std::max<double>(pRuntimeStat->mMax, current.CopyStartToCopyStopInMs);
-
-		pRuntimeStat = &stats.mLSRInputLatchToVsync;
 		const double lsrInputLatchToVsync =
 			current.InputLatchToGPUSubmissionInMs +
 			current.GpuSubmissionToGpuStartInMs +
@@ -162,49 +153,34 @@ LateStageReprojectionRuntimeStats LateStageReprojectionData::ComputeRuntimeStats
 			current.GpuStopToCopyStartInMs +
 			current.CopyStartToCopyStopInMs +
 			current.CopyStopToVsyncInMs;
-		pRuntimeStat->mAvg += lsrInputLatchToVsync;
-		pRuntimeStat->mMax = std::max<double>(pRuntimeStat->mMax, lsrInputLatchToVsync);
+		stats.mLSRInputLatchToVsync.AddValue(lsrInputLatchToVsync);
 
+		// Stats just with averages
 		stats.mGPUEndToVsync += current.CopyStopToVsyncInMs;
 		stats.mVsyncToPhotonsMiddle += (current.TimeUntilPhotonsMiddleMs - current.TimeUntilVsyncMs);
+		stats.mLsrPoseLatency += current.LsrPredictionLatencyMs;
+		stats.mAppPoseLatency += current.AppPredictionLatencyMs;
 
-		pRuntimeStat = &stats.mLsrPoseLatency;
-		pRuntimeStat->mAvg += current.LsrPredictionLatencyMs;
-		pRuntimeStat->mMax = std::max<double>(pRuntimeStat->mMax, current.LsrPredictionLatencyMs);
-
-		pRuntimeStat = &stats.mAppPoseLatency;
-		pRuntimeStat->mAvg += current.AppPredictionLatencyMs;
-		pRuntimeStat->mMax = std::max<double>(pRuntimeStat->mMax, current.AppPredictionLatencyMs);
-
-		if (!current.NewSourceLatched)
-		{
+		if (!current.NewSourceLatched) {
 			stats.mAppMissedFrames++;
 		}
 
-		if (LateStageReprojectionMissed(current.FinalState))
-		{
+		if (LateStageReprojectionMissed(current.FinalState)) {
 			stats.mLsrMissedFrames += current.MissedVsyncCount;
-			if (current.MissedVsyncCount > 1)
-			{
+			if (current.MissedVsyncCount > 1) {
 				// We always expect a count of at least 1, but if we missed multiple vsyncs during a single LSR period we need to account for that.
 				stats.mLsrConsecutiveMissedFrames += (current.MissedVsyncCount - 1);
 			}
-			if (i > 0 && LateStageReprojectionMissed((mLSRHistory[i - 1].FinalState)))
-			{
+			if (i > 0 && LateStageReprojectionMissed((mLSRHistory[i - 1].FinalState))) {
 				stats.mLsrConsecutiveMissedFrames++;
 			}
 		}
 	}
 
-	stats.mGPUPreemptionInMs.mAvg /= count;
-	stats.mGPUExecutionInMs.mAvg /= count;
-	stats.mCopyPreemptionInMs.mAvg /= count;
-	stats.mCopyExecutionInMs.mAvg /= count;
-	stats.mLSRInputLatchToVsync.mAvg /= count;
 	stats.mGPUEndToVsync /= count;
 	stats.mVsyncToPhotonsMiddle /= count;
-	stats.mLsrPoseLatency.mAvg /= count;
-	stats.mAppPoseLatency.mAvg /= count;
+	stats.mLsrPoseLatency /= count;
+	stats.mAppPoseLatency /= count;
 
 	return stats;
 }

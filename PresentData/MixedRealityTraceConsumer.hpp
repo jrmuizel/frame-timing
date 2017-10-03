@@ -40,8 +40,8 @@ struct __declspec(uuid("{19d9d739-da0a-41a0-b97f-24ed27abc9fb}")) DHD_PROVIDER_G
 static const auto DHD_PROVIDER_GUID = __uuidof(DHD_PROVIDER_GUID_HOLDER);
 
 // Forward-declare structs that will be used by both modern and legacy dxgkrnl events.
-struct DHDBeginLSRProcessingArgs;
-struct DHDPresentationTimingArgs;
+//struct DHDBeginLSRProcessingArgs;
+//struct DHDPresentationTimingArgs;
 
 enum class LateStageReprojectionResult
 {
@@ -102,6 +102,19 @@ struct LateStageReprojectionEvent {
 
 	LateStageReprojectionEvent(EVENT_HEADER const& hdr);
     ~LateStageReprojectionEvent();
+
+	inline float GetThreadWakeupToGpuEndMs() const
+	{
+		return ThreadWakeupToCpuRenderFrameStartInMs +
+			CpuRenderFrameStartToHeadPoseCallbackStartInMs +
+			HeadPoseCallbackStartToHeadPoseCallbackStopInMs +
+			HeadPoseCallbackStopToInputLatchInMs +
+			InputLatchToGPUSubmissionInMs +
+			GpuSubmissionToGpuStartInMs +
+			GpuStartToGpuStopInMs +
+			GpuStopToCopyStartInMs +
+			CopyStartToCopyStopInMs;
+	}
 };
 
 struct MRTraceConsumer
