@@ -34,18 +34,19 @@ SOFTWARE.
 
 #include "PresentMonTraceConsumer.hpp"
 
-//struct __declspec(uuid("{356e1338-04ad-420e-8b8a-a2eb678541cf}")) SPECTRUM_PROVIDER_GUID_HOLDER;
+struct __declspec(uuid("{356e1338-04ad-420e-8b8a-a2eb678541cf}")) SPECTRUMCONTINUOUS_PROVIDER_GUID_HOLDER;
 struct __declspec(uuid("{19d9d739-da0a-41a0-b97f-24ed27abc9fb}")) DHD_PROVIDER_GUID_HOLDER;
-//static const auto SPECTRUM_PROVIDER_GUID = __uuidof(SPECTRUM_PROVIDER_GUID_HOLDER);
+static const auto SPECTRUMCONTINUOUS_PROVIDER_GUID = __uuidof(SPECTRUMCONTINUOUS_PROVIDER_GUID_HOLDER);
 static const auto DHD_PROVIDER_GUID = __uuidof(DHD_PROVIDER_GUID_HOLDER);
-
-// Forward-declare structs that will be used by both modern and legacy dxgkrnl events.
-//struct DHDBeginLSRProcessingArgs;
-//struct DHDPresentationTimingArgs;
 
 enum class LateStageReprojectionResult
 {
 	Unknown, Presented, Missed, MissedMultiple, Error
+};
+
+enum class HolographicFrameResult
+{
+	Unknown, Presented, DuplicateFrameId, Error
 };
 
 inline bool LateStageReprojectionPresented(LateStageReprojectionResult result)
@@ -66,11 +67,14 @@ inline bool LateStageReprojectionMissed(LateStageReprojectionResult result)
 }
 
 struct LateStageReprojectionEvent {
-    // Available from DHD
 	uint64_t QpcTime;
-	//uint64_t TargetVBlankQPC;
+	uint64_t SourceCpuRenderTime;
+	uint64_t SourcePresentTime;
+	uint64_t SourcePtr;
 	
 	bool NewSourceLatched;
+	uint64_t SourceReleaseFromRenderingToAcquireForPresentationTime;
+
 	float ThreadWakeupToCpuRenderFrameStartInMs;
 	float CpuRenderFrameStartToHeadPoseCallbackStartInMs;
 	float HeadPoseCallbackStartToHeadPoseCallbackStopInMs;
@@ -93,6 +97,7 @@ struct LateStageReprojectionEvent {
 	bool SuspendedThreadBeforeLSR;
 
     uint32_t ProcessId;
+	uint32_t SourceProcessId;
 	LateStageReprojectionResult FinalState;
 	uint32_t MissedVsyncCount;
 
@@ -115,6 +120,47 @@ struct LateStageReprojectionEvent {
 			GpuStopToCopyStartInMs +
 			CopyStartToCopyStopInMs;
 	}
+	
+	inline float GetActualLsrLatencyMs() const
+	{
+		return InputLatchToGPUSubmissionInMs +
+			GpuSubmissionToGpuStartInMs +
+			GpuStartToGpuStopInMs +
+			GpuStopToCopyStartInMs +
+			CopyStartToCopyStopInMs +
+			CopyStopToVsyncInMs +
+			(TimeUntilPhotonsMiddleMs - TimeUntilVsyncMs);
+	}
+};
+
+struct PresentationSource {
+	uint64_t Ptr;
+	uint64_t AcquireForRenderingTime;
+	uint64_t ReleaseFromRenderingTime;
+	uint64_t AcquireForPresentationTime;
+	uint64_t ReleaseFromPresentationTime;
+
+	uint32_t HolographicFrameProcessId;
+	uint64_t HolographicFramePresentTime;
+	uint64_t HolographicFrameCpuRenderTime;
+
+	PresentationSource(uint64_t ptr);
+	~PresentationSource();
+};
+
+struct HolographicFrame {
+	uint32_t PresentId;	// Unique globally
+	uint32_t HolographicFrameId;	// Unique per-process
+
+	uint64_t HolographicFrameStartTime;
+	uint64_t HolographicFrameStopTime;
+
+	uint32_t ProcessId;
+	bool Completed;
+	HolographicFrameResult FinalState;
+
+	HolographicFrame(EVENT_HEADER const& hdr);
+	~HolographicFrame();
 };
 
 struct MRTraceConsumer
@@ -125,8 +171,8 @@ struct MRTraceConsumer
 	{ }
     ~MRTraceConsumer();
 
-    bool mSimpleMode;
-	bool mLogUserHitches;
+    const bool mSimpleMode;
+	const bool mLogUserHitches;
 
     std::mutex mMutex;
     // A set of LSRs that are "completed":
@@ -134,16 +180,19 @@ struct MRTraceConsumer
     // These will be handed off to the consumer thread.
     std::vector<std::shared_ptr<LateStageReprojectionEvent>> mCompletedLSRs;
 
-    // Presents in the process of being submitted
-    // The first map contains a single present that is currently in-between a set of expected events on the same thread:
-    //   (e.g. DXGI_Present_Start/DXGI_Present_Stop, or Flip/QueueSubmit)
-    // Used for mapping from runtime events to future events, and thread map used extensively for correlating kernel events
-    //std::map<uint32_t, std::shared_ptr<LateStageReprojectionEvent>> mLSRByThreadId;
+    // Presentation sources in the process of being rendered by the app.
+    std::map<uint64_t, std::shared_ptr<PresentationSource>> mPresentationSourceByPtr;
+
+	// Stores each Holographic Frame started by it's HolographicFrameId.
+	std::map<uint32_t, std::shared_ptr<HolographicFrame>> mHolographicFramesByFrameId;
+
+	// Stores each Holographic Frame started by it's PresentId.
+	std::map<uint32_t, std::shared_ptr<HolographicFrame>> mHolographicFramesByPresentId;
+
 	std::shared_ptr<LateStageReprojectionEvent> mActiveLSR;
     bool DequeueLSRs(std::vector<std::shared_ptr<LateStageReprojectionEvent>>& outLSRs)
     {
-        if (mCompletedLSRs.size())
-        {
+        if (mCompletedLSRs.size()) {
             auto lock = scoped_lock(mMutex);
 			outLSRs.swap(mCompletedLSRs);
             return !outLSRs.empty();
@@ -151,11 +200,15 @@ struct MRTraceConsumer
         return false;
     }
 
-	//void HandleDHDBeginLSRProcessing(DHDBeginLSRProcessingArgs& args);
-	//void HandleDHDPresentationTiming(DHDPresentationTimingArgs& args);
-
     void CompleteLSR(std::shared_ptr<LateStageReprojectionEvent> p);
-    //decltype(mLSRByThreadId.begin()) FindOrCreateLSR(EVENT_HEADER const& hdr);
+	void CompleteHolographicFrame(std::shared_ptr<HolographicFrame> p);
+	void CompletePresentationSource(uint64_t presentationSourcePtr);
+
+	decltype(mPresentationSourceByPtr.begin()) FindOrCreatePresentationSource(uint64_t presentationSourcePtr);
+	
+	void HolographicFrameStart(HolographicFrame &frame);
+	void HolographicFrameStop(std::shared_ptr<HolographicFrame> p);
 };
 
 void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer);
+void HandleSpectrumContinuousEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer);

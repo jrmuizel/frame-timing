@@ -156,6 +156,7 @@ void PrintEventInformation(FILE* fp, EVENT_RECORD* pEventRecord)
 
 std::wstring GetEventTaskName(EVENT_RECORD* pEventRecord)
 {
+	std::wstring taskName = L"";
 	ULONG bufferSize = 0;
 	auto status = TdhGetEventInformation(pEventRecord, 0, nullptr, nullptr, &bufferSize);
 	if (status == ERROR_INSUFFICIENT_BUFFER) {
@@ -164,13 +165,13 @@ std::wstring GetEventTaskName(EVENT_RECORD* pEventRecord)
 		auto info = (TRACE_EVENT_INFO*)bufferAddr;
 		status = TdhGetEventInformation(pEventRecord, 0, nullptr, info, &bufferSize);
 		if (status == ERROR_SUCCESS) {
-			return (wchar_t*)(bufferAddr + info->TaskNameOffset);
+			taskName = (wchar_t*)(bufferAddr + info->TaskNameOffset);
 		}
 
 		free((void*)bufferAddr);
 	}
 
-	return L"";
+	return taskName;
 }
 
 template <>

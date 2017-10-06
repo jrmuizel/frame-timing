@@ -57,14 +57,19 @@ struct LateStageReprojectionRuntimeStats {
 	RuntimeStat<double> mGPUExecutionInMs;
 	RuntimeStat<double> mCopyPreemptionInMs;
 	RuntimeStat<double> mCopyExecutionInMs;
-	RuntimeStat<double> mLSRInputLatchToVsync;
-	double mGPUEndToVsync = 0.0;
-	double mVsyncToPhotonsMiddle = 0.0;
-	double mLsrPoseLatency = 0.0;
-	double mAppPoseLatency = 0.0;
+	RuntimeStat<double> mLSRInputLatchToVsyncInMs;
+	double mGPUEndToVsyncInMs = 0.0;
+	double mVsyncToPhotonsMiddleInMs = 0.0;
+	double mLsrPoseLatencyInMs = 0.0;
+	double mAppPoseLatencyInMs = 0.0;
+	double mAppSourceReleaseToLsrAcquireInMs = 0.0;
+	double mAppSourceCpuRenderTimeInMs = 0.0;
+	double mLsrCpuRenderTimeInMs = 0.0;
 	size_t mAppMissedFrames = 0;
 	size_t mLsrMissedFrames = 0;
 	size_t mLsrConsecutiveMissedFrames = 0;
+	uint32_t mLatestAppProcessId = 0;
+	uint32_t mLsrProcessId = 0;
 };
 
 struct LateStageReprojectionData {
@@ -83,7 +88,7 @@ struct LateStageReprojectionData {
     double ComputeDisplayedFps(uint64_t qpcFreq);
     double ComputeFps(uint64_t qpcFreq);
 	size_t ComputeHistorySize();
-	LateStageReprojectionRuntimeStats ComputeRuntimeStats();
+	LateStageReprojectionRuntimeStats ComputeRuntimeStats(uint64_t perfFreq);
 
     bool IsStale(uint64_t now) const;
 	bool HasData() const { return !mLSRHistory.empty(); }

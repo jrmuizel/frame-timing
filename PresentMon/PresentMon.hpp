@@ -38,7 +38,6 @@ struct ProcessInfo {
     uint64_t mLastRefreshTicks = 0; // GetTickCount64
     std::string mModuleName;
     std::map<uint64_t, SwapChainData> mChainMap;
-	LateStageReprojectionData mLateStageReprojectionData;
     bool mTerminationProcess;
     bool mProcessExists = false;
 };
@@ -51,6 +50,7 @@ struct PresentMonData {
     FILE *mOutputFile = nullptr;
 	FILE *mLsrOutputFile = nullptr;
     std::map<uint32_t, ProcessInfo> mProcessMap;
+	LateStageReprojectionData mLateStageReprojectionData;
     uint32_t mTerminationProcessCount = 0;
 };
 
