@@ -172,6 +172,10 @@ void MRTraceConsumer::HolographicFrameStart(HolographicFrame &frame)
         // Collision with an existing in-flight Holographic FrameId.
         // Timing information for the source may be wrong if it get's timing from the wrong Holographic Frame.
         pFrame->FinalState = HolographicFrameResult::DuplicateFrameId;
+
+        // Set the event instance to completed so the assert
+        // in ~HolographicFrame() doesn't fire when it is destructed.
+        frameIter->second->Completed = true;
     }
 
     mHolographicFramesByFrameId[pFrame->HolographicFrameId] = pFrame;
@@ -187,7 +191,7 @@ void MRTraceConsumer::HolographicFrameStop(std::shared_ptr<HolographicFrame> p)
     // Begin tracking the frame by its PresentId until LSR picks it up.
     mHolographicFramesByFrameId.erase(p->HolographicFrameId);
 
-    assert(p->PresentId != 0);
+    assert(p->PresentId != 0 && p->HolographicFrameStopTime != 0);
     if (p->FinalState == HolographicFrameResult::Unknown) {
         p->FinalState = HolographicFrameResult::Presented;
     }
@@ -392,7 +396,7 @@ void HandleSpectrumContinuousEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* 
                 frameIter->second->HolographicFrameStopTime = timeStamp;
 
                 // Only stop the frame once we've seen all the events for it.
-                if (frameIter->second->PresentId != 0) {
+                if (frameIter->second->PresentId != 0 && frameIter->second->HolographicFrameStopTime != 0) {
                     mrConsumer->HolographicFrameStop(frameIter->second);
                 }
                 break;
@@ -414,7 +418,7 @@ void HandleSpectrumContinuousEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* 
         GetEventData(pEventRecord, L"presentId", &frameIter->second->PresentId);
 
         // Only complete the frame once we've seen all the events for it.
-        if (frameIter->second->HolographicFrameStopTime != 0) {
+        if (frameIter->second->PresentId != 0 && frameIter->second->HolographicFrameStopTime != 0) {
             mrConsumer->HolographicFrameStop(frameIter->second);
         }
     }
