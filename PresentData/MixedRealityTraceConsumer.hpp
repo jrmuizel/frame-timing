@@ -165,14 +165,12 @@ struct HolographicFrame {
 
 struct MRTraceConsumer
 {
-	MRTraceConsumer(bool simple, bool logUserHitches) 
+	MRTraceConsumer(bool simple) 
 		: mSimpleMode(simple)
-		, mLogUserHitches(logUserHitches)
-	{ }
+	{}
     ~MRTraceConsumer();
 
     const bool mSimpleMode;
-	const bool mLogUserHitches;
 
     std::mutex mMutex;
     // A set of LSRs that are "completed":

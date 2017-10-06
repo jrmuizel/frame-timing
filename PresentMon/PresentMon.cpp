@@ -205,10 +205,6 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
 				fprintf(pm.mLsrOutputFile, ",%.6lf,%.6lf", appPresentDeltaMilliseconds, appPresentToLsrMilliseconds);
 			}
 			fprintf(pm.mLsrOutputFile, ",%.6lf,%d,%d", deltaMilliseconds, !curr.NewSourceLatched, curr.MissedVsyncCount);
-			if (pm.mArgs->mLogUserHitches)
-			{
-				fprintf(pm.mLsrOutputFile, ",%d", curr.UserNoticedHitch);
-			}
 			if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
 			{
 				fprintf(pm.mLsrOutputFile, ",%.6lf", 1000 * double(curr.SourceReleaseFromRenderingToAcquireForPresentationTime) / perfFreq );
@@ -401,39 +397,37 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
             fprintf(pm.mOutputFile, "\n");
         }
 
-		// Open output file and print CSV header
-		fopen_s(&pm.mLsrOutputFile, pm.mLsrOutputFilePath, "w");
-		if (pm.mLsrOutputFile) {
-			fprintf(pm.mLsrOutputFile, "Application,ProcessID,DWMProcessID,TimeInSeconds");
-			if (pm.mArgs->mVerbosity > Verbosity::Simple)
-			{
-				fprintf(pm.mLsrOutputFile, ",MsBetweenAppPresents,MsAppPresentToLsr");
+		if (pm.mArgs->mIncludeWindowsMixedReality) {
+			// Open output file and print CSV header
+			fopen_s(&pm.mLsrOutputFile, pm.mLsrOutputFilePath, "w");
+			if (pm.mLsrOutputFile) {
+				fprintf(pm.mLsrOutputFile, "Application,ProcessID,DWMProcessID,TimeInSeconds");
+				if (pm.mArgs->mVerbosity > Verbosity::Simple)
+				{
+					fprintf(pm.mLsrOutputFile, ",MsBetweenAppPresents,MsAppPresentToLsr");
+				}
+				fprintf(pm.mLsrOutputFile, ",MsBetweenLsrs,MsAppMissed,LsrMissed");
+				if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+				{
+					fprintf(pm.mLsrOutputFile, ",MsSourceReleaseFromRenderingToLsrAcquire");
+				}
+				fprintf(pm.mLsrOutputFile, ",MsAppPoseLatency");
+				if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+				{
+					fprintf(pm.mLsrOutputFile, ",MsAppMisprediction");
+				}
+				fprintf(pm.mLsrOutputFile, ",MsLsrPoseLatency,MsActualLsrPoseLatency,MsTimeUntilVsync,MsLsrThreadWakeupToGpuEnd,MsLsrThreadWakeupError");
+				if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+				{
+					fprintf(pm.mLsrOutputFile, ",MsLsrThreadWakeupToCpuRenderFrameStart,MsCpuRenderFrameStartToHeadPoseCallbackStart,MsGetHeadPose,MsHeadPoseCallbackStopToInputLatch,MsInputLatchToGPUSubmission");
+				}
+				fprintf(pm.mLsrOutputFile, ",MsLsrPreemption,MsLsrExecution,MsCopyPreemption,MsCopyExecution,MsGpuEndToVsync");
+				if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+				{
+					fprintf(pm.mLsrOutputFile, ",SuspendedThreadBeforeLSR,EarlyLSRDueToInvalidFence");
+				}
+				fprintf(pm.mLsrOutputFile, "\n");
 			}
-			fprintf(pm.mLsrOutputFile, ",MsBetweenLsrs,MsAppMissed,LsrMissed");
-			if (pm.mArgs->mLogUserHitches)
-			{
-				fprintf(pm.mLsrOutputFile, ",UserNotedHitch");
-			}
-			if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
-			{
-				fprintf(pm.mLsrOutputFile, ",MsSourceReleaseFromRenderingToLsrAcquire");
-			}
-			fprintf(pm.mLsrOutputFile, ",MsAppPoseLatency");
-			if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
-			{
-				fprintf(pm.mLsrOutputFile, ",MsAppMisprediction");
-			}
-			fprintf(pm.mLsrOutputFile, ",MsLsrPoseLatency,MsActualLsrPoseLatency,MsTimeUntilVsync,MsLsrThreadWakeupToGpuEnd,MsLsrThreadWakeupError");
-			if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
-			{
-				fprintf(pm.mLsrOutputFile, ",MsLsrThreadWakeupToCpuRenderFrameStart,MsCpuRenderFrameStartToHeadPoseCallbackStart,MsGetHeadPose,MsHeadPoseCallbackStopToInputLatch,MsInputLatchToGPUSubmission");
-			}
-			fprintf(pm.mLsrOutputFile, ",MsLsrPreemption,MsLsrExecution,MsCopyPreemption,MsCopyExecution,MsGpuEndToVsync");
-			if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
-			{
-				fprintf(pm.mLsrOutputFile, ",SuspendedThreadBeforeLSR,EarlyLSRDueToInvalidFence");
-			}
-			fprintf(pm.mLsrOutputFile, "\n");
 		}
     }
 }
@@ -715,13 +709,15 @@ void EtwConsumingThread(const CommandLineArgs& args)
 
     PresentMonData data;
     PMTraceConsumer pmConsumer(args.mVerbosity == Verbosity::Simple);
-	MRTraceConsumer mrConsumer(args.mVerbosity == Verbosity::Simple, args.mLogUserHitches);
+	MRTraceConsumer mrConsumer(args.mVerbosity == Verbosity::Simple);
 
     TraceSession session;
 
-	session.AddProviderAndHandler(DHD_PROVIDER_GUID, TRACE_LEVEL_VERBOSE, 0x1C00000, 0, (EventHandlerFn)&HandleDHDEvent, &mrConsumer);
-	if (args.mVerbosity != Verbosity::Simple) {
-		session.AddProviderAndHandler(SPECTRUMCONTINUOUS_PROVIDER_GUID, TRACE_LEVEL_VERBOSE, 0x800000, 0, (EventHandlerFn)&HandleSpectrumContinuousEvent, &mrConsumer);
+	if (args.mIncludeWindowsMixedReality) {
+		session.AddProviderAndHandler(DHD_PROVIDER_GUID, TRACE_LEVEL_VERBOSE, 0x1C00000, 0, (EventHandlerFn)&HandleDHDEvent, &mrConsumer);
+		if (args.mVerbosity != Verbosity::Simple) {
+			session.AddProviderAndHandler(SPECTRUMCONTINUOUS_PROVIDER_GUID, TRACE_LEVEL_VERBOSE, 0x800000, 0, (EventHandlerFn)&HandleSpectrumContinuousEvent, &mrConsumer);
+		}
 	}
 
     session.AddProviderAndHandler(DXGI_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 0, 0, (EventHandlerFn) &HandleDXGIEvent, &pmConsumer);

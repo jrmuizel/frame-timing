@@ -50,12 +50,12 @@ struct CommandLineArgs {
     bool mScrollLockIndicator = false;
     bool mExcludeDropped = false;
     Verbosity mVerbosity = Verbosity::Normal;
-	bool mLogUserHitches = false;
     bool mSimpleConsole = false;
     bool mTerminateOnProcExit = false;
     bool mTerminateAfterTimer = false;
     bool mHotkeySupport = false;
     bool mTryToElevate = true;
+    bool mIncludeWindowsMixedReality = false;
 };
 
 bool ParseCommandLine(int argc, char** argv, CommandLineArgs* out);

@@ -242,13 +242,6 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
 		// Complete the last LSR.
 		auto& pEvent = mrConsumer->mActiveLSR;
 		if (pEvent) {
-			if (mrConsumer->mLogUserHitches) {
-				const bool bSpacePressed = (GetAsyncKeyState(VK_SPACE) & 1) == 1;
-				if (bSpacePressed) {
-					pEvent->UserNoticedHitch = true;
-				}
-			}
-			
 			mrConsumer->CompleteLSR(pEvent);
 		}
 
