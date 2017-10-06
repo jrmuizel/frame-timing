@@ -169,66 +169,71 @@ bool HaveAdministratorPrivileges()
     return privilege == PRIVILEGE_ELEVATED;
 }
 
-bool SetPrivilege(HANDLE TokenHandle, LPCTSTR lpszPrivilege, bool bEnablePrivilege)
+bool SetPrivilege(HANDLE hToken, LPCSTR lpszPrivilege, bool bEnablePrivilege)
 {
-    LUID luid;
-    if (!LookupPrivilegeValue(
-        NULL, // lookup privilege on local system
-        lpszPrivilege, // privilege to lookup 
-        &luid)) // receives LUID of privilege
-    {
-        fprintf(stderr, "error: failed to lookup privilege value (%u).\n", GetLastError());
-        return false;
+    bool bPrivilegeSet = false;
+    typedef BOOL(WINAPI *LookupPrivilegeValueAProc)(LPCSTR lpSystemName, LPCSTR lpName, PLUID lpLuid);
+    typedef BOOL(WINAPI *AdjustTokenPrivilegesProc)(HANDLE TokenHandle, BOOL DisableAllPrivileges, PTOKEN_PRIVILEGES NewState, DWORD BufferLength, PTOKEN_PRIVILEGES PreviousState, PDWORD ReturnLength);
+    HMODULE advapi = LoadLibraryA("advapi32");
+    if (advapi) {
+        LookupPrivilegeValueAProc LookupPrivilegeValueA = (LookupPrivilegeValueAProc)GetProcAddress(advapi, "LookupPrivilegeValueA");
+        AdjustTokenPrivilegesProc AdjustTokenPrivileges = (AdjustTokenPrivilegesProc)GetProcAddress(advapi, "AdjustTokenPrivileges");
+        if (LookupPrivilegeValueA && AdjustTokenPrivileges) {
+            LUID luid;
+            if (LookupPrivilegeValueA(NULL, lpszPrivilege, &luid)) {
+                TOKEN_PRIVILEGES tp;
+                tp.PrivilegeCount = 1;
+                tp.Privileges[0].Luid = luid;
+                tp.Privileges[0].Attributes = bEnablePrivilege ? SE_PRIVILEGE_ENABLED : 0;
+
+                if (AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(TOKEN_PRIVILEGES), (PTOKEN_PRIVILEGES)NULL, (PDWORD)NULL)) {
+                    if (GetLastError() != ERROR_NOT_ALL_ASSIGNED) {
+                        bPrivilegeSet = true;
+                    }
+                    else {
+                        fprintf(stderr, "error: token does not have the specified privilege.\n");
+                    }
+                }
+                else {
+                    fprintf(stderr, "error: failed to adjust token privileges (%u).\n", GetLastError());
+                }
+            }
+            else {
+                fprintf(stderr, "error: failed to lookup privilege value (%u).\n", GetLastError());
+            }
+        }
+        FreeLibrary(advapi);
     }
 
-    TOKEN_PRIVILEGES tp;
-    tp.PrivilegeCount = 1;
-    tp.Privileges[0].Luid = luid;
-    tp.Privileges[0].Attributes = bEnablePrivilege ? SE_PRIVILEGE_ENABLED : 0;
-
-    // Enable the privilege or disable all privileges.
-    if (!AdjustTokenPrivileges(
-        TokenHandle,
-        FALSE,
-        &tp,
-        sizeof(TOKEN_PRIVILEGES),
-        (PTOKEN_PRIVILEGES)NULL,
-        (PDWORD)NULL))
-    {
-        fprintf(stderr, "error: failed to adjust token privileges (%u).\n", GetLastError());
-        return false;
-    }
-
-    if (GetLastError() == ERROR_NOT_ALL_ASSIGNED)
-    {
-        fprintf(stderr, "error: token does not have the specified privilege.\n");
-        return false;
-    }
-
-    return true;
+    return bPrivilegeSet;
 }
 
 bool AdjustPrivileges()
 {
-    // DWM processes run in a separate user account.
-    // We need permissions to query inforamtion about other user accounts.
+    // On some versions of Windows, DWM processes run under a separate account.
+    // We need permissions to get data about a process owned by another account.
+    bool bPrivilegesSet = false;
+    typedef BOOL(WINAPI *OpenProcessTokenProc)(HANDLE ProcessHandle, DWORD DesiredAccess, PHANDLE TokenHandle);
+    HMODULE advapi = LoadLibraryA("advapi32");
+    if (advapi) {
+        OpenProcessTokenProc OpenProcessToken = (OpenProcessTokenProc)GetProcAddress(advapi, "OpenProcessToken");
+        if (OpenProcessToken) {
+            HANDLE hToken = NULL;
+            if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &hToken)) {
+                if (SetPrivilege(hToken, "SeDebugPrivilege", true)) {
+                    bPrivilegesSet = true;
+                }
+                else {
+                    fprintf(stderr, "error: failed to enable SeDebugPrivilege.\n");
+                }
 
-    HANDLE tokenHandle = nullptr;
-    if (::OpenProcessToken(::GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &tokenHandle))
-    {
-        if (!SetPrivilege(tokenHandle, L"SeDebugPrivilege", true))
-        {
-            fprintf(stderr, "error: failed to enable SeDebugPrivilege.\n");
-            return false;
+                CloseHandle(hToken);
+            }
         }
-    }
-    else
-    {
-        fprintf(stderr, "error: failed to open process token (%u).\n", GetLastError());
-        return false;
+        FreeLibrary(advapi);
     }
 
-    return true;
+    return bPrivilegesSet;
 }
 
 }
@@ -276,10 +281,9 @@ int main(int argc, char** argv)
 
     int ret = 0;
 
-    // Adjust process privileges for real-time.
-    if (!args.mEtlFileName && !AdjustPrivileges())
-    {
-        fprintf(stderr, "error: process requires special privileges.\n");
+    // Adjust process privileges for real-time
+    if (!args.mEtlFileName && !AdjustPrivileges()) {
+        fprintf(stderr, "warning: some processes may not show up because we don't have sufficient privileges.\n");
     }
 
     // Set console title to command line arguments
