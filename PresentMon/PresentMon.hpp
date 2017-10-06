@@ -46,11 +46,11 @@ struct PresentMonData {
     const CommandLineArgs *mArgs = nullptr;
     uint64_t mStartupQpcTime;
     char mOutputFilePath[MAX_PATH];
-	char mLsrOutputFilePath[MAX_PATH];
+    char mLsrOutputFilePath[MAX_PATH];
     FILE *mOutputFile = nullptr;
-	FILE *mLsrOutputFile = nullptr;
+    FILE *mLsrOutputFile = nullptr;
     std::map<uint32_t, ProcessInfo> mProcessMap;
-	LateStageReprojectionData mLateStageReprojectionData;
+    LateStageReprojectionData mLateStageReprojectionData;
     uint32_t mTerminationProcessCount = 0;
 };
 

@@ -41,133 +41,133 @@ static const auto DHD_PROVIDER_GUID = __uuidof(DHD_PROVIDER_GUID_HOLDER);
 
 enum class LateStageReprojectionResult
 {
-	Unknown, Presented, Missed, MissedMultiple, Error
+    Unknown, Presented, Missed, MissedMultiple, Error
 };
 
 enum class HolographicFrameResult
 {
-	Unknown, Presented, DuplicateFrameId, Error
+    Unknown, Presented, DuplicateFrameId, Error
 };
 
 inline bool LateStageReprojectionPresented(LateStageReprojectionResult result)
 {
-	return (result == LateStageReprojectionResult::Presented) ? true : false;
+    return (result == LateStageReprojectionResult::Presented) ? true : false;
 }
 
 inline bool LateStageReprojectionMissed(LateStageReprojectionResult result)
 {
-	switch (result)
-	{
-	case LateStageReprojectionResult::Missed:
-	case LateStageReprojectionResult::MissedMultiple:
-		return true;
-	}
+    switch (result)
+    {
+    case LateStageReprojectionResult::Missed:
+    case LateStageReprojectionResult::MissedMultiple:
+        return true;
+    }
 
-	return false;
+    return false;
 }
 
 struct LateStageReprojectionEvent {
-	uint64_t QpcTime;
-	uint64_t SourceCpuRenderTime;
-	uint64_t SourcePresentTime;
-	uint64_t SourcePtr;
-	
-	bool NewSourceLatched;
-	uint64_t SourceReleaseFromRenderingToAcquireForPresentationTime;
+    uint64_t QpcTime;
+    uint64_t SourceCpuRenderTime;
+    uint64_t SourcePresentTime;
+    uint64_t SourcePtr;
+    
+    bool NewSourceLatched;
+    uint64_t SourceReleaseFromRenderingToAcquireForPresentationTime;
 
-	float ThreadWakeupToCpuRenderFrameStartInMs;
-	float CpuRenderFrameStartToHeadPoseCallbackStartInMs;
-	float HeadPoseCallbackStartToHeadPoseCallbackStopInMs;
-	float HeadPoseCallbackStopToInputLatchInMs;
-	float InputLatchToGPUSubmissionInMs;
-	float GpuSubmissionToGpuStartInMs;
-	float GpuStartToGpuStopInMs;
-	float GpuStopToCopyStartInMs;
-	float CopyStartToCopyStopInMs;
-	float CopyStopToVsyncInMs;
+    float ThreadWakeupToCpuRenderFrameStartInMs;
+    float CpuRenderFrameStartToHeadPoseCallbackStartInMs;
+    float HeadPoseCallbackStartToHeadPoseCallbackStopInMs;
+    float HeadPoseCallbackStopToInputLatchInMs;
+    float InputLatchToGPUSubmissionInMs;
+    float GpuSubmissionToGpuStartInMs;
+    float GpuStartToGpuStopInMs;
+    float GpuStopToCopyStartInMs;
+    float CopyStartToCopyStopInMs;
+    float CopyStopToVsyncInMs;
 
-	float LsrPredictionLatencyMs;
-	float AppPredictionLatencyMs;
-	float AppMispredictionMs;
-	float WakeupErrorMs;
-	float TimeUntilVsyncMs;
-	float TimeUntilPhotonsMiddleMs;
+    float LsrPredictionLatencyMs;
+    float AppPredictionLatencyMs;
+    float AppMispredictionMs;
+    float WakeupErrorMs;
+    float TimeUntilVsyncMs;
+    float TimeUntilPhotonsMiddleMs;
 
-	bool EarlyLSRDueToInvalidFence;
-	bool SuspendedThreadBeforeLSR;
+    bool EarlyLSRDueToInvalidFence;
+    bool SuspendedThreadBeforeLSR;
 
     uint32_t ProcessId;
-	uint32_t SourceProcessId;
-	LateStageReprojectionResult FinalState;
-	uint32_t MissedVsyncCount;
+    uint32_t SourceProcessId;
+    LateStageReprojectionResult FinalState;
+    uint32_t MissedVsyncCount;
 
     // Additional transient state
     bool Completed;
-	bool UserNoticedHitch;
+    bool UserNoticedHitch;
 
-	LateStageReprojectionEvent(EVENT_HEADER const& hdr);
+    LateStageReprojectionEvent(EVENT_HEADER const& hdr);
     ~LateStageReprojectionEvent();
 
-	inline float GetThreadWakeupToGpuEndMs() const
-	{
-		return ThreadWakeupToCpuRenderFrameStartInMs +
-			CpuRenderFrameStartToHeadPoseCallbackStartInMs +
-			HeadPoseCallbackStartToHeadPoseCallbackStopInMs +
-			HeadPoseCallbackStopToInputLatchInMs +
-			InputLatchToGPUSubmissionInMs +
-			GpuSubmissionToGpuStartInMs +
-			GpuStartToGpuStopInMs +
-			GpuStopToCopyStartInMs +
-			CopyStartToCopyStopInMs;
-	}
-	
-	inline float GetActualLsrLatencyMs() const
-	{
-		return InputLatchToGPUSubmissionInMs +
-			GpuSubmissionToGpuStartInMs +
-			GpuStartToGpuStopInMs +
-			GpuStopToCopyStartInMs +
-			CopyStartToCopyStopInMs +
-			CopyStopToVsyncInMs +
-			(TimeUntilPhotonsMiddleMs - TimeUntilVsyncMs);
-	}
+    inline float GetThreadWakeupToGpuEndMs() const
+    {
+        return ThreadWakeupToCpuRenderFrameStartInMs +
+            CpuRenderFrameStartToHeadPoseCallbackStartInMs +
+            HeadPoseCallbackStartToHeadPoseCallbackStopInMs +
+            HeadPoseCallbackStopToInputLatchInMs +
+            InputLatchToGPUSubmissionInMs +
+            GpuSubmissionToGpuStartInMs +
+            GpuStartToGpuStopInMs +
+            GpuStopToCopyStartInMs +
+            CopyStartToCopyStopInMs;
+    }
+    
+    inline float GetActualLsrLatencyMs() const
+    {
+        return InputLatchToGPUSubmissionInMs +
+            GpuSubmissionToGpuStartInMs +
+            GpuStartToGpuStopInMs +
+            GpuStopToCopyStartInMs +
+            CopyStartToCopyStopInMs +
+            CopyStopToVsyncInMs +
+            (TimeUntilPhotonsMiddleMs - TimeUntilVsyncMs);
+    }
 };
 
 struct PresentationSource {
-	uint64_t Ptr;
-	uint64_t AcquireForRenderingTime;
-	uint64_t ReleaseFromRenderingTime;
-	uint64_t AcquireForPresentationTime;
-	uint64_t ReleaseFromPresentationTime;
+    uint64_t Ptr;
+    uint64_t AcquireForRenderingTime;
+    uint64_t ReleaseFromRenderingTime;
+    uint64_t AcquireForPresentationTime;
+    uint64_t ReleaseFromPresentationTime;
 
-	uint32_t HolographicFrameProcessId;
-	uint64_t HolographicFramePresentTime;
-	uint64_t HolographicFrameCpuRenderTime;
+    uint32_t HolographicFrameProcessId;
+    uint64_t HolographicFramePresentTime;
+    uint64_t HolographicFrameCpuRenderTime;
 
-	PresentationSource(uint64_t ptr);
-	~PresentationSource();
+    PresentationSource(uint64_t ptr);
+    ~PresentationSource();
 };
 
 struct HolographicFrame {
-	uint32_t PresentId;	// Unique globally
-	uint32_t HolographicFrameId;	// Unique per-process
+    uint32_t PresentId;	// Unique globally
+    uint32_t HolographicFrameId;	// Unique per-process
 
-	uint64_t HolographicFrameStartTime;
-	uint64_t HolographicFrameStopTime;
+    uint64_t HolographicFrameStartTime;
+    uint64_t HolographicFrameStopTime;
 
-	uint32_t ProcessId;
-	bool Completed;
-	HolographicFrameResult FinalState;
+    uint32_t ProcessId;
+    bool Completed;
+    HolographicFrameResult FinalState;
 
-	HolographicFrame(EVENT_HEADER const& hdr);
-	~HolographicFrame();
+    HolographicFrame(EVENT_HEADER const& hdr);
+    ~HolographicFrame();
 };
 
 struct MRTraceConsumer
 {
-	MRTraceConsumer(bool simple) 
-		: mSimpleMode(simple)
-	{}
+    MRTraceConsumer(bool simple) 
+        : mSimpleMode(simple)
+    {}
     ~MRTraceConsumer();
 
     const bool mSimpleMode;
@@ -181,31 +181,31 @@ struct MRTraceConsumer
     // Presentation sources in the process of being rendered by the app.
     std::map<uint64_t, std::shared_ptr<PresentationSource>> mPresentationSourceByPtr;
 
-	// Stores each Holographic Frame started by it's HolographicFrameId.
-	std::map<uint32_t, std::shared_ptr<HolographicFrame>> mHolographicFramesByFrameId;
+    // Stores each Holographic Frame started by it's HolographicFrameId.
+    std::map<uint32_t, std::shared_ptr<HolographicFrame>> mHolographicFramesByFrameId;
 
-	// Stores each Holographic Frame started by it's PresentId.
-	std::map<uint32_t, std::shared_ptr<HolographicFrame>> mHolographicFramesByPresentId;
+    // Stores each Holographic Frame started by it's PresentId.
+    std::map<uint32_t, std::shared_ptr<HolographicFrame>> mHolographicFramesByPresentId;
 
-	std::shared_ptr<LateStageReprojectionEvent> mActiveLSR;
+    std::shared_ptr<LateStageReprojectionEvent> mActiveLSR;
     bool DequeueLSRs(std::vector<std::shared_ptr<LateStageReprojectionEvent>>& outLSRs)
     {
         if (mCompletedLSRs.size()) {
             auto lock = scoped_lock(mMutex);
-			outLSRs.swap(mCompletedLSRs);
+            outLSRs.swap(mCompletedLSRs);
             return !outLSRs.empty();
         }
         return false;
     }
 
     void CompleteLSR(std::shared_ptr<LateStageReprojectionEvent> p);
-	void CompleteHolographicFrame(std::shared_ptr<HolographicFrame> p);
-	void CompletePresentationSource(uint64_t presentationSourcePtr);
+    void CompleteHolographicFrame(std::shared_ptr<HolographicFrame> p);
+    void CompletePresentationSource(uint64_t presentationSourcePtr);
 
-	decltype(mPresentationSourceByPtr.begin()) FindOrCreatePresentationSource(uint64_t presentationSourcePtr);
-	
-	void HolographicFrameStart(HolographicFrame &frame);
-	void HolographicFrameStop(std::shared_ptr<HolographicFrame> p);
+    decltype(mPresentationSourceByPtr.begin()) FindOrCreatePresentationSource(uint64_t presentationSourcePtr);
+    
+    void HolographicFrameStart(HolographicFrame &frame);
+    void HolographicFrameStop(std::shared_ptr<HolographicFrame> p);
 };
 
 void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer);

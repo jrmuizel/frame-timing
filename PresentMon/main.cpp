@@ -171,64 +171,64 @@ bool HaveAdministratorPrivileges()
 
 bool SetPrivilege(HANDLE TokenHandle, LPCTSTR lpszPrivilege, bool bEnablePrivilege)
 {
-	LUID luid;
-	if (!LookupPrivilegeValue(
-		NULL, // lookup privilege on local system
-		lpszPrivilege, // privilege to lookup 
-		&luid)) // receives LUID of privilege
-	{
-		fprintf(stderr, "error: failed to lookup privilege value (%u).\n", GetLastError());
-		return false;
-	}
+    LUID luid;
+    if (!LookupPrivilegeValue(
+        NULL, // lookup privilege on local system
+        lpszPrivilege, // privilege to lookup 
+        &luid)) // receives LUID of privilege
+    {
+        fprintf(stderr, "error: failed to lookup privilege value (%u).\n", GetLastError());
+        return false;
+    }
 
-	TOKEN_PRIVILEGES tp;
-	tp.PrivilegeCount = 1;
-	tp.Privileges[0].Luid = luid;
-	tp.Privileges[0].Attributes = bEnablePrivilege ? SE_PRIVILEGE_ENABLED : 0;
+    TOKEN_PRIVILEGES tp;
+    tp.PrivilegeCount = 1;
+    tp.Privileges[0].Luid = luid;
+    tp.Privileges[0].Attributes = bEnablePrivilege ? SE_PRIVILEGE_ENABLED : 0;
 
-	// Enable the privilege or disable all privileges.
-	if (!AdjustTokenPrivileges(
-		TokenHandle,
-		FALSE,
-		&tp,
-		sizeof(TOKEN_PRIVILEGES),
-		(PTOKEN_PRIVILEGES)NULL,
-		(PDWORD)NULL))
-	{
-		fprintf(stderr, "error: failed to adjust token privileges (%u).\n", GetLastError());
-		return false;
-	}
+    // Enable the privilege or disable all privileges.
+    if (!AdjustTokenPrivileges(
+        TokenHandle,
+        FALSE,
+        &tp,
+        sizeof(TOKEN_PRIVILEGES),
+        (PTOKEN_PRIVILEGES)NULL,
+        (PDWORD)NULL))
+    {
+        fprintf(stderr, "error: failed to adjust token privileges (%u).\n", GetLastError());
+        return false;
+    }
 
-	if (GetLastError() == ERROR_NOT_ALL_ASSIGNED)
-	{
-		fprintf(stderr, "error: token does not have the specified privilege.\n");
-		return false;
-	}
+    if (GetLastError() == ERROR_NOT_ALL_ASSIGNED)
+    {
+        fprintf(stderr, "error: token does not have the specified privilege.\n");
+        return false;
+    }
 
-	return true;
+    return true;
 }
 
 bool AdjustPrivileges()
 {
-	// DWM processes run in a separate user account.
-	// We need permissions to query inforamtion about other user accounts.
+    // DWM processes run in a separate user account.
+    // We need permissions to query inforamtion about other user accounts.
 
-	HANDLE tokenHandle = nullptr;
-	if (::OpenProcessToken(::GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &tokenHandle))
-	{
-		if (!SetPrivilege(tokenHandle, L"SeDebugPrivilege", true))
-		{
-			fprintf(stderr, "error: failed to enable SeDebugPrivilege.\n");
-			return false;
-		}
-	}
-	else
-	{
-		fprintf(stderr, "error: failed to open process token (%u).\n", GetLastError());
-		return false;
-	}
+    HANDLE tokenHandle = nullptr;
+    if (::OpenProcessToken(::GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &tokenHandle))
+    {
+        if (!SetPrivilege(tokenHandle, L"SeDebugPrivilege", true))
+        {
+            fprintf(stderr, "error: failed to enable SeDebugPrivilege.\n");
+            return false;
+        }
+    }
+    else
+    {
+        fprintf(stderr, "error: failed to open process token (%u).\n", GetLastError());
+        return false;
+    }
 
-	return true;
+    return true;
 }
 
 }
@@ -276,11 +276,11 @@ int main(int argc, char** argv)
 
     int ret = 0;
 
-	// Adjust process privileges for real-time.
-	if (!args.mEtlFileName && !AdjustPrivileges())
-	{
-		fprintf(stderr, "error: process requires special privileges.\n");
-	}
+    // Adjust process privileges for real-time.
+    if (!args.mEtlFileName && !AdjustPrivileges())
+    {
+        fprintf(stderr, "error: process requires special privileges.\n");
+    }
 
     // Set console title to command line arguments
     SetConsoleTitle(argc, argv);

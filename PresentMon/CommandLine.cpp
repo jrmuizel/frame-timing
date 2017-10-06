@@ -280,7 +280,7 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
         else ARG2("-process_name",           args->mTargetProcessName          = argv[i])
         else ARG2("-process_id",             args->mTargetPid                  = atou(argv[i]))
         else ARG2("-etl_file",               args->mEtlFileName                = argv[i])
-																		       
+                                                                               
         // Output options												       
         else ARG1("-no_csv",                 args->mOutputFile                 = false)
         else ARG2("-output_file",            args->mOutputFileName             = argv[i])

@@ -42,23 +42,23 @@ void LateStageReprojectionData::AddLateStageReprojection(LateStageReprojectionEv
 {
     if (LateStageReprojectionPresented(p.FinalState))
     {
-		assert(p.MissedVsyncCount == 0);
-		mDisplayedLSRHistory.push_back(p);
+        assert(p.MissedVsyncCount == 0);
+        mDisplayedLSRHistory.push_back(p);
     }
-	else if(LateStageReprojectionMissed(p.FinalState))
-	{
-		assert(p.MissedVsyncCount >= 1);
-		mLifetimeLsrMissedFrames += p.MissedVsyncCount;
-	}
+    else if(LateStageReprojectionMissed(p.FinalState))
+    {
+        assert(p.MissedVsyncCount >= 1);
+        mLifetimeLsrMissedFrames += p.MissedVsyncCount;
+    }
 
-	if (p.NewSourceLatched)
-	{
-		mSourceHistory.push_back(p);
-	}
-	else
-	{
-		mLifetimeAppMissedFrames++;
-	}
+    if (p.NewSourceLatched)
+    {
+        mSourceHistory.push_back(p);
+    }
+    else
+    {
+        mLifetimeAppMissedFrames++;
+    }
 
     if (!mLSRHistory.empty())
     {
@@ -69,7 +69,7 @@ void LateStageReprojectionData::AddLateStageReprojection(LateStageReprojectionEv
 
 void LateStageReprojectionData::UpdateLateStageReprojectionInfo(uint64_t now, uint64_t perfFreq)
 {
-	PruneDeque(mSourceHistory, perfFreq, MAX_HISTORY_TIME, MAX_LSRS_IN_DEQUE);
+    PruneDeque(mSourceHistory, perfFreq, MAX_HISTORY_TIME, MAX_LSRS_IN_DEQUE);
     PruneDeque(mDisplayedLSRHistory, perfFreq, MAX_HISTORY_TIME, MAX_LSRS_IN_DEQUE);
     PruneDeque(mLSRHistory, perfFreq, MAX_HISTORY_TIME, MAX_LSRS_IN_DEQUE);
 
@@ -78,27 +78,27 @@ void LateStageReprojectionData::UpdateLateStageReprojectionInfo(uint64_t now, ui
 
 double LateStageReprojectionData::ComputeHistoryTime(const std::deque<LateStageReprojectionEvent>& lsrHistory, uint64_t qpcFreq)
 {
-	if (lsrHistory.size() < 2) {
-		return 0.0;
-	}
+    if (lsrHistory.size() < 2) {
+        return 0.0;
+    }
 
-	auto start = lsrHistory.front().QpcTime;
-	auto end = lsrHistory.back().QpcTime;
-	return double(end - start) / qpcFreq;
+    auto start = lsrHistory.front().QpcTime;
+    auto end = lsrHistory.back().QpcTime;
+    return double(end - start) / qpcFreq;
 }
 
 size_t LateStageReprojectionData::ComputeHistorySize()
 {
-	if (mLSRHistory.size() < 2) {
-		return 0;
-	}
+    if (mLSRHistory.size() < 2) {
+        return 0;
+    }
 
-	return mLSRHistory.size();
+    return mLSRHistory.size();
 }
 
 double LateStageReprojectionData::ComputeHistoryTime(uint64_t qpcFreq)
 {
-	return ComputeHistoryTime(mLSRHistory, qpcFreq);
+    return ComputeHistoryTime(mLSRHistory, qpcFreq);
 }
 
 double LateStageReprojectionData::ComputeFps(const std::deque<LateStageReprojectionEvent>& lsrHistory, uint64_t qpcFreq)
@@ -116,7 +116,7 @@ double LateStageReprojectionData::ComputeFps(const std::deque<LateStageReproject
 
 double LateStageReprojectionData::ComputeSourceFps(uint64_t qpcFreq)
 {
-	return ComputeFps(mSourceHistory, qpcFreq);
+    return ComputeFps(mSourceHistory, qpcFreq);
 }
 
 double LateStageReprojectionData::ComputeDisplayedFps(uint64_t qpcFreq)
@@ -131,77 +131,77 @@ double LateStageReprojectionData::ComputeFps(uint64_t qpcFreq)
 
 LateStageReprojectionRuntimeStats LateStageReprojectionData::ComputeRuntimeStats(uint64_t qpcFreq)
 {
-	LateStageReprojectionRuntimeStats stats = {};
-	if (mLSRHistory.size() < 2) {
-		return stats;
-	}
+    LateStageReprojectionRuntimeStats stats = {};
+    if (mLSRHistory.size() < 2) {
+        return stats;
+    }
 
-	uint64_t totalAppSourceReleaseToLsrAcquireTime = 0;
-	uint64_t totalAppSourceCpuRenderTime = 0;
-	const size_t count = mLSRHistory.size();
-	for (size_t i = 0; i < count; i++)
-	{
-		LateStageReprojectionEvent& current = mLSRHistory[i];
+    uint64_t totalAppSourceReleaseToLsrAcquireTime = 0;
+    uint64_t totalAppSourceCpuRenderTime = 0;
+    const size_t count = mLSRHistory.size();
+    for (size_t i = 0; i < count; i++)
+    {
+        LateStageReprojectionEvent& current = mLSRHistory[i];
 
-		stats.mGPUPreemptionInMs.AddValue(current.GpuSubmissionToGpuStartInMs);
-		stats.mGPUExecutionInMs.AddValue(current.GpuStartToGpuStopInMs);
-		stats.mCopyPreemptionInMs.AddValue(current.GpuStopToCopyStartInMs);
-		stats.mCopyExecutionInMs.AddValue(current.CopyStartToCopyStopInMs);
+        stats.mGPUPreemptionInMs.AddValue(current.GpuSubmissionToGpuStartInMs);
+        stats.mGPUExecutionInMs.AddValue(current.GpuStartToGpuStopInMs);
+        stats.mCopyPreemptionInMs.AddValue(current.GpuStopToCopyStartInMs);
+        stats.mCopyExecutionInMs.AddValue(current.CopyStartToCopyStopInMs);
 
-		const double lsrInputLatchToVsyncInMs =
-			current.InputLatchToGPUSubmissionInMs +
-			current.GpuSubmissionToGpuStartInMs +
-			current.GpuStartToGpuStopInMs +
-			current.GpuStopToCopyStartInMs +
-			current.CopyStartToCopyStopInMs +
-			current.CopyStopToVsyncInMs;
-		stats.mLSRInputLatchToVsyncInMs.AddValue(lsrInputLatchToVsyncInMs);
+        const double lsrInputLatchToVsyncInMs =
+            current.InputLatchToGPUSubmissionInMs +
+            current.GpuSubmissionToGpuStartInMs +
+            current.GpuStartToGpuStopInMs +
+            current.GpuStopToCopyStartInMs +
+            current.CopyStartToCopyStopInMs +
+            current.CopyStopToVsyncInMs;
+        stats.mLSRInputLatchToVsyncInMs.AddValue(lsrInputLatchToVsyncInMs);
 
-		// Stats just with averages
-		totalAppSourceReleaseToLsrAcquireTime += current.SourceReleaseFromRenderingToAcquireForPresentationTime;
-		totalAppSourceCpuRenderTime += current.SourceCpuRenderTime;
-		stats.mLsrCpuRenderTimeInMs +=
-			current.CpuRenderFrameStartToHeadPoseCallbackStartInMs +
-			current.HeadPoseCallbackStartToHeadPoseCallbackStopInMs +
-			current.HeadPoseCallbackStopToInputLatchInMs +
-			current.InputLatchToGPUSubmissionInMs;
+        // Stats just with averages
+        totalAppSourceReleaseToLsrAcquireTime += current.SourceReleaseFromRenderingToAcquireForPresentationTime;
+        totalAppSourceCpuRenderTime += current.SourceCpuRenderTime;
+        stats.mLsrCpuRenderTimeInMs +=
+            current.CpuRenderFrameStartToHeadPoseCallbackStartInMs +
+            current.HeadPoseCallbackStartToHeadPoseCallbackStopInMs +
+            current.HeadPoseCallbackStopToInputLatchInMs +
+            current.InputLatchToGPUSubmissionInMs;
 
-		stats.mGPUEndToVsyncInMs += current.CopyStopToVsyncInMs;
-		stats.mVsyncToPhotonsMiddleInMs += (current.TimeUntilPhotonsMiddleMs - current.TimeUntilVsyncMs);
-		stats.mLsrPoseLatencyInMs += current.LsrPredictionLatencyMs;
-		stats.mAppPoseLatencyInMs += current.AppPredictionLatencyMs;
+        stats.mGPUEndToVsyncInMs += current.CopyStopToVsyncInMs;
+        stats.mVsyncToPhotonsMiddleInMs += (current.TimeUntilPhotonsMiddleMs - current.TimeUntilVsyncMs);
+        stats.mLsrPoseLatencyInMs += current.LsrPredictionLatencyMs;
+        stats.mAppPoseLatencyInMs += current.AppPredictionLatencyMs;
 
-		if (!current.NewSourceLatched) {
-			stats.mAppMissedFrames++;
-		}
+        if (!current.NewSourceLatched) {
+            stats.mAppMissedFrames++;
+        }
 
-		if (LateStageReprojectionMissed(current.FinalState)) {
-			stats.mLsrMissedFrames += current.MissedVsyncCount;
-			if (current.MissedVsyncCount > 1) {
-				// We always expect a count of at least 1, but if we missed multiple vsyncs during a single LSR period we need to account for that.
-				stats.mLsrConsecutiveMissedFrames += (current.MissedVsyncCount - 1);
-			}
-			if (i > 0 && LateStageReprojectionMissed((mLSRHistory[i - 1].FinalState))) {
-				stats.mLsrConsecutiveMissedFrames++;
-			}
-		}
-	}
+        if (LateStageReprojectionMissed(current.FinalState)) {
+            stats.mLsrMissedFrames += current.MissedVsyncCount;
+            if (current.MissedVsyncCount > 1) {
+                // We always expect a count of at least 1, but if we missed multiple vsyncs during a single LSR period we need to account for that.
+                stats.mLsrConsecutiveMissedFrames += (current.MissedVsyncCount - 1);
+            }
+            if (i > 0 && LateStageReprojectionMissed((mLSRHistory[i - 1].FinalState))) {
+                stats.mLsrConsecutiveMissedFrames++;
+            }
+        }
+    }
 
-	stats.mLatestAppProcessId = mLSRHistory[count - 1].SourceProcessId;
-	stats.mLsrProcessId = mLSRHistory[count - 1].ProcessId;
+    stats.mLatestAppProcessId = mLSRHistory[count - 1].SourceProcessId;
+    stats.mLsrProcessId = mLSRHistory[count - 1].ProcessId;
 
-	stats.mAppSourceCpuRenderTimeInMs = 1000 * double(totalAppSourceCpuRenderTime) / qpcFreq;
-	stats.mAppSourceReleaseToLsrAcquireInMs = 1000 * double(totalAppSourceReleaseToLsrAcquireTime) / qpcFreq;
+    stats.mAppSourceCpuRenderTimeInMs = 1000 * double(totalAppSourceCpuRenderTime) / qpcFreq;
+    stats.mAppSourceReleaseToLsrAcquireInMs = 1000 * double(totalAppSourceReleaseToLsrAcquireTime) / qpcFreq;
 
-	stats.mAppSourceReleaseToLsrAcquireInMs /= count;
-	stats.mAppSourceCpuRenderTimeInMs /= count;
-	stats.mLsrCpuRenderTimeInMs /= count;
-	stats.mGPUEndToVsyncInMs /= count;
-	stats.mVsyncToPhotonsMiddleInMs /= count;
-	stats.mLsrPoseLatencyInMs /= count;
-	stats.mAppPoseLatencyInMs /= count;
+    stats.mAppSourceReleaseToLsrAcquireInMs /= count;
+    stats.mAppSourceCpuRenderTimeInMs /= count;
+    stats.mLsrCpuRenderTimeInMs /= count;
+    stats.mGPUEndToVsyncInMs /= count;
+    stats.mVsyncToPhotonsMiddleInMs /= count;
+    stats.mLsrPoseLatencyInMs /= count;
+    stats.mAppPoseLatencyInMs /= count;
 
-	return stats;
+    return stats;
 }
 
 bool LateStageReprojectionData::IsStale(uint64_t now) const
