@@ -31,6 +31,7 @@ SOFTWARE.
 
 LateStageReprojectionEvent::LateStageReprojectionEvent(EVENT_HEADER const& hdr)
     : QpcTime(*(uint64_t*) &hdr.TimeStamp)
+    , SourceHolographicFrameId(0)
     , SourceCpuRenderTime(0)
     , SourcePresentTime(0)
     , SourcePtr(0)
@@ -77,6 +78,7 @@ PresentationSource::PresentationSource(uint64_t ptr)
     , ReleaseFromRenderingTime(0)
     , AcquireForPresentationTime(0)
     , ReleaseFromPresentationTime(0)
+    , HolographicFrameId(0)
     , HolographicFrameProcessId(0)
     , HolographicFramePresentTime(0)
     , HolographicFrameCpuRenderTime(0)
@@ -288,6 +290,7 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
                 if (frameIter != mrConsumer->mHolographicFramesByPresentId.end()) {
                     // Update the source with information about the Holographic Frame being used.
                     // This data is cached as since the source is reused, but the Holographic Frame is deleted.
+                    sourceIter->second->HolographicFrameId = frameIter->second->HolographicFrameId;
                     sourceIter->second->HolographicFrameProcessId = frameIter->second->ProcessId;
                     sourceIter->second->HolographicFrameCpuRenderTime = frameIter->second->HolographicFrameStopTime - frameIter->second->HolographicFrameStartTime;
                     sourceIter->second->HolographicFramePresentTime = frameIter->second->HolographicFrameStopTime;
@@ -298,6 +301,7 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
             }
 
             // Update the LSR event based on the latest info in the source.
+            pEvent->SourceHolographicFrameId = sourceIter->second->HolographicFrameId;
             pEvent->SourceProcessId = sourceIter->second->HolographicFrameProcessId;
             pEvent->SourceCpuRenderTime = sourceIter->second->HolographicFrameCpuRenderTime;
             pEvent->SourcePresentTime = sourceIter->second->HolographicFramePresentTime;

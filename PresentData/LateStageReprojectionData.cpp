@@ -187,7 +187,7 @@ LateStageReprojectionRuntimeStats LateStageReprojectionData::ComputeRuntimeStats
         }
     }
 
-    stats.mLatestAppProcessId = mLSRHistory[count - 1].SourceProcessId;
+    stats.mAppProcessId = mLSRHistory[count - 1].SourceProcessId;
     stats.mLsrProcessId = mLSRHistory[count - 1].ProcessId;
 
     stats.mAppSourceCpuRenderTimeInMs = 1000 * double(totalAppSourceCpuRenderTime) / qpcFreq;

@@ -30,11 +30,18 @@ SOFTWARE.
 struct LateStageReprojectionRuntimeStats {
     template <typename T>
     class RuntimeStat {
-        T mAvg = 0.0;
-        T mMax = 0.0;
-        size_t mCount = 0;
+    private:
+        T mAvg;
+        T mMax;
+        size_t mCount;
 
     public:
+        RuntimeStat()
+            : mAvg(0)
+            , mMax(0)
+            , mCount(0)
+        {}
+
         void AddValue(const T& value)
         {
             mAvg += value;
@@ -68,7 +75,7 @@ struct LateStageReprojectionRuntimeStats {
     size_t mAppMissedFrames = 0;
     size_t mLsrMissedFrames = 0;
     size_t mLsrConsecutiveMissedFrames = 0;
-    uint32_t mLatestAppProcessId = 0;
+    uint32_t mAppProcessId = 0;
     uint32_t mLsrProcessId = 0;
 };
 
@@ -80,7 +87,7 @@ struct LateStageReprojectionData {
     std::deque<LateStageReprojectionEvent> mDisplayedLSRHistory;
     std::deque<LateStageReprojectionEvent> mSourceHistory;
 
-    void PruneDeque(std::deque<LateStageReprojectionEvent> &lsrHistory, uint64_t perfFreq, uint32_t msTimeDiff, uint32_t maxHistLen);
+    void PruneDeque(std::deque<LateStageReprojectionEvent>& lsrHistory, uint64_t perfFreq, uint32_t msTimeDiff, uint32_t maxHistLen);
     void AddLateStageReprojection(LateStageReprojectionEvent& p);
     void UpdateLateStageReprojectionInfo(uint64_t now, uint64_t perfFreq);
     double ComputeHistoryTime(uint64_t qpcFreq);
@@ -92,6 +99,7 @@ struct LateStageReprojectionData {
 
     bool IsStale(uint64_t now) const;
     bool HasData() const { return !mLSRHistory.empty(); }
+
 private:
     double ComputeFps(const std::deque<LateStageReprojectionEvent>& lsrHistory, uint64_t qpcFreq);
     double ComputeHistoryTime(const std::deque<LateStageReprojectionEvent>& lsrHistory, uint64_t qpcFreq);

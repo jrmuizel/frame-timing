@@ -68,6 +68,7 @@ inline bool LateStageReprojectionMissed(LateStageReprojectionResult result)
 
 struct LateStageReprojectionEvent {
     uint64_t QpcTime;
+    uint32_t SourceHolographicFrameId;
     uint64_t SourceCpuRenderTime;
     uint64_t SourcePresentTime;
     uint64_t SourcePtr;
@@ -107,6 +108,14 @@ struct LateStageReprojectionEvent {
     LateStageReprojectionEvent(EVENT_HEADER const& hdr);
     ~LateStageReprojectionEvent();
 
+    inline float GetLsrCpuRenderMs() const
+    {
+        return CpuRenderFrameStartToHeadPoseCallbackStartInMs +
+            HeadPoseCallbackStartToHeadPoseCallbackStopInMs +
+            HeadPoseCallbackStopToInputLatchInMs +
+            InputLatchToGPUSubmissionInMs;
+    }
+
     inline float GetThreadWakeupToGpuEndMs() const
     {
         return ThreadWakeupToCpuRenderFrameStartInMs +
@@ -139,6 +148,7 @@ struct PresentationSource {
     uint64_t AcquireForPresentationTime;
     uint64_t ReleaseFromPresentationTime;
 
+    uint32_t HolographicFrameId;
     uint32_t HolographicFrameProcessId;
     uint64_t HolographicFramePresentTime;
     uint64_t HolographicFrameCpuRenderTime;

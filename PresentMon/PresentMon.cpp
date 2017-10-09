@@ -197,7 +197,12 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
             double deltaMilliseconds = 1000 * double(curr.QpcTime - prev.QpcTime) / perfFreq;
             double timeInSeconds = (double)(int64_t)(p.QpcTime - pm.mStartupQpcTime) / perfFreq;
 
-            fprintf(pm.mLsrOutputFile, "%s,%d,%d,%.6lf", proc.mModuleName.c_str(), curr.SourceProcessId, curr.ProcessId, timeInSeconds);
+            fprintf(pm.mLsrOutputFile, "%s,%d,%d", proc.mModuleName.c_str(), curr.SourceProcessId, curr.ProcessId);
+            if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+            {
+                fprintf(pm.mLsrOutputFile, ",%d", curr.SourceHolographicFrameId);
+            }
+            fprintf(pm.mLsrOutputFile, ",%.6lf", timeInSeconds);
             if (pm.mArgs->mVerbosity > Verbosity::Simple)
             {
                 double appPresentDeltaMilliseconds = 1000 * double(curr.SourcePresentTime - prev.SourcePresentTime) / perfFreq;
@@ -207,12 +212,12 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
             fprintf(pm.mLsrOutputFile, ",%.6lf,%d,%d", deltaMilliseconds, !curr.NewSourceLatched, curr.MissedVsyncCount);
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(pm.mLsrOutputFile, ",%.6lf", 1000 * double(curr.SourceReleaseFromRenderingToAcquireForPresentationTime) / perfFreq );
+                fprintf(pm.mLsrOutputFile, ",%.6lf,%.6lf", 1000 * double(curr.SourceReleaseFromRenderingToAcquireForPresentationTime) / perfFreq, 1000 * double(curr.SourceCpuRenderTime) / perfFreq);
             }
             fprintf(pm.mLsrOutputFile, ",%.6lf", curr.AppPredictionLatencyMs);
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(pm.mLsrOutputFile, ",%.6lf", curr.AppMispredictionMs);
+                fprintf(pm.mLsrOutputFile, ",%.6lf,%.6lf", curr.AppMispredictionMs, curr.GetLsrCpuRenderMs());
             }
             fprintf(pm.mLsrOutputFile, ",%.6lf,%.6lf,%.6lf,%.6lf,%.6lf",
                 curr.LsrPredictionLatencyMs,
@@ -401,7 +406,12 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
             // Open output file and print CSV header
             fopen_s(&pm.mLsrOutputFile, pm.mLsrOutputFilePath, "w");
             if (pm.mLsrOutputFile) {
-                fprintf(pm.mLsrOutputFile, "Application,ProcessID,DWMProcessID,TimeInSeconds");
+                fprintf(pm.mLsrOutputFile, "Application,ProcessID,DWMProcessID");
+                if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+                {
+                    fprintf(pm.mLsrOutputFile, ",HolographicFrameID");
+                }
+                fprintf(pm.mLsrOutputFile, ",TimeInSeconds");
                 if (pm.mArgs->mVerbosity > Verbosity::Simple)
                 {
                     fprintf(pm.mLsrOutputFile, ",MsBetweenAppPresents,MsAppPresentToLsr");
@@ -409,12 +419,12 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
                 fprintf(pm.mLsrOutputFile, ",MsBetweenLsrs,MsAppMissed,LsrMissed");
                 if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
                 {
-                    fprintf(pm.mLsrOutputFile, ",MsSourceReleaseFromRenderingToLsrAcquire");
+                    fprintf(pm.mLsrOutputFile, ",MsSourceReleaseFromRenderingToLsrAcquire,MsAppCPURender");
                 }
                 fprintf(pm.mLsrOutputFile, ",MsAppPoseLatency");
                 if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
                 {
-                    fprintf(pm.mLsrOutputFile, ",MsAppMisprediction");
+                    fprintf(pm.mLsrOutputFile, ",MsAppMisprediction,MsLsrCPURender");
                 }
                 fprintf(pm.mLsrOutputFile, ",MsLsrPoseLatency,MsActualLsrPoseLatency,MsTimeUntilVsync,MsLsrThreadWakeupToGpuEnd,MsLsrThreadWakeupError");
                 if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
@@ -467,10 +477,10 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
                 const size_t historySize = lsrData.ComputeHistorySize();
 
                 if (pm.mArgs->mVerbosity > Verbosity::Simple) {
-                    auto& appProcess = pm.mProcessMap[runtimeStats.mLatestAppProcessId];
+                    auto& appProcess = pm.mProcessMap[runtimeStats.mAppProcessId];
                     _snprintf_s(str, _TRUNCATE, "\tApp - %s[%d]:\n\t\t%.2lf ms/frame (%.1lf fps, %.2lf ms CPU",
                          appProcess.mModuleName.c_str(),
-                        runtimeStats.mLatestAppProcessId,
+                        runtimeStats.mAppProcessId,
                         1000.0 / fps,
                         fps,
                         runtimeStats.mAppSourceCpuRenderTimeInMs);
