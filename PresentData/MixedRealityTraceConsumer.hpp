@@ -103,7 +103,6 @@ struct LateStageReprojectionEvent {
 
     // Additional transient state
     bool Completed;
-    bool UserNoticedHitch;
 
     LateStageReprojectionEvent(EVENT_HEADER const& hdr);
     ~LateStageReprojectionEvent();

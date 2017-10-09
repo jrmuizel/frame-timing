@@ -59,7 +59,6 @@ LateStageReprojectionEvent::LateStageReprojectionEvent(EVENT_HEADER const& hdr)
     , FinalState(LateStageReprojectionResult::Unknown)
     , MissedVsyncCount(0)
     , Completed(false)
-    , UserNoticedHitch(false)
 {
 }
 
