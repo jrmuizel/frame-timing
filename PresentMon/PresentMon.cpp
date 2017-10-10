@@ -169,16 +169,17 @@ const char* FinalStateToDroppedString(PresentResult res)
 
 void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p, uint64_t now, uint64_t perfFreq)
 {
-    auto& proc = pm.mProcessMap[p.SourceProcessId];
+    const uint32_t appProcessId = p.GetAppProcessId();
+    auto& proc = pm.mProcessMap[appProcessId];
     if (!proc.mLastRefreshTicks && !pm.mArgs->mEtlFileName) {
-        UpdateProcessInfo_Realtime(proc, now, p.SourceProcessId);
+        UpdateProcessInfo_Realtime(proc, now, appProcessId);
     }
 
     if (pm.mArgs->mTargetProcessName != nullptr && _stricmp(pm.mArgs->mTargetProcessName, proc.mModuleName.c_str()) != 0) {
         // process name does not match
         return;
     }
-    if (pm.mArgs->mTargetPid && p.SourceProcessId != pm.mArgs->mTargetPid) {
+    if (pm.mArgs->mTargetPid && appProcessId != pm.mArgs->mTargetPid) {
         return;
     }
 
@@ -194,36 +195,38 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
         if (len > 1) {
             auto& curr = pm.mLateStageReprojectionData.mLSRHistory[len - 1];
             auto& prev = pm.mLateStageReprojectionData.mLSRHistory[len - 2];
-            double deltaMilliseconds = 1000 * double(curr.QpcTime - prev.QpcTime) / perfFreq;
-            double timeInSeconds = (double)(int64_t)(p.QpcTime - pm.mStartupQpcTime) / perfFreq;
+            const double deltaMilliseconds = 1000 * double(curr.QpcTime - prev.QpcTime) / perfFreq;
+            const double timeInSeconds = (double)(int64_t)(p.QpcTime - pm.mStartupQpcTime) / perfFreq;
 
-            fprintf(pm.mLsrOutputFile, "%s,%d,%d", proc.mModuleName.c_str(), curr.SourceProcessId, curr.ProcessId);
+            fprintf(pm.mLsrOutputFile, "%s,%d,%d", proc.mModuleName.c_str(), curr.GetAppProcessId(), curr.ProcessId);
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(pm.mLsrOutputFile, ",%d", curr.SourceHolographicFrameId);
+                fprintf(pm.mLsrOutputFile, ",%d", curr.GetAppFrameId());
             }
             fprintf(pm.mLsrOutputFile, ",%.6lf", timeInSeconds);
             if (pm.mArgs->mVerbosity > Verbosity::Simple)
             {
-                double appPresentDeltaMilliseconds = 1000 * double(curr.SourcePresentTime - prev.SourcePresentTime) / perfFreq;
-                double appPresentToLsrMilliseconds = 1000 * double(curr.QpcTime - curr.SourcePresentTime) / perfFreq;
+                const uint64_t currAppPresentTime = curr.GetAppPresentTime();
+                const uint64_t prevAppPresentTime = prev.GetAppPresentTime();
+                const double appPresentDeltaMilliseconds = 1000 * double(currAppPresentTime - prevAppPresentTime) / perfFreq;
+                const double appPresentToLsrMilliseconds = 1000 * double(curr.QpcTime - currAppPresentTime) / perfFreq;
                 fprintf(pm.mLsrOutputFile, ",%.6lf,%.6lf", appPresentDeltaMilliseconds, appPresentToLsrMilliseconds);
             }
             fprintf(pm.mLsrOutputFile, ",%.6lf,%d,%d", deltaMilliseconds, !curr.NewSourceLatched, curr.MissedVsyncCount);
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(pm.mLsrOutputFile, ",%.6lf,%.6lf", 1000 * double(curr.SourceReleaseFromRenderingToAcquireForPresentationTime) / perfFreq, 1000 * double(curr.SourceCpuRenderTime) / perfFreq);
+                fprintf(pm.mLsrOutputFile, ",%.6lf,%.6lf", 1000 * double(curr.Source.GetReleaseFromRenderingToAcquireForPresentationTime()) / perfFreq, 1000 * double(curr.GetAppCpuRenderFrameTime()) / perfFreq);
             }
             fprintf(pm.mLsrOutputFile, ",%.6lf", curr.AppPredictionLatencyMs);
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(pm.mLsrOutputFile, ",%.6lf,%.6lf", curr.AppMispredictionMs, curr.GetLsrCpuRenderMs());
+                fprintf(pm.mLsrOutputFile, ",%.6lf,%.6lf", curr.AppMispredictionMs, curr.GetLsrCpuRenderFrameMs());
             }
             fprintf(pm.mLsrOutputFile, ",%.6lf,%.6lf,%.6lf,%.6lf,%.6lf",
                 curr.LsrPredictionLatencyMs,
-                curr.GetActualLsrLatencyMs(),
+                curr.GetLsrMotionToPhotonLatencyMs(),
                 curr.TimeUntilVsyncMs,
-                curr.GetThreadWakeupToGpuEndMs(),
+                curr.GetLsrThreadWakeupToGpuEndMs(),
                 curr.WakeupErrorMs);
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
@@ -232,7 +235,7 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
                     curr.CpuRenderFrameStartToHeadPoseCallbackStartInMs,
                     curr.HeadPoseCallbackStartToHeadPoseCallbackStopInMs,
                     curr.HeadPoseCallbackStopToInputLatchInMs,
-                    curr.InputLatchToGPUSubmissionInMs);
+                    curr.InputLatchToGpuSubmissionInMs);
             }
             fprintf(pm.mLsrOutputFile, ",%.6lf,%.6lf,%.6lf,%.6lf,%.6lf",
                 curr.GpuSubmissionToGpuStartInMs,
@@ -242,7 +245,7 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
                 curr.CopyStopToVsyncInMs);
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(pm.mLsrOutputFile, ",%d,%d", curr.SuspendedThreadBeforeLSR, curr.EarlyLSRDueToInvalidFence);
+                fprintf(pm.mLsrOutputFile, ",%d,%d", curr.SuspendedThreadBeforeLsr, curr.EarlyLsrDueToInvalidFence);
             }
             fprintf(pm.mLsrOutputFile, "\n");
         }
@@ -406,7 +409,7 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
             // Open output file and print CSV header
             fopen_s(&pm.mLsrOutputFile, pm.mLsrOutputFilePath, "w");
             if (pm.mLsrOutputFile) {
-                fprintf(pm.mLsrOutputFile, "Application,ProcessID,DWMProcessID");
+                fprintf(pm.mLsrOutputFile, "Application,ProcessID,DwmProcessID");
                 if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
                 {
                     fprintf(pm.mLsrOutputFile, ",HolographicFrameID");
@@ -419,22 +422,22 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
                 fprintf(pm.mLsrOutputFile, ",MsBetweenLsrs,MsAppMissed,LsrMissed");
                 if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
                 {
-                    fprintf(pm.mLsrOutputFile, ",MsSourceReleaseFromRenderingToLsrAcquire,MsAppCPURender");
+                    fprintf(pm.mLsrOutputFile, ",MsSourceReleaseFromRenderingToLsrAcquire,MsAppCpuRenderFrame");
                 }
                 fprintf(pm.mLsrOutputFile, ",MsAppPoseLatency");
                 if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
                 {
-                    fprintf(pm.mLsrOutputFile, ",MsAppMisprediction,MsLsrCPURender");
+                    fprintf(pm.mLsrOutputFile, ",MsAppMisprediction,MsLsrCpuRenderFrame");
                 }
                 fprintf(pm.mLsrOutputFile, ",MsLsrPoseLatency,MsActualLsrPoseLatency,MsTimeUntilVsync,MsLsrThreadWakeupToGpuEnd,MsLsrThreadWakeupError");
                 if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
                 {
-                    fprintf(pm.mLsrOutputFile, ",MsLsrThreadWakeupToCpuRenderFrameStart,MsCpuRenderFrameStartToHeadPoseCallbackStart,MsGetHeadPose,MsHeadPoseCallbackStopToInputLatch,MsInputLatchToGPUSubmission");
+                    fprintf(pm.mLsrOutputFile, ",MsLsrThreadWakeupToCpuRenderFrameStart,MsCpuRenderFrameStartToHeadPoseCallbackStart,MsGetHeadPose,MsHeadPoseCallbackStopToInputLatch,MsInputLatchToGpuSubmission");
                 }
                 fprintf(pm.mLsrOutputFile, ",MsLsrPreemption,MsLsrExecution,MsCopyPreemption,MsCopyExecution,MsGpuEndToVsync");
                 if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
                 {
-                    fprintf(pm.mLsrOutputFile, ",SuspendedThreadBeforeLSR,EarlyLSRDueToInvalidFence");
+                    fprintf(pm.mLsrOutputFile, ",SuspendedThreadBeforeLsr,EarlyLsrDueToInvalidFence");
                 }
                 fprintf(pm.mLsrOutputFile, "\n");
             }
@@ -530,10 +533,10 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
                 display += str;
 
                 _snprintf_s(str, _TRUNCATE, "\t\tReprojection: %.2lf ms gpu preemption (%.2lf ms max) | %.2lf ms gpu execution (%.2lf ms max)\n",
-                    runtimeStats.mGPUPreemptionInMs.GetAverage(),
-                    runtimeStats.mGPUPreemptionInMs.GetMax(),
-                    runtimeStats.mGPUExecutionInMs.GetAverage(),
-                    runtimeStats.mGPUExecutionInMs.GetMax());
+                    runtimeStats.mGpuPreemptionInMs.GetAverage(),
+                    runtimeStats.mGpuPreemptionInMs.GetMax(),
+                    runtimeStats.mGpuExecutionInMs.GetAverage(),
+                    runtimeStats.mGpuExecutionInMs.GetMax());
                 display += str;
 
                 if (runtimeStats.mCopyExecutionInMs.GetAverage() > 0.0) {
@@ -546,7 +549,7 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
                 }
 
                 _snprintf_s(str, _TRUNCATE, "\t\tGpu-End to V-Sync: %.2lf ms\n",
-                    runtimeStats.mGPUEndToVsyncInMs);
+                    runtimeStats.mGpuEndToVsyncInMs);
                 display += str;
             }
 
@@ -558,7 +561,7 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
 
                 _snprintf_s(str, _TRUNCATE, "\t\tCompositor Motion-to-Mid-Photon: %.2lf ms (%.2lf ms to V-Sync)\n",
                     runtimeStats.mLsrPoseLatencyInMs,
-                    runtimeStats.mLSRInputLatchToVsyncInMs.GetAverage());
+                    runtimeStats.mLsrInputLatchToVsyncInMs.GetAverage());
                 display += str;
 
                 _snprintf_s(str, _TRUNCATE, "\t\tV-Sync to Mid-Photon: %.2lf ms\n",

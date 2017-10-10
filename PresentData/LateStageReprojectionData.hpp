@@ -60,12 +60,12 @@ struct LateStageReprojectionRuntimeStats {
         }
     };
 
-    RuntimeStat<double> mGPUPreemptionInMs;
-    RuntimeStat<double> mGPUExecutionInMs;
+    RuntimeStat<double> mGpuPreemptionInMs;
+    RuntimeStat<double> mGpuExecutionInMs;
     RuntimeStat<double> mCopyPreemptionInMs;
     RuntimeStat<double> mCopyExecutionInMs;
-    RuntimeStat<double> mLSRInputLatchToVsyncInMs;
-    double mGPUEndToVsyncInMs = 0.0;
+    RuntimeStat<double> mLsrInputLatchToVsyncInMs;
+    double mGpuEndToVsyncInMs = 0.0;
     double mVsyncToPhotonsMiddleInMs = 0.0;
     double mLsrPoseLatencyInMs = 0.0;
     double mAppPoseLatencyInMs = 0.0;

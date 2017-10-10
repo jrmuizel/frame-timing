@@ -39,14 +39,74 @@ struct __declspec(uuid("{19d9d739-da0a-41a0-b97f-24ed27abc9fb}")) DHD_PROVIDER_G
 static const auto SPECTRUMCONTINUOUS_PROVIDER_GUID = __uuidof(SPECTRUMCONTINUOUS_PROVIDER_GUID_HOLDER);
 static const auto DHD_PROVIDER_GUID = __uuidof(DHD_PROVIDER_GUID_HOLDER);
 
-enum class LateStageReprojectionResult
-{
-    Unknown, Presented, Missed, MissedMultiple, Error
-};
-
 enum class HolographicFrameResult
 {
     Unknown, Presented, DuplicateFrameId, Error
+};
+
+struct HolographicFrame {
+    uint32_t PresentId;	// PresentId: Unique globally
+    uint32_t FrameId;	// HolographicFrameId: Unique per-process
+
+    uint64_t StartTime;
+    uint64_t StopTime;
+
+    uint32_t ProcessId;
+    bool Completed;
+    HolographicFrameResult FinalState;
+
+    HolographicFrame(EVENT_HEADER const& hdr);
+    ~HolographicFrame();
+
+    inline uint64_t GetCpuRenderFrameTime() const
+    {
+        if (StartTime > 0 && StopTime > 0)
+        {
+            assert(StopTime >= StartTime);
+            return StopTime - StartTime;
+        }
+        else
+        {
+            return 0;
+        }
+    }
+
+    inline uint64_t GetPresentTime() const
+    {
+        return StopTime;
+    }
+};
+
+struct PresentationSource {
+    uint64_t Ptr;
+    uint64_t AcquireForRenderingTime;
+    uint64_t ReleaseFromRenderingTime;
+    uint64_t AcquireForPresentationTime;
+    uint64_t ReleaseFromPresentationTime;
+
+    std::shared_ptr<HolographicFrame> pHolographicFrame;
+
+    PresentationSource();
+    PresentationSource(uint64_t ptr);
+    ~PresentationSource();
+
+    inline uint64_t GetReleaseFromRenderingToAcquireForPresentationTime() const
+    {
+        if (ReleaseFromRenderingTime > 0 && AcquireForPresentationTime > 0)
+        {
+            assert(AcquireForPresentationTime >= ReleaseFromRenderingTime);
+            return AcquireForPresentationTime - ReleaseFromRenderingTime;
+        }
+        else
+        {
+            return 0;
+        }
+    }
+};
+
+enum class LateStageReprojectionResult
+{
+    Unknown, Presented, Missed, MissedMultiple, Error
 };
 
 inline bool LateStageReprojectionPresented(LateStageReprojectionResult result)
@@ -68,19 +128,15 @@ inline bool LateStageReprojectionMissed(LateStageReprojectionResult result)
 
 struct LateStageReprojectionEvent {
     uint64_t QpcTime;
-    uint32_t SourceHolographicFrameId;
-    uint64_t SourceCpuRenderTime;
-    uint64_t SourcePresentTime;
-    uint64_t SourcePtr;
-    
+
+    PresentationSource Source;  // A copy of the PresentationSource used when the input was latched.
     bool NewSourceLatched;
-    uint64_t SourceReleaseFromRenderingToAcquireForPresentationTime;
 
     float ThreadWakeupToCpuRenderFrameStartInMs;
     float CpuRenderFrameStartToHeadPoseCallbackStartInMs;
     float HeadPoseCallbackStartToHeadPoseCallbackStopInMs;
     float HeadPoseCallbackStopToInputLatchInMs;
-    float InputLatchToGPUSubmissionInMs;
+    float InputLatchToGpuSubmissionInMs;
     float GpuSubmissionToGpuStartInMs;
     float GpuStartToGpuStopInMs;
     float GpuStopToCopyStartInMs;
@@ -94,11 +150,10 @@ struct LateStageReprojectionEvent {
     float TimeUntilVsyncMs;
     float TimeUntilPhotonsMiddleMs;
 
-    bool EarlyLSRDueToInvalidFence;
-    bool SuspendedThreadBeforeLSR;
+    bool EarlyLsrDueToInvalidFence;
+    bool SuspendedThreadBeforeLsr;
 
     uint32_t ProcessId;
-    uint32_t SourceProcessId;
     LateStageReprojectionResult FinalState;
     uint32_t MissedVsyncCount;
 
@@ -108,30 +163,50 @@ struct LateStageReprojectionEvent {
     LateStageReprojectionEvent(EVENT_HEADER const& hdr);
     ~LateStageReprojectionEvent();
 
-    inline float GetLsrCpuRenderMs() const
+    inline uint32_t GetAppFrameId() const
+    {
+        return Source.pHolographicFrame ? Source.pHolographicFrame->FrameId : 0;
+    }
+
+    inline uint32_t GetAppProcessId() const
+    {
+        return Source.pHolographicFrame ? Source.pHolographicFrame->ProcessId : 0;
+    }
+
+    inline uint64_t GetAppPresentTime() const
+    {
+        return Source.pHolographicFrame ? Source.pHolographicFrame->GetPresentTime() : 0;
+    }
+
+    inline uint64_t GetAppCpuRenderFrameTime() const
+    {
+        return Source.pHolographicFrame ? Source.pHolographicFrame->GetCpuRenderFrameTime() : 0;
+    }
+
+    inline float GetLsrCpuRenderFrameMs() const
     {
         return CpuRenderFrameStartToHeadPoseCallbackStartInMs +
             HeadPoseCallbackStartToHeadPoseCallbackStopInMs +
             HeadPoseCallbackStopToInputLatchInMs +
-            InputLatchToGPUSubmissionInMs;
+            InputLatchToGpuSubmissionInMs;
     }
 
-    inline float GetThreadWakeupToGpuEndMs() const
+    inline float GetLsrThreadWakeupToGpuEndMs() const
     {
         return ThreadWakeupToCpuRenderFrameStartInMs +
             CpuRenderFrameStartToHeadPoseCallbackStartInMs +
             HeadPoseCallbackStartToHeadPoseCallbackStopInMs +
             HeadPoseCallbackStopToInputLatchInMs +
-            InputLatchToGPUSubmissionInMs +
+            InputLatchToGpuSubmissionInMs +
             GpuSubmissionToGpuStartInMs +
             GpuStartToGpuStopInMs +
             GpuStopToCopyStartInMs +
             CopyStartToCopyStopInMs;
     }
     
-    inline float GetActualLsrLatencyMs() const
+    inline float GetLsrMotionToPhotonLatencyMs() const
     {
-        return InputLatchToGPUSubmissionInMs +
+        return InputLatchToGpuSubmissionInMs +
             GpuSubmissionToGpuStartInMs +
             GpuStartToGpuStopInMs +
             GpuStopToCopyStartInMs +
@@ -139,37 +214,6 @@ struct LateStageReprojectionEvent {
             CopyStopToVsyncInMs +
             (TimeUntilPhotonsMiddleMs - TimeUntilVsyncMs);
     }
-};
-
-struct PresentationSource {
-    uint64_t Ptr;
-    uint64_t AcquireForRenderingTime;
-    uint64_t ReleaseFromRenderingTime;
-    uint64_t AcquireForPresentationTime;
-    uint64_t ReleaseFromPresentationTime;
-
-    uint32_t HolographicFrameId;
-    uint32_t HolographicFrameProcessId;
-    uint64_t HolographicFramePresentTime;
-    uint64_t HolographicFrameCpuRenderTime;
-
-    PresentationSource(uint64_t ptr);
-    ~PresentationSource();
-};
-
-struct HolographicFrame {
-    uint32_t PresentId;	// Unique globally
-    uint32_t HolographicFrameId;	// Unique per-process
-
-    uint64_t HolographicFrameStartTime;
-    uint64_t HolographicFrameStopTime;
-
-    uint32_t ProcessId;
-    bool Completed;
-    HolographicFrameResult FinalState;
-
-    HolographicFrame(EVENT_HEADER const& hdr);
-    ~HolographicFrame();
 };
 
 struct MRTraceConsumer
@@ -213,7 +257,7 @@ struct MRTraceConsumer
 
     decltype(mPresentationSourceByPtr.begin()) FindOrCreatePresentationSource(uint64_t presentationSourcePtr);
     
-    void HolographicFrameStart(HolographicFrame &frame);
+    void HolographicFrameStart(std::shared_ptr<HolographicFrame> p);
     void HolographicFrameStop(std::shared_ptr<HolographicFrame> p);
 };
 
