@@ -44,12 +44,15 @@ enum class HolographicFrameResult
     Unknown, Presented, DuplicateFrameId, Error
 };
 
+// A HolographicFrame is created by the Windows Mixed Reality App or Shell.
+// A HolographicFrame's lifetime is short (span of a couple frames), just long enough
+// to capture data about how the App or Shell used that frame. Data comes from the Spectrum Continuous provider.
 struct HolographicFrame {
-    uint32_t PresentId;	// PresentId: Unique globally
-    uint32_t FrameId;	// HolographicFrameId: Unique per-process
+    uint32_t PresentId; // PresentId: Unique globally
+    uint32_t FrameId;   // HolographicFrameId: Unique per-process
 
-    uint64_t StartTime;
-    uint64_t StopTime;
+    uint64_t StartTime; // Qpc when CreateNextFrame() is called.
+    uint64_t StopTime;  // Qpc when PresentWithCurrentPrediction() is called.
 
     uint32_t ProcessId;
     bool Completed;
@@ -79,10 +82,10 @@ struct HolographicFrame {
 
 struct PresentationSource {
     uint64_t Ptr;
-    uint64_t AcquireForRenderingTime;
-    uint64_t ReleaseFromRenderingTime;
-    uint64_t AcquireForPresentationTime;
-    uint64_t ReleaseFromPresentationTime;
+    uint64_t AcquireForRenderingTime;   // Qpc time the Presentation Source was acquired for rendering by DWM.
+    uint64_t ReleaseFromRenderingTime;  // Qpc time the Presentation Source was released from rendering by DWM and Gpu work is submitted (Note LSR will only pick it up if the Gpu work is complete).
+    uint64_t AcquireForPresentationTime;    // Qpc time the Presentation Source was acquired for LSR (the Gpu work is required to be complete).
+    uint64_t ReleaseFromPresentationTime;   // Qpc time the Presentation Source was released from LSR.
 
     std::shared_ptr<HolographicFrame> pHolographicFrame;
 
@@ -126,6 +129,9 @@ inline bool LateStageReprojectionMissed(LateStageReprojectionResult result)
     return false;
 }
 
+// A LateStageReprojectionEvent is used to track a single instance of LSR.
+// A LateStageReprojectionEvent's lifetime is short (span of a couple frames), just long enough to capture data about that LSR.
+// Data comes from the DHD provider.
 struct LateStageReprojectionEvent {
     uint64_t QpcTime;
 
@@ -231,7 +237,13 @@ struct MRTraceConsumer
     // These will be handed off to the consumer thread.
     std::vector<std::shared_ptr<LateStageReprojectionEvent>> mCompletedLSRs;
 
-    // Presentation sources in the process of being rendered by the app.
+    // A high-level description of the sequence of events:
+    // HolographicFrameStart (by HolographicFrameId, for App's CPU frame render start time) -> HolographicFrameStop (by HolographicFrameId, for App's CPU frame render end/Present time) -> 
+    //  AcquireForRendering (by PresentationSource, for DWM's CPU frame compose start time) -> ReleaseFromRendering (by PresentationSource, for DWM's CPU frame compose end/GPU Submit time) ->
+    //  BeginLsrProcessing (by PresentId and PresentationSource, for LSR's start time) -> AcquireForPresentation (by PresentationSource, for LSR's CPU frame render start time) -> HolographicFrameMetadata_GetNewPoseForReprojection (by HolographicFrameId and PresentId, for linking HolographicFrameId to PresentId) ->
+    //  LatchedInput (by PresentId, for LSR's pose latency) -> ReleaseFromPresentation (by PresentationSource, for LSR's CPU frame end/GPU Submit time) -> OnTimePresentationTiming/LatePresentationTiming (for detailed LSR timing information)
+
+    // Presentation Sources being used by the app.
     std::map<uint64_t, std::shared_ptr<PresentationSource>> mPresentationSourceByPtr;
 
     // Stores each Holographic Frame started by it's HolographicFrameId.
