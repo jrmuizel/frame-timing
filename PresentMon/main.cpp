@@ -286,11 +286,6 @@ int main(int argc, char** argv)
 
     int ret = 0;
 
-    // Adjust process privileges for real-time
-    if (!args.mEtlFileName && !AdjustPrivileges()) {
-        fprintf(stderr, "warning: some processes may not show up because we don't have sufficient privileges.\n");
-    }
-
     // Set console title to command line arguments
     SetConsoleTitle(argc, argv);
 
