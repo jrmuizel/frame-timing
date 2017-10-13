@@ -354,7 +354,7 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
                 char ext[_MAX_EXT] = {};
                 _splitpath_s(args.mOutputFileName, drive, dir, name, ext);
                 _snprintf_s(pm.mOutputFilePath, _TRUNCATE, "%s%s%s-%d%s", drive, dir, name, args.mRecordingCount, ext);
-                _snprintf_s(pm.mLsrOutputFilePath, _TRUNCATE, "%s%s%s-%d%s_LSR", drive, dir, name, args.mRecordingCount, ext);
+                _snprintf_s(pm.mLsrOutputFilePath, _TRUNCATE, "%s%s%s-%d%s_WMR", drive, dir, name, args.mRecordingCount, ext);
             }
         } else {
             struct tm tm;
@@ -365,7 +365,7 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
                 _snprintf_s(pm.mOutputFilePath, _TRUNCATE, "PresentMon-%4d-%02d-%02dT%02d%02d%02d.csv", // ISO 8601
                     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
                     tm.tm_hour, tm.tm_min, tm.tm_sec);
-                _snprintf_s(pm.mLsrOutputFilePath, _TRUNCATE, "PresentMon-%4d-%02d-%02dT%02d%02d%02d_LSR.csv", // ISO 8601
+                _snprintf_s(pm.mLsrOutputFilePath, _TRUNCATE, "PresentMon-%4d-%02d-%02dT%02d%02d%02d_WMR.csv", // ISO 8601
                     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
                     tm.tm_hour, tm.tm_min, tm.tm_sec);
             } else {
@@ -373,7 +373,7 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
                     args.mTargetProcessName,
                     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
                     tm.tm_hour, tm.tm_min, tm.tm_sec);
-                _snprintf_s(pm.mLsrOutputFilePath, _TRUNCATE, "PresentMon-%s-%4d-%02d-%02dT%02d%02d%02d_LSR.csv", // ISO 8601
+                _snprintf_s(pm.mLsrOutputFilePath, _TRUNCATE, "PresentMon-%s-%4d-%02d-%02dT%02d%02d%02d_WMR.csv", // ISO 8601
                     args.mTargetProcessName,
                     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
                     tm.tm_hour, tm.tm_min, tm.tm_sec);
@@ -419,7 +419,7 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
                 {
                     fprintf(pm.mLsrOutputFile, ",MsBetweenAppPresents,MsAppPresentToLsr");
                 }
-                fprintf(pm.mLsrOutputFile, ",MsBetweenLsrs,MsAppMissed,LsrMissed");
+                fprintf(pm.mLsrOutputFile, ",MsBetweenLsrs,AppMissed,LsrMissed");
                 if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
                 {
                     fprintf(pm.mLsrOutputFile, ",MsSourceReleaseFromRenderingToLsrAcquire,MsAppCpuRenderFrame");
