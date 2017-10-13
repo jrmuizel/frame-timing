@@ -279,6 +279,11 @@ int main(int argc, char** argv)
         return 2;
     }
 
+    // Adjust process privileges for real-time
+    if (!args.mEtlFileName && !AdjustPrivileges()) {
+        fprintf(stderr, "warning: some processes may not show up because we don't have sufficient privileges.\n");
+    }
+
     int ret = 0;
 
     // Adjust process privileges for real-time
