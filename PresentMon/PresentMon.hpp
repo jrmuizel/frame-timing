@@ -31,6 +31,8 @@ SOFTWARE.
 
 #include "CommandLine.hpp"
 #include "..\PresentData\SwapChainData.hpp"
+#include "..\PresentData\LateStageReprojectionData.hpp"
+#include "..\PresentData\MixedRealityTraceConsumer.hpp"
 
 struct ProcessInfo {
     uint64_t mLastRefreshTicks = 0; // GetTickCount64
@@ -44,15 +46,18 @@ struct PresentMonData {
     const CommandLineArgs *mArgs = nullptr;
     uint64_t mStartupQpcTime;
     char mOutputFilePath[MAX_PATH];
+    char mLsrOutputFilePath[MAX_PATH];
     FILE *mOutputFile = nullptr;
+    FILE *mLsrOutputFile = nullptr;
     std::map<uint32_t, ProcessInfo> mProcessMap;
+    LateStageReprojectionData mLateStageReprojectionData;
     uint32_t mTerminationProcessCount = 0;
 };
 
 void EtwConsumingThread(const CommandLineArgs& args);
 
 void PresentMon_Init(const CommandLineArgs& args, PresentMonData& data);
-void PresentMon_Update(PresentMonData& data, std::vector<std::shared_ptr<PresentEvent>>& presents, uint64_t perfFreq);
+void PresentMon_Update(PresentMonData& data, std::vector<std::shared_ptr<PresentEvent>>& presents, std::vector<std::shared_ptr<LateStageReprojectionEvent>>& lsrs, uint64_t perfFreq);
 void PresentMon_Shutdown(PresentMonData& data, bool log_corrupted);
 
 bool EtwThreadsShouldQuit();
