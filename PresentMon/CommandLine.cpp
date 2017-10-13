@@ -248,7 +248,7 @@ void PrintHelp()
         "    -verbose                   Adds additional data to output not relevant to normal usage.\n"
         "    -dont_restart_as_admin     Don't try to elevate privilege.\n"
         "    -no_top                    Don't display active swap chains in the console window.\n"
-        "    -include_mixed_reality     Include Windows Mixed Reality data. If enabled, writes csv output to a separate file (with \"_WMR\" suffix).\n",
+        "    -include_mixed_reality     [Beta] Include Windows Mixed Reality data. If enabled, writes csv output to a separate file (with \"_WMR\" suffix).\n",
         PRESENT_MON_VERSION
         );
 }

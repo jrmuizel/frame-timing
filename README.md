@@ -62,7 +62,7 @@ Control and filtering options:
     -verbose                   Adds additional data to output not relevant to normal usage.
     -dont_restart_as_admin     Don't try to elevate privilege.
     -no_top                    Don't display active swap chains in the console window.
-    -include_mixed_reality     Include Windows Mixed Reality data. If enabled, writes csv output to a separate file (with "_WMR" suffix).
+    -include_mixed_reality     [Beta] Include Windows Mixed Reality data. If enabled, writes csv output to a separate file (with "_WMR" suffix).
 ```
 
 ## Comma-separated value (CSV) file output
