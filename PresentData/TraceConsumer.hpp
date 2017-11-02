@@ -28,6 +28,7 @@ SOFTWARE.
 #include <tdh.h>
 
 void PrintEventInformation(FILE* fp, EVENT_RECORD* pEventRecord);
+std::wstring GetEventTaskName(EVENT_RECORD* pEventRecord);
 
 template <typename T>
 bool GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name, T* out)
