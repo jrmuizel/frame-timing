@@ -295,10 +295,10 @@ bool TraceSession::CheckLostReports(uint32_t* eventsLost, uint32_t* buffersLost)
     }
 
     auto status = ControlTraceW(sessionHandle_, nullptr, &properties_, EVENT_TRACE_CONTROL_QUERY);
-    if (status == ERROR_MORE_DATA) {
-        *eventsLost = 0;
-        *buffersLost = 0;
-        return true;
+    if (status == ERROR_MORE_DATA) {    // The buffer &properties_ is too small to hold all the information
+        *eventsLost = 0;                // for the session.  If you don't need the session's property information
+        *buffersLost = 0;               // you can ignore this error.
+        return false;
     }
 
     if (status != ERROR_SUCCESS) {

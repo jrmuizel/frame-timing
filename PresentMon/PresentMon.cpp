@@ -96,6 +96,114 @@ static void SetConsoleText(const char *text)
     SetConsoleCursorPosition(hConsole, origin);
 }
 
+//  mOutputFilename mTargetProcessName  mHotkeySupport  FileName
+//  nullptr         nullptr             any             PresentMon-TIME.csv
+//  nullptr         PROCESSNAME         any             PresentMon-PROCESSNAME-TIME.csv
+//  PATH.EXT        any                 false           PATH.EXT
+//  PATH.EXT        any                 true            PATH-INDEX.EXT
+//
+// If wmr, then append _WMR to name.
+static void GenerateOutputFilename(const PresentMonData& pm, bool wmr, char* path)
+{
+    char ext[_MAX_EXT];
+
+    if (pm.mArgs->mOutputFileName) {
+        char drive[_MAX_DRIVE];
+        char dir[_MAX_DIR];
+        char name[_MAX_FNAME];
+        _splitpath_s(pm.mArgs->mOutputFileName, drive, dir, name, ext);
+
+        if (pm.mArgs->mHotkeySupport) {
+            _snprintf_s(path, MAX_PATH, _TRUNCATE, "%s%s%s-%d", drive, dir, name, pm.mArgs->mRecordingCount);
+        } else {
+            _snprintf_s(path, MAX_PATH, _TRUNCATE, "%s%s%s", drive, dir, name);
+        }
+    } else {
+        strcpy_s(ext, ".csv");
+
+        if (pm.mArgs->mTargetProcessName == nullptr) {
+            _snprintf_s(path, MAX_PATH, _TRUNCATE, "PresentMon-%s", pm.mCaptureTimeStr);
+        } else {
+            _snprintf_s(path, MAX_PATH, _TRUNCATE, "PresentMon-%s-%s", pm.mArgs->mTargetProcessName, pm.mCaptureTimeStr);
+        }
+    }
+
+    if (wmr) {
+        strcat_s(path, MAX_PATH, "_WMR");
+    }
+
+    strcat_s(path, MAX_PATH, ext);
+}
+
+static void CreateOutputFiles(PresentMonData& pm)
+{
+    // Open output file and print CSV header
+    char outputFilePath[MAX_PATH];
+    GenerateOutputFilename(pm, false, outputFilePath);
+    fopen_s(&pm.mOutputFile, outputFilePath, "w");
+    if (pm.mOutputFile) {
+        fprintf(pm.mOutputFile, "Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags");
+        if (pm.mArgs->mVerbosity > Verbosity::Simple)
+        {
+            fprintf(pm.mOutputFile, ",AllowsTearing,PresentMode");
+        }
+        if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+        {
+            fprintf(pm.mOutputFile, ",WasBatched,DwmNotified");
+        }
+        fprintf(pm.mOutputFile, ",Dropped,TimeInSeconds,MsBetweenPresents");
+        if (pm.mArgs->mVerbosity > Verbosity::Simple)
+        {
+            fprintf(pm.mOutputFile, ",MsBetweenDisplayChange");
+        }
+        fprintf(pm.mOutputFile, ",MsInPresentAPI");
+        if (pm.mArgs->mVerbosity > Verbosity::Simple)
+        {
+            fprintf(pm.mOutputFile, ",MsUntilRenderComplete,MsUntilDisplayed");
+        }
+        fprintf(pm.mOutputFile, "\n");
+    }
+
+    if (pm.mArgs->mIncludeWindowsMixedReality) {
+        // Open output file and print CSV header
+        GenerateOutputFilename(pm, true, outputFilePath);
+        fopen_s(&pm.mLsrOutputFile, outputFilePath, "w");
+        if (pm.mLsrOutputFile) {
+            fprintf(pm.mLsrOutputFile, "Application,ProcessID,DwmProcessID");
+            if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+            {
+                fprintf(pm.mLsrOutputFile, ",HolographicFrameID");
+            }
+            fprintf(pm.mLsrOutputFile, ",TimeInSeconds");
+            if (pm.mArgs->mVerbosity > Verbosity::Simple)
+            {
+                fprintf(pm.mLsrOutputFile, ",MsBetweenAppPresents,MsAppPresentToLsr");
+            }
+            fprintf(pm.mLsrOutputFile, ",MsBetweenLsrs,AppMissed,LsrMissed");
+            if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+            {
+                fprintf(pm.mLsrOutputFile, ",MsSourceReleaseFromRenderingToLsrAcquire,MsAppCpuRenderFrame");
+            }
+            fprintf(pm.mLsrOutputFile, ",MsAppPoseLatency");
+            if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+            {
+                fprintf(pm.mLsrOutputFile, ",MsAppMisprediction,MsLsrCpuRenderFrame");
+            }
+            fprintf(pm.mLsrOutputFile, ",MsLsrPoseLatency,MsActualLsrPoseLatency,MsTimeUntilVsync,MsLsrThreadWakeupToGpuEnd,MsLsrThreadWakeupError");
+            if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+            {
+                fprintf(pm.mLsrOutputFile, ",MsLsrThreadWakeupToCpuRenderFrameStart,MsCpuRenderFrameStartToHeadPoseCallbackStart,MsGetHeadPose,MsHeadPoseCallbackStopToInputLatch,MsInputLatchToGpuSubmission");
+            }
+            fprintf(pm.mLsrOutputFile, ",MsLsrPreemption,MsLsrExecution,MsCopyPreemption,MsCopyExecution,MsGpuEndToVsync");
+            if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+            {
+                fprintf(pm.mLsrOutputFile, ",SuspendedThreadBeforeLsr,EarlyLsrDueToInvalidFence");
+            }
+            fprintf(pm.mLsrOutputFile, "\n");
+        }
+    }
+}
+
 static void TerminateProcess(PresentMonData& pm, ProcessInfo const& proc)
 {
     if (!proc.mTargetProcess) {
@@ -407,110 +515,19 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
         pm.mStartupQpcTime = 0;
     }
 
+    // Generate capture date string in ISO 8601 format
+    {
+        struct tm tm;
+        time_t time_now = time(NULL);
+        localtime_s(&tm, &time_now);
+        _snprintf_s(pm.mCaptureTimeStr, _TRUNCATE, "%4d-%02d-%02dT%02d%02d%02d",
+            tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+            tm.tm_hour, tm.tm_min, tm.tm_sec);
+    }
+
+    // Open CSV files
     if (args.mOutputFile) {
-        // Figure out what file name to use:
-        //    FILENAME.EXT                     If FILENAME.EXT specified on command line
-        //    FILENAME-RECORD#.EXT             If FILENAME.EXT specified on command line and -hotkey used
-        //    PresentMon-PROCESSNAME-TIME.csv  If targetting a process by name
-        //    PresentMon-TIME.csv              Otherwise
-        if (args.mOutputFileName) {
-            if (!args.mHotkeySupport) {
-                _snprintf_s(pm.mOutputFilePath, _TRUNCATE, "%s", args.mOutputFileName);
-            } else {
-                char drive[_MAX_DRIVE] = {};
-                char dir[_MAX_DIR] = {};
-                char name[_MAX_FNAME] = {};
-                char ext[_MAX_EXT] = {};
-                _splitpath_s(args.mOutputFileName, drive, dir, name, ext);
-                _snprintf_s(pm.mOutputFilePath, _TRUNCATE, "%s%s%s-%d%s", drive, dir, name, args.mRecordingCount, ext);
-                _snprintf_s(pm.mLsrOutputFilePath, _TRUNCATE, "%s%s%s-%d_WMR%s", drive, dir, name, args.mRecordingCount, ext);
-            }
-        } else {
-            struct tm tm;
-            time_t time_now = time(NULL);
-            localtime_s(&tm, &time_now);
-
-            if (args.mTargetProcessName == nullptr) {
-                _snprintf_s(pm.mOutputFilePath, _TRUNCATE, "PresentMon-%4d-%02d-%02dT%02d%02d%02d.csv", // ISO 8601
-                    tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-                    tm.tm_hour, tm.tm_min, tm.tm_sec);
-                _snprintf_s(pm.mLsrOutputFilePath, _TRUNCATE, "PresentMon-%4d-%02d-%02dT%02d%02d%02d_WMR.csv", // ISO 8601
-                    tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-                    tm.tm_hour, tm.tm_min, tm.tm_sec);
-            } else {
-                _snprintf_s(pm.mOutputFilePath, _TRUNCATE, "PresentMon-%s-%4d-%02d-%02dT%02d%02d%02d.csv", // ISO 8601
-                    args.mTargetProcessName,
-                    tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-                    tm.tm_hour, tm.tm_min, tm.tm_sec);
-                _snprintf_s(pm.mLsrOutputFilePath, _TRUNCATE, "PresentMon-%s-%4d-%02d-%02dT%02d%02d%02d_WMR.csv", // ISO 8601
-                    args.mTargetProcessName,
-                    tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-                    tm.tm_hour, tm.tm_min, tm.tm_sec);
-            }
-        }
-
-        // Open output file and print CSV header
-        fopen_s(&pm.mOutputFile, pm.mOutputFilePath, "w");
-        if (pm.mOutputFile) {
-            fprintf(pm.mOutputFile, "Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags");
-            if (pm.mArgs->mVerbosity > Verbosity::Simple)
-            {
-                fprintf(pm.mOutputFile, ",AllowsTearing,PresentMode");
-            }
-            if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
-            {
-                fprintf(pm.mOutputFile, ",WasBatched,DwmNotified");
-            }
-            fprintf(pm.mOutputFile, ",Dropped,TimeInSeconds,MsBetweenPresents");
-            if (pm.mArgs->mVerbosity > Verbosity::Simple)
-            {
-                fprintf(pm.mOutputFile, ",MsBetweenDisplayChange");
-            }
-            fprintf(pm.mOutputFile, ",MsInPresentAPI");
-            if (pm.mArgs->mVerbosity > Verbosity::Simple)
-            {
-                fprintf(pm.mOutputFile, ",MsUntilRenderComplete,MsUntilDisplayed");
-            }
-            fprintf(pm.mOutputFile, "\n");
-        }
-
-        if (pm.mArgs->mIncludeWindowsMixedReality) {
-            // Open output file and print CSV header
-            fopen_s(&pm.mLsrOutputFile, pm.mLsrOutputFilePath, "w");
-            if (pm.mLsrOutputFile) {
-                fprintf(pm.mLsrOutputFile, "Application,ProcessID,DwmProcessID");
-                if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
-                {
-                    fprintf(pm.mLsrOutputFile, ",HolographicFrameID");
-                }
-                fprintf(pm.mLsrOutputFile, ",TimeInSeconds");
-                if (pm.mArgs->mVerbosity > Verbosity::Simple)
-                {
-                    fprintf(pm.mLsrOutputFile, ",MsBetweenAppPresents,MsAppPresentToLsr");
-                }
-                fprintf(pm.mLsrOutputFile, ",MsBetweenLsrs,AppMissed,LsrMissed");
-                if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
-                {
-                    fprintf(pm.mLsrOutputFile, ",MsSourceReleaseFromRenderingToLsrAcquire,MsAppCpuRenderFrame");
-                }
-                fprintf(pm.mLsrOutputFile, ",MsAppPoseLatency");
-                if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
-                {
-                    fprintf(pm.mLsrOutputFile, ",MsAppMisprediction,MsLsrCpuRenderFrame");
-                }
-                fprintf(pm.mLsrOutputFile, ",MsLsrPoseLatency,MsActualLsrPoseLatency,MsTimeUntilVsync,MsLsrThreadWakeupToGpuEnd,MsLsrThreadWakeupError");
-                if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
-                {
-                    fprintf(pm.mLsrOutputFile, ",MsLsrThreadWakeupToCpuRenderFrameStart,MsCpuRenderFrameStartToHeadPoseCallbackStart,MsGetHeadPose,MsHeadPoseCallbackStopToInputLatch,MsInputLatchToGpuSubmission");
-                }
-                fprintf(pm.mLsrOutputFile, ",MsLsrPreemption,MsLsrExecution,MsCopyPreemption,MsCopyExecution,MsGpuEndToVsync");
-                if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
-                {
-                    fprintf(pm.mLsrOutputFile, ",SuspendedThreadBeforeLsr,EarlyLsrDueToInvalidFence");
-                }
-                fprintf(pm.mLsrOutputFile, "\n");
-            }
-        }
+        CreateOutputFiles(pm);
     }
 }
 
@@ -728,37 +745,29 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
     }
 }
 
-void PresentMon_Shutdown(PresentMonData& pm, bool log_corrupted)
+void CloseFile(FILE* fp, uint32_t totalEventsLost, uint32_t totalBuffersLost)
 {
-    if (pm.mOutputFile)
-    {
-        if (log_corrupted) {
-            fclose(pm.mOutputFile);
-            fopen_s(&pm.mOutputFile, pm.mOutputFilePath, "w");
-            if (pm.mOutputFile) {
-                fprintf(pm.mOutputFile, "Error: Some ETW packets were lost. Collected data is unreliable.\n");
-            }
-        }
-        if (pm.mOutputFile) {
-            fclose(pm.mOutputFile);
-            pm.mOutputFile = nullptr;
-        }
+    if (fp == nullptr) {
+        return;
     }
 
-    if (pm.mLsrOutputFile)
-    {
-        if (log_corrupted) {
-            fclose(pm.mLsrOutputFile);
-            fopen_s(&pm.mLsrOutputFile, pm.mOutputFilePath, "w");
-            if (pm.mLsrOutputFile) {
-                fprintf(pm.mOutputFile, "Error: Some ETW packets were lost. Collected data is unreliable.\n");
-            }
-        }
-        if (pm.mLsrOutputFile) {
-            fclose(pm.mLsrOutputFile);
-            pm.mLsrOutputFile = nullptr;
-        }
+    if (totalEventsLost > 0) {
+        fprintf(fp, "warning: %u events were lost; collected data may be unreliable.\n", totalEventsLost);
     }
+    if (totalBuffersLost > 0) {
+        fprintf(fp, "warning: %u buffers were lost; collected data may be unreliable.\n", totalBuffersLost);
+    }
+
+    fclose(fp);
+}
+
+void PresentMon_Shutdown(PresentMonData& pm, uint32_t totalEventsLost, uint32_t totalBuffersLost)
+{
+    CloseFile(pm.mOutputFile, totalEventsLost, totalBuffersLost);
+    CloseFile(pm.mLsrOutputFile, totalEventsLost, totalBuffersLost);
+    pm.mOutputFile = nullptr;
+    pm.mLsrOutputFile = nullptr;
+
     pm.mProcessMap.clear();
 
     if (pm.mArgs->mSimpleConsole == false) {
@@ -846,7 +855,8 @@ void EtwConsumingThread(const CommandLineArgs& args)
             std::vector<std::shared_ptr<LateStageReprojectionEvent>> lsrs;
             std::vector<NTProcessEvent> ntProcessEvents;
 
-            bool log_corrupted = false;
+            uint32_t totalEventsLost = 0;
+            uint32_t totalBuffersLost = 0;
             for (;;) {
 #if _DEBUG
                 if (args.mSimpleConsole) {
@@ -895,9 +905,12 @@ void EtwConsumingThread(const CommandLineArgs& args)
                 uint32_t buffersLost = 0;
                 if (session.CheckLostReports(&eventsLost, &buffersLost)) {
                     printf("Lost %u events, %u buffers.", eventsLost, buffersLost);
+
+                    totalEventsLost += eventsLost;
+                    totalBuffersLost += buffersLost;
+
                     // FIXME: How do we set a threshold here?
                     if (eventsLost > 100) {
-                        log_corrupted = true;
                         PostStopRecording();
                         PostQuitProcess();
                     }
@@ -925,7 +938,7 @@ void EtwConsumingThread(const CommandLineArgs& args)
                 Sleep(100);
             }
 
-            PresentMon_Shutdown(data, log_corrupted);
+            PresentMon_Shutdown(data, totalEventsLost, totalBuffersLost);
         }
 
         assert(etwProcessingThread.joinable());

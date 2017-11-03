@@ -42,10 +42,9 @@ struct ProcessInfo {
 };
 
 struct PresentMonData {
+    char mCaptureTimeStr[18] = "";
     const CommandLineArgs *mArgs = nullptr;
-    uint64_t mStartupQpcTime;
-    char mOutputFilePath[MAX_PATH];
-    char mLsrOutputFilePath[MAX_PATH];
+    uint64_t mStartupQpcTime = 0;
     FILE *mOutputFile = nullptr;
     FILE *mLsrOutputFile = nullptr;
     std::map<uint32_t, ProcessInfo> mProcessMap;
