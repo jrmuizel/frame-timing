@@ -38,7 +38,6 @@ struct ProcessInfo {
     std::string mModuleName;
     std::map<uint64_t, SwapChainData> mChainMap;
     uint64_t mLastRefreshTicks; // GetTickCount64
-    bool mProcessExists;
     bool mTargetProcess;
 };
 

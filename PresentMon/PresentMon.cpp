@@ -96,19 +96,25 @@ static void SetConsoleText(const char *text)
     SetConsoleCursorPosition(hConsole, origin);
 }
 
-static void StopProcess(PresentMonData& pm, std::map<uint32_t, ProcessInfo>::iterator it)
+static void TerminateProcess(PresentMonData& pm, ProcessInfo const& proc)
 {
-    auto const& proc = it->second;
+    if (!proc.mTargetProcess) {
+        return;
+    }
 
     // Quit if this is the last process tracked for -terminate_on_proc_exit
-    if (pm.mArgs->mTerminateOnProcExit && proc.mTargetProcess) {
+    if (pm.mArgs->mTerminateOnProcExit) {
         pm.mTerminationProcessCount -= 1;
         if (pm.mTerminationProcessCount == 0) {
             PostStopRecording();
             PostQuitProcess();
         }
     }
+}
 
+static void StopProcess(PresentMonData& pm, std::map<uint32_t, ProcessInfo>::iterator it)
+{
+    TerminateProcess(pm, it->second);
     pm.mProcessMap.erase(it);
 }
 
@@ -120,7 +126,28 @@ static void StopProcess(PresentMonData& pm, uint32_t processId)
     }
 }
 
-static void StartProcess(PresentMonData& pm, uint32_t processId, std::string const& imageFileName, uint64_t now)
+static ProcessInfo* StartNewProcess(PresentMonData& pm, ProcessInfo* proc, uint32_t processId, std::string const& imageFileName, uint64_t now)
+{
+    proc->mModuleName = imageFileName;
+    proc->mLastRefreshTicks = now;
+    proc->mTargetProcess =
+        (pm.mArgs->mTargetPid == 0 && pm.mArgs->mTargetProcessName == nullptr) || // all processes targetted
+        (pm.mArgs->mTargetPid != 0 && pm.mArgs->mTargetPid == processId) || // explicitly targetted by PID
+        (pm.mArgs->mTargetProcessName != nullptr && _stricmp(pm.mArgs->mTargetProcessName, proc->mModuleName.c_str()) == 0); // explicitly targetted by name
+
+    if (!proc->mTargetProcess) {
+        return nullptr;
+    }
+
+    // Include process in -terminate_on_proc_exit count
+    if (pm.mArgs->mTerminateOnProcExit) {
+        pm.mTerminationProcessCount += 1;
+    }
+
+    return proc;
+}
+
+static ProcessInfo* StartProcess(PresentMonData& pm, uint32_t processId, std::string const& imageFileName, uint64_t now)
 {
     auto it = pm.mProcessMap.find(processId);
     if (it != pm.mProcessMap.end()) {
@@ -128,33 +155,45 @@ static void StartProcess(PresentMonData& pm, uint32_t processId, std::string con
     }
 
     auto proc = &pm.mProcessMap.emplace(processId, ProcessInfo()).first->second;
-
-    proc->mModuleName = imageFileName;
-    proc->mLastRefreshTicks = now;
-    proc->mProcessExists = true;
-    proc->mTargetProcess =
-        (pm.mArgs->mTargetPid == 0 && pm.mArgs->mTargetProcessName == nullptr) || // all processes targetted
-        (pm.mArgs->mTargetPid != 0 && pm.mArgs->mTargetPid == processId) || // explicitly targetted by PID
-        (pm.mArgs->mTargetProcessName != nullptr && _stricmp(pm.mArgs->mTargetProcessName, proc->mModuleName.c_str()) == 0); // explicitly targetted by name
-
-    if (!proc->mTargetProcess) {
-        return;
-    }
-
-    // Include process in -terminate_on_proc_exit count
-    if (pm.mArgs->mTerminateOnProcExit) {
-        pm.mTerminationProcessCount += 1;
-    }
+    return StartNewProcess(pm, proc, processId, imageFileName, now);
 }
 
-static void UpdateProcessInfo_Realtime(ProcessInfo& info, uint64_t now, uint32_t thisPid)
+static ProcessInfo* StartProcessIfNew(PresentMonData& pm, uint32_t processId, uint64_t now)
 {
+    auto it = pm.mProcessMap.find(processId);
+    if (it != pm.mProcessMap.end()) {
+        auto proc = &it->second;
+        return proc->mTargetProcess ? proc : nullptr;
+    }
+
+    std::string imageFileName("<error>");
+    if (!pm.mArgs->mEtlFileName) {
+        HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+        if (h) {
+            char path[MAX_PATH] = "<error>";
+            char* name = path;
+            DWORD numChars = sizeof(path);
+            if (QueryFullProcessImageNameA(h, 0, path, &numChars) == TRUE) {
+                name = PathFindFileNameA(path);
+            }
+            imageFileName = name;
+            CloseHandle(h);
+        }
+    }
+
+    auto proc = &pm.mProcessMap.emplace(processId, ProcessInfo()).first->second;
+    return StartNewProcess(pm, proc, processId, imageFileName, now);
+}
+
+static bool UpdateProcessInfo_Realtime(PresentMonData& pm, ProcessInfo& info, uint64_t now, uint32_t thisPid)
+{
+    // Check periodically if the process has exited
     if (now - info.mLastRefreshTicks > 1000) {
         info.mLastRefreshTicks = now;
+
+        auto running = false;
         HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, thisPid);
         if (h) {
-            info.mProcessExists = true;
-
             char path[MAX_PATH] = "<error>";
             char* name = path;
             DWORD numChars = sizeof(path);
@@ -162,19 +201,21 @@ static void UpdateProcessInfo_Realtime(ProcessInfo& info, uint64_t now, uint32_t
                 name = PathFindFileNameA(path);
             }
             if (info.mModuleName.compare(name) != 0) {
-                info.mModuleName.assign(name);
-                info.mChainMap.clear();
+                // Image name changed, which means that our process exited and another
+                // one started with the same PID.
+                TerminateProcess(pm, info);
+                StartNewProcess(pm, &info, thisPid, name, now);
             }
 
             DWORD dwExitCode = 0;
-            if (GetExitCodeProcess(h, &dwExitCode) == TRUE && dwExitCode != STILL_ACTIVE) {
-                info.mProcessExists = false;
+            if (GetExitCodeProcess(h, &dwExitCode) == TRUE && dwExitCode == STILL_ACTIVE) {
+                running = true;
             }
-
             CloseHandle(h);
-        } else {
-            info.mChainMap.clear();
-            info.mProcessExists = false;
+        }
+
+        if (!running) {
+            return false;
         }
     }
 
@@ -182,6 +223,8 @@ static void UpdateProcessInfo_Realtime(ProcessInfo& info, uint64_t now, uint32_t
     map_erase_if(info.mChainMap, [now](const std::pair<const uint64_t, SwapChainData>& entry) {
         return entry.second.IsStale(now);
     });
+
+    return true;
 }
 
 const char* PresentModeToString(PresentMode mode)
@@ -221,22 +264,9 @@ const char* FinalStateToDroppedString(PresentResult res)
 void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p, uint64_t now, uint64_t perfFreq)
 {
     const uint32_t appProcessId = p.GetAppProcessId();
-    auto& proc = pm.mProcessMap[appProcessId];
-    if (!proc.mLastRefreshTicks && !pm.mArgs->mEtlFileName) {
-        UpdateProcessInfo_Realtime(proc, now, appProcessId);
-    }
-
-    if (pm.mArgs->mTargetProcessName != nullptr && _stricmp(pm.mArgs->mTargetProcessName, proc.mModuleName.c_str()) != 0) {
-        // process name does not match
-        return;
-    }
-    if (pm.mArgs->mTargetPid && appProcessId != pm.mArgs->mTargetPid) {
-        return;
-    }
-
-    if (pm.mArgs->mTerminateOnProcExit && !proc.mTargetProcess) {
-        proc.mTargetProcess = true;
-        ++pm.mTerminationProcessCount;
+    auto proc = StartProcessIfNew(pm, appProcessId, now);
+    if (proc == nullptr) {
+        return; // process is not a target
     }
 
     pm.mLateStageReprojectionData.AddLateStageReprojection(p);
@@ -249,7 +279,7 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
             const double deltaMilliseconds = 1000 * double(curr.QpcTime - prev.QpcTime) / perfFreq;
             const double timeInSeconds = (double)(int64_t)(p.QpcTime - pm.mStartupQpcTime) / perfFreq;
 
-            fprintf(pm.mLsrOutputFile, "%s,%d,%d", proc.mModuleName.c_str(), curr.GetAppProcessId(), curr.ProcessId);
+            fprintf(pm.mLsrOutputFile, "%s,%d,%d", proc->mModuleName.c_str(), curr.GetAppProcessId(), curr.ProcessId);
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
                 fprintf(pm.mLsrOutputFile, ",%d", curr.GetAppFrameId());
@@ -307,25 +337,13 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
 
 void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perfFreq)
 {
-    auto& proc = pm.mProcessMap[p.ProcessId];
-    if (!proc.mLastRefreshTicks && !pm.mArgs->mEtlFileName) {
-        UpdateProcessInfo_Realtime(proc, now, p.ProcessId);
+    const uint32_t appProcessId = p.ProcessId;
+    auto proc = StartProcessIfNew(pm, appProcessId, now);
+    if (proc == nullptr) {
+        return; // process is not a target
     }
 
-    if (pm.mArgs->mTargetProcessName != nullptr && _stricmp(pm.mArgs->mTargetProcessName, proc.mModuleName.c_str()) != 0) {
-        // process name does not match
-        return;
-    }
-    if (pm.mArgs->mTargetPid && p.ProcessId != pm.mArgs->mTargetPid) {
-        return;
-    }
-
-    if (pm.mArgs->mTerminateOnProcExit && !proc.mTargetProcess) {
-        proc.mTargetProcess = true;
-        ++pm.mTerminationProcessCount;
-    }
-
-    auto& chain = proc.mChainMap[p.SwapChainAddress];
+    auto& chain = proc->mChainMap[p.SwapChainAddress];
     chain.AddPresentToSwapChain(p);
 
     if (pm.mOutputFile && (p.FinalState == PresentResult::Presented || !pm.mArgs->mExcludeDropped)) {
@@ -348,7 +366,7 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
 
             double timeInSeconds = (double)(int64_t)(p.QpcTime - pm.mStartupQpcTime) / perfFreq;
             fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%s,%d,%d",
-                    proc.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime), curr.SyncInterval, curr.PresentFlags);
+                    proc->mModuleName.c_str(), appProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime), curr.SyncInterval, curr.PresentFlags);
             if (pm.mArgs->mVerbosity > Verbosity::Simple)
             {
                 fprintf(pm.mOutputFile, ",%d,%s", curr.SupportsTearing, PresentModeToString(curr.PresentMode));
@@ -498,8 +516,6 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
 
 void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEvent>>& presents, std::vector<std::shared_ptr<LateStageReprojectionEvent>>& lsrs, uint64_t now, uint64_t perfFreq)
 {
-    std::string display;
-
     // store the new presents into processes
     for (auto& p : presents)
     {
@@ -512,8 +528,24 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
         AddLateStageReprojection(pm, *p, now, perfFreq);
     }
 
-    // Conditionally display LSR info
-    {
+    // Update realtime process info
+    if (!pm.mArgs->mEtlFileName) {
+        std::vector<std::map<uint32_t, ProcessInfo>::iterator> remove;
+        for (auto ii = pm.mProcessMap.begin(), ie = pm.mProcessMap.end(); ii != ie; ++ii) {
+            if (!UpdateProcessInfo_Realtime(pm, ii->second, now, ii->first)) {
+                remove.emplace_back(ii);
+            }
+        }
+        for (auto ii : remove) {
+            StopProcess(pm, ii);
+        }
+    }
+
+    // Display information to console
+    if (!pm.mArgs->mSimpleConsole) {
+        std::string display;
+
+        // LSR info
         auto& lsrData = pm.mLateStageReprojectionData;
         if (lsrData.HasData()) {
             char str[256] = {};
@@ -622,91 +654,76 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
             _snprintf_s(str, _TRUNCATE, "\n");
             display += str;
         }
-    }
 
-    // update all processes
-    for (auto& proc : pm.mProcessMap)
-    {
-        if (!pm.mArgs->mEtlFileName) {
-            UpdateProcessInfo_Realtime(proc.second, now, proc.first);
-        }
+        // ProcessInfo
+        for (auto const& p : pm.mProcessMap) {
+            auto processId = p.first;
+            auto const& proc = p.second;
 
-        if (pm.mArgs->mTerminateOnProcExit && proc.second.mTargetProcess && !proc.second.mProcessExists) {
-            --pm.mTerminationProcessCount;
-            if (pm.mTerminationProcessCount == 0) {
-                PostStopRecording();
-                PostQuitProcess();
-            }
-            proc.second.mTargetProcess = false;
-        }
-
-        if (pm.mArgs->mSimpleConsole ||
-            proc.second.mModuleName.empty() ||
-            proc.second.mChainMap.empty())
-        {
-            // don't display empty processes
-            continue;
-        }
-
-        char str[256] = {};
-        _snprintf_s(str, _TRUNCATE, "\n%s[%d]:\n", proc.second.mModuleName.c_str(),proc.first);
-        display += str;
-
-        for (auto& chain : proc.second.mChainMap)
-        {
-            double fps = chain.second.ComputeFps(perfFreq);
-
-            _snprintf_s(str, _TRUNCATE, "\t%016llX (%s): SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, ",
-                chain.first,
-                RuntimeToString(chain.second.mRuntime),
-                chain.second.mLastSyncInterval,
-                chain.second.mLastFlags,
-                1000.0/fps,
-                fps);
-            display += str;
-
-            if (pm.mArgs->mVerbosity > Verbosity::Simple) {
-                _snprintf_s(str, _TRUNCATE, "%.1lf displayed fps, ", chain.second.ComputeDisplayedFps(perfFreq));
-                display += str;
+            // Don't display non-specified or empty processes
+            if (!proc.mTargetProcess ||
+                proc.mModuleName.empty() ||
+                proc.mChainMap.empty()) {
+                continue;
             }
 
-            _snprintf_s(str, _TRUNCATE, "%.2lf ms CPU", chain.second.ComputeCpuFrameTime(perfFreq) * 1000.0);
+            char str[256] = {};
+            _snprintf_s(str, _TRUNCATE, "\n%s[%d]:\n", proc.mModuleName.c_str(), processId);
             display += str;
 
-            if (pm.mArgs->mVerbosity > Verbosity::Simple) {
-                _snprintf_s(str, _TRUNCATE, ", %.2lf ms latency) (%s",
-                    1000.0 * chain.second.ComputeLatency(perfFreq),
-                    PresentModeToString(chain.second.mLastPresentMode));
+            for (auto& chain : proc.mChainMap)
+            {
+                double fps = chain.second.ComputeFps(perfFreq);
+
+                _snprintf_s(str, _TRUNCATE, "\t%016llX (%s): SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, ",
+                    chain.first,
+                    RuntimeToString(chain.second.mRuntime),
+                    chain.second.mLastSyncInterval,
+                    chain.second.mLastFlags,
+                    1000.0/fps,
+                    fps);
                 display += str;
 
-                if (chain.second.mLastPresentMode == PresentMode::Hardware_Composed_Independent_Flip) {
-                    _snprintf_s(str, _TRUNCATE, ": Plane %d", chain.second.mLastPlane);
+                if (pm.mArgs->mVerbosity > Verbosity::Simple) {
+                    _snprintf_s(str, _TRUNCATE, "%.1lf displayed fps, ", chain.second.ComputeDisplayedFps(perfFreq));
                     display += str;
                 }
 
-                if ((chain.second.mLastPresentMode == PresentMode::Hardware_Composed_Independent_Flip ||
-                     chain.second.mLastPresentMode == PresentMode::Hardware_Independent_Flip) &&
-                    pm.mArgs->mVerbosity >= Verbosity::Verbose &&
-                    chain.second.mDwmNotified) {
-                    _snprintf_s(str, _TRUNCATE, ", DWM notified");
+                _snprintf_s(str, _TRUNCATE, "%.2lf ms CPU", chain.second.ComputeCpuFrameTime(perfFreq) * 1000.0);
+                display += str;
+
+                if (pm.mArgs->mVerbosity > Verbosity::Simple) {
+                    _snprintf_s(str, _TRUNCATE, ", %.2lf ms latency) (%s",
+                        1000.0 * chain.second.ComputeLatency(perfFreq),
+                        PresentModeToString(chain.second.mLastPresentMode));
                     display += str;
+
+                    if (chain.second.mLastPresentMode == PresentMode::Hardware_Composed_Independent_Flip) {
+                        _snprintf_s(str, _TRUNCATE, ": Plane %d", chain.second.mLastPlane);
+                        display += str;
+                    }
+
+                    if ((chain.second.mLastPresentMode == PresentMode::Hardware_Composed_Independent_Flip ||
+                         chain.second.mLastPresentMode == PresentMode::Hardware_Independent_Flip) &&
+                        pm.mArgs->mVerbosity >= Verbosity::Verbose &&
+                        chain.second.mDwmNotified) {
+                        _snprintf_s(str, _TRUNCATE, ", DWM notified");
+                        display += str;
+                    }
+
+                    if (pm.mArgs->mVerbosity >= Verbosity::Verbose &&
+                        chain.second.mHasBeenBatched) {
+                        _snprintf_s(str, _TRUNCATE, ", batched");
+                        display += str;
+                    }
                 }
 
-                if (pm.mArgs->mVerbosity >= Verbosity::Verbose &&
-                    chain.second.mHasBeenBatched) {
-                    _snprintf_s(str, _TRUNCATE, ", batched");
-                    display += str;
-                }
+                _snprintf_s(str, _TRUNCATE, ")%s\n",
+                    (now - chain.second.mLastUpdateTicks) > 1000 ? " [STALE]" : "");
+                display += str;
             }
-
-            _snprintf_s(str, _TRUNCATE, ")%s\n",
-                (now - chain.second.mLastUpdateTicks) > 1000 ? " [STALE]" : "");
-            display += str;
         }
-    }
 
-    // refresh the console
-    if (pm.mArgs->mSimpleConsole == false) {
         SetConsoleText(display.c_str());
     }
 }
