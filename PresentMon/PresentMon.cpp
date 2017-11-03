@@ -96,6 +96,28 @@ static void SetConsoleText(const char *text)
     SetConsoleCursorPosition(hConsole, origin);
 }
 
+static bool IsTargetProcess(CommandLineArgs const& args, uint32_t processId, char const* processName)
+{
+    // -capture_all
+    if (args.mTargetPid == 0 && args.mTargetProcessNames.empty()) {
+        return true;
+    }
+
+    // -process_id
+    if (args.mTargetPid != 0 && args.mTargetPid == processId) {
+        return true;
+    }
+
+    // -process_name
+    for (auto targetProcessName : args.mTargetProcessNames) {
+        if (_stricmp(targetProcessName, processName) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 //  mOutputFilename mHotkeySupport mMultiCsv processName -> FileName
 //  PATH.EXT        true           true      PROCESSNAME -> PATH-PROCESSNAME-INDEX.EXT
 //  PATH.EXT        false          true      PROCESSNAME -> PATH-PROCESSNAME.EXT
@@ -251,10 +273,7 @@ static ProcessInfo* StartNewProcess(PresentMonData& pm, ProcessInfo* proc, uint3
     proc->mOutputFile = nullptr;
     proc->mLsrOutputFile = nullptr;
     proc->mLastRefreshTicks = now;
-    proc->mTargetProcess =
-        (pm.mArgs->mTargetPid == 0 && pm.mArgs->mTargetProcessName == nullptr) || // all processes targetted
-        (pm.mArgs->mTargetPid != 0 && pm.mArgs->mTargetPid == processId) || // explicitly targetted by PID
-        (pm.mArgs->mTargetProcessName != nullptr && _stricmp(pm.mArgs->mTargetProcessName, proc->mModuleName.c_str()) == 0); // explicitly targetted by name
+    proc->mTargetProcess = IsTargetProcess(*pm.mArgs, processId, imageFileName.c_str());
 
     if (!proc->mTargetProcess) {
         return nullptr;
@@ -557,8 +576,8 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
 
     // Create output files now if we're not creating one per process and we
     // don't need to wait for the single process name specified by PID.
-    if (args.mOutputFile && !args.mMultiCsv && args.mTargetPid == 0) {
-        CreateOutputFiles(pm, pm.mArgs->mTargetProcessName, &pm.mOutputFile, &pm.mLsrOutputFile);
+    if (args.mOutputFile && !args.mMultiCsv && !(args.mTargetPid != 0 && args.mTargetProcessNames.empty())) {
+        CreateOutputFiles(pm, args.mTargetPid == 0 && args.mTargetProcessNames.size() == 1 ? args.mTargetProcessNames[0] : nullptr, &pm.mOutputFile, &pm.mLsrOutputFile);
     }
 }
 

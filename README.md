@@ -40,8 +40,10 @@ Binaries for main release versions of PresentMon are provided on GitHub:
 ```html
 Capture target options:
     -captureall                Record all processes (default).
-    -process_name [exe name]   Record specific process specified by name.
+    -process_name [exe name]   Record specific process specified by name; this argument can be
+                               repeated to capture multiple processes at the same time.
     -process_id [integer]      Record specific process specified by ID.
+    -etl_file [path]           Consume events from an ETL file instead of a running process.
 
 Output options:
     -no_csv                    Do not create any output file.
@@ -49,7 +51,8 @@ Output options:
     -multi_csv                 Create a separate CSV file for each captured process.
 
 Control and filtering options:
-    -etl_file [path]           Consume events from an ETL file instead of a running process.
+    -exclude [exe name]        Don't record specific process specified by name; this argument can be
+                               repeated to exclude multiple processes.
     -scroll_toggle             Only record events while scroll lock is enabled.
     -scroll_indicator          Set scroll lock while recording events.
     -hotkey [key]              Use specified key to start and stop recording, writing to a
@@ -65,7 +68,8 @@ Control and filtering options:
     -verbose                   Adds additional data to output not relevant to normal usage.
     -dont_restart_as_admin     Don't try to elevate privilege.
     -no_top                    Don't display active swap chains in the console window.
-    -include_mixed_reality     [Beta] Include Windows Mixed Reality data. If enabled, writes csv output to a separate file (with "_WMR" suffix).
+    -include_mixed_reality     [Beta] Include Windows Mixed Reality data. If enabled, writes csv output
+                               to a separate file (with "_WMR" suffix).
 ```
 
 ## Comma-separated value (CSV) file output
@@ -75,7 +79,7 @@ Control and filtering options:
 The default CSV file name is `PresentMon-TIME.csv`, where `TIME` is the capture
 time in ISO 8601 format.
 
-If the CSV file contains a single target process (`-process_id` or
+If the CSV file contains a single target process (`-process_id` or one
 `-process_name` or `-multi_csv`) then the CSV filename is
 `PresentMon-PROCESSNAME-TIME.csv`.
 

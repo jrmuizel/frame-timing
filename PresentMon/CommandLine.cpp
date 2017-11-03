@@ -223,8 +223,10 @@ void PrintHelp()
         "\n"
         "Capture target options:\n"
         "    -captureall                Record all processes (default).\n"
-        "    -process_name [exe name]   Record specific process specified by name.\n"
+        "    -process_name [exe name]   Record specific process specified by name; this argument can be\n"
+        "                               repeated to capture multiple processes at the same time.\n"
         "    -process_id [integer]      Record specific process specified by ID.\n"
+        "    -etl_file [path]           Consume events from an ETL file instead of a running process.\n"
         "\n"
         "Output options:\n"
         "    -no_csv                    Do not create any output file.\n"
@@ -232,7 +234,8 @@ void PrintHelp()
         "    -multi_csv                 Create a separate CSV file for each captured process.\n"
         "\n"
         "Control and filtering options:\n"
-        "    -etl_file [path]           Consume events from an ETL file instead of a running process.\n"
+        "    -exclude [exe name]        Don't record specific process specified by name; this argument can be\n"
+        "                               repeated to exclude multiple processes.\n"
         "    -scroll_toggle             Only record events while scroll lock is enabled.\n"
         "    -scroll_indicator          Set scroll lock while recording events.\n"
         "    -hotkey [key]              Use specified key to start and stop recording, writing to a\n"
@@ -248,15 +251,38 @@ void PrintHelp()
         "    -verbose                   Adds additional data to output not relevant to normal usage.\n"
         "    -dont_restart_as_admin     Don't try to elevate privilege.\n"
         "    -no_top                    Don't display active swap chains in the console window.\n"
-        "    -include_mixed_reality     [Beta] Include Windows Mixed Reality data. If enabled, writes csv output to a separate file (with \"_WMR\" suffix).\n",
-        PRESENT_MON_VERSION
-        );
+        "    -include_mixed_reality     [Beta] Include Windows Mixed Reality data. If enabled, writes csv output\n"
+        "                               to a separate file (with \"_WMR\" suffix).\n"
+        , PRESENT_MON_VERSION);
 }
 
 }
 
 bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
 {
+    args->mTargetProcessNames.clear();
+    args->mExcludeProcessNames.clear();
+    args->mOutputFileName = nullptr;
+    args->mEtlFileName = nullptr;
+    args->mTargetPid = 0;
+    args->mDelay = 0;
+    args->mTimer = 0;
+    args->mRecordingCount = 0;
+    args->mHotkeyModifiers = MOD_NOREPEAT;
+    args->mHotkeyVirtualKeyCode = VK_F11;
+    args->mOutputFile = true;
+    args->mScrollLockToggle = false;
+    args->mScrollLockIndicator = false;
+    args->mExcludeDropped = false;
+    args->mVerbosity = Verbosity::Normal;
+    args->mSimpleConsole = false;
+    args->mTerminateOnProcExit = false;
+    args->mTerminateAfterTimer = false;
+    args->mHotkeySupport = false;
+    args->mTryToElevate = true;
+    args->mIncludeWindowsMixedReality = false;
+    args->mMultiCsv = false;
+
     bool simple = false;
     bool verbose = false;
     for (int i = 1; i < argc; ++i) {
@@ -276,8 +302,15 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
         }
 
         // Capture target options
-             ARG1("-captureall",             args->mTargetProcessName          = nullptr)
-        else ARG2("-process_name",           args->mTargetProcessName          = argv[i])
+        if (strcmp(argv[i], "-captureall") == 0) {
+            if (!args->mTargetProcessNames.empty()) {
+                fprintf(stderr, "warning: -captureall elides all previous -process_name command line arguments.\n");
+                args->mTargetProcessNames.clear();
+            }
+            continue;
+        }
+
+        else ARG2("-process_name",           args->mTargetProcessNames.emplace_back(argv[i]))
         else ARG2("-process_id",             args->mTargetPid                  = atou(argv[i]))
         else ARG2("-etl_file",               args->mEtlFileName                = argv[i])
 
@@ -287,6 +320,7 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
         else ARG1("-multi_csv",              args->mMultiCsv                   = true)
 
         // Control and filtering options
+        else ARG2("-exclude",                args->mExcludeProcessNames.emplace_back(argv[i]))
         else ARG1("-hotkey",                 AssignHotkey(&i, argc, argv, args))
         else ARG1("-scroll_toggle",          args->mScrollLockToggle           = true)
         else ARG1("-scroll_indicator",       args->mScrollLockIndicator        = true)
@@ -311,23 +345,13 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
     }
 
     // Validate command line arguments
-    if (((args->mTargetProcessName == nullptr) ? 0 : 1) +
-        ((args->mTargetPid         <= 0      ) ? 0 : 1) > 1) {
-        fprintf(stderr, "error: only specify one of -captureall, -process_name, or -process_id.\n");
-        PrintHelp();
-        return false;
-    }
-
     if (args->mEtlFileName && args->mHotkeySupport) {
-        fprintf(stderr, "error: -etl_file and -hotkey arguments are not compatible.\n");
-        PrintHelp();
-        return false;
+        fprintf(stderr, "warning: -etl_file and -hotkey arguments are not compatible; ignoring -hotkey.\n");
+        args->mHotkeySupport = false;
     }
 
     if (args->mMultiCsv && !args->mOutputFile) {
-        fprintf(stderr, "error: -multi_csv and -no_csv arguments are not compatible.\n");
-        PrintHelp();
-        return false;
+        args->mMultiCsv = false; // -multi_csv and -no_csv provided, don't need a warning on this one
     }
 
     if (args->mHotkeySupport) {
@@ -344,16 +368,34 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
         }
     }
 
-    if (simple && verbose) {
-        fprintf(stderr, "error: -simple and -verbose arguments are not compatible.\n");
-        PrintHelp();
-        return false;
+    // -process_name and -exclude don't make sense together; warn about cases
+    // that both include and exclude the same process name and just ignore all
+    // the other exclusions.
+    if (!args->mTargetProcessNames.empty()) {
+        for (auto exclude : args->mExcludeProcessNames) {
+            bool conflict = false;
+            for (auto target : args->mTargetProcessNames) {
+                if (_stricmp(exclude, target) == 0) {
+                    fprintf(stderr, "warning: -exclude and -process_name conflict, ignoring -exclude.\n");
+                    conflict = true;
+                    break;
+                }
+            }
+            if (conflict) {
+                break;
+            }
+        }
+        args->mExcludeProcessNames.clear();
+    }
+
+    if (verbose) {
+        if (simple) {
+            fprintf(stderr, "warning: -simple and -verbose arguments are not compatible; ignoring -simple.\n");
+        }
+        args->mVerbosity = Verbosity::Verbose;
     }
     else if (simple) {
         args->mVerbosity = Verbosity::Simple;
-    }
-    else if (verbose) {
-        args->mVerbosity = Verbosity::Verbose;
     }
 
     return true;

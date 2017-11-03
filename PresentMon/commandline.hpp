@@ -23,6 +23,7 @@ SOFTWARE.
 #pragma once
 
 #include <windows.h>
+#include <vector>
 
 enum class Verbosity {
     Simple,
@@ -30,33 +31,28 @@ enum class Verbosity {
     Verbose
 };
 
-// Target:           mTargetProcessName mTargetPid mEtlFileName
-//  All processes    nullptr            0          nullptr
-//  Process by name  process name       0          nullptr
-//  Process by ID    nullptr            pid        nullptr
-//  ETL file         nullptr            0          path
 struct CommandLineArgs {
-    const char *mOutputFileName = nullptr;
-    const char *mTargetProcessName = nullptr;
-    const char *mEtlFileName = nullptr;
-    UINT mTargetPid = 0;
-    UINT mDelay = 0;
-    UINT mTimer = 0;
-    UINT mRecordingCount = 0;
-    UINT mHotkeyModifiers = MOD_NOREPEAT;
-    UINT mHotkeyVirtualKeyCode = VK_F11;
-    bool mOutputFile = true;
-    bool mScrollLockToggle = false;
-    bool mScrollLockIndicator = false;
-    bool mExcludeDropped = false;
-    Verbosity mVerbosity = Verbosity::Normal;
-    bool mSimpleConsole = false;
-    bool mTerminateOnProcExit = false;
-    bool mTerminateAfterTimer = false;
-    bool mHotkeySupport = false;
-    bool mTryToElevate = true;
-    bool mIncludeWindowsMixedReality = false;
-    bool mMultiCsv = false;
+    std::vector<const char*> mTargetProcessNames;
+    const char *mOutputFileName;
+    const char *mEtlFileName;
+    UINT mTargetPid;
+    UINT mDelay;
+    UINT mTimer;
+    UINT mRecordingCount;
+    UINT mHotkeyModifiers;
+    UINT mHotkeyVirtualKeyCode;
+    bool mOutputFile;
+    bool mScrollLockToggle;
+    bool mScrollLockIndicator;
+    bool mExcludeDropped;
+    Verbosity mVerbosity;
+    bool mSimpleConsole;
+    bool mTerminateOnProcExit;
+    bool mTerminateAfterTimer;
+    bool mHotkeySupport;
+    bool mTryToElevate;
+    bool mIncludeWindowsMixedReality;
+    bool mMultiCsv;
 };
 
 bool ParseCommandLine(int argc, char** argv, CommandLineArgs* out);
