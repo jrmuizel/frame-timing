@@ -96,6 +96,57 @@ static void SetConsoleText(const char *text)
     SetConsoleCursorPosition(hConsole, origin);
 }
 
+static void StopProcess(PresentMonData& pm, std::map<uint32_t, ProcessInfo>::iterator it)
+{
+    auto const& proc = it->second;
+
+    // Quit if this is the last process tracked for -terminate_on_proc_exit
+    if (pm.mArgs->mTerminateOnProcExit && proc.mTargetProcess) {
+        pm.mTerminationProcessCount -= 1;
+        if (pm.mTerminationProcessCount == 0) {
+            PostStopRecording();
+            PostQuitProcess();
+        }
+    }
+
+    pm.mProcessMap.erase(it);
+}
+
+static void StopProcess(PresentMonData& pm, uint32_t processId)
+{
+    auto it = pm.mProcessMap.find(processId);
+    if (it != pm.mProcessMap.end()) {
+        StopProcess(pm, it);
+    }
+}
+
+static void StartProcess(PresentMonData& pm, uint32_t processId, std::string const& imageFileName, uint64_t now)
+{
+    auto it = pm.mProcessMap.find(processId);
+    if (it != pm.mProcessMap.end()) {
+        StopProcess(pm, it);
+    }
+
+    auto proc = &pm.mProcessMap.emplace(processId, ProcessInfo()).first->second;
+
+    proc->mModuleName = imageFileName;
+    proc->mLastRefreshTicks = now;
+    proc->mProcessExists = true;
+    proc->mTargetProcess =
+        (pm.mArgs->mTargetPid == 0 && pm.mArgs->mTargetProcessName == nullptr) || // all processes targetted
+        (pm.mArgs->mTargetPid != 0 && pm.mArgs->mTargetPid == processId) || // explicitly targetted by PID
+        (pm.mArgs->mTargetProcessName != nullptr && _stricmp(pm.mArgs->mTargetProcessName, proc->mModuleName.c_str()) == 0); // explicitly targetted by name
+
+    if (!proc->mTargetProcess) {
+        return;
+    }
+
+    // Include process in -terminate_on_proc_exit count
+    if (pm.mArgs->mTerminateOnProcExit) {
+        pm.mTerminationProcessCount += 1;
+    }
+}
+
 static void UpdateProcessInfo_Realtime(ProcessInfo& info, uint64_t now, uint32_t thisPid)
 {
     if (now - info.mLastRefreshTicks > 1000) {
@@ -183,8 +234,8 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
         return;
     }
 
-    if (pm.mArgs->mTerminateOnProcExit && !proc.mTerminationProcess) {
-        proc.mTerminationProcess = true;
+    if (pm.mArgs->mTerminateOnProcExit && !proc.mTargetProcess) {
+        proc.mTargetProcess = true;
         ++pm.mTerminationProcessCount;
     }
 
@@ -269,8 +320,8 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
         return;
     }
 
-    if (pm.mArgs->mTerminateOnProcExit && !proc.mTerminationProcess) {
-        proc.mTerminationProcess = true;
+    if (pm.mArgs->mTerminateOnProcExit && !proc.mTargetProcess) {
+        proc.mTargetProcess = true;
         ++pm.mTerminationProcessCount;
     }
 
@@ -445,10 +496,9 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
     }
 }
 
-void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEvent>>& presents, std::vector<std::shared_ptr<LateStageReprojectionEvent>>& lsrs, uint64_t perfFreq)
+void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEvent>>& presents, std::vector<std::shared_ptr<LateStageReprojectionEvent>>& lsrs, uint64_t now, uint64_t perfFreq)
 {
     std::string display;
-    uint64_t now = GetTickCount64();
 
     // store the new presents into processes
     for (auto& p : presents)
@@ -581,13 +631,13 @@ void PresentMon_Update(PresentMonData& pm, std::vector<std::shared_ptr<PresentEv
             UpdateProcessInfo_Realtime(proc.second, now, proc.first);
         }
 
-        if (proc.second.mTerminationProcess && !proc.second.mProcessExists) {
+        if (pm.mArgs->mTerminateOnProcExit && proc.second.mTargetProcess && !proc.second.mProcessExists) {
             --pm.mTerminationProcessCount;
             if (pm.mTerminationProcessCount == 0) {
                 PostStopRecording();
                 PostQuitProcess();
             }
-            proc.second.mTerminationProcess = false;
+            proc.second.mTargetProcess = false;
         }
 
         if (pm.mArgs->mSimpleConsole ||
@@ -797,19 +847,14 @@ void EtwConsumingThread(const CommandLineArgs& args)
                     data.mStartupQpcTime = session.startTime_;
                 }
 
-                if (args.mEtlFileName) {
-                    {
-                        auto lock = scoped_lock(pmConsumer.mNTProcessEventMutex);
-                        ntProcessEvents.swap(pmConsumer.mNTProcessEvents);
-                    }
+                uint64_t now = GetTickCount64();
 
-                    for (auto ntProcessEvent : ntProcessEvents) {
-                        if (!ntProcessEvent.ImageFileName.empty()) {
-                            ProcessInfo processInfo;
-                            processInfo.mModuleName = ntProcessEvent.ImageFileName;
-
-                            data.mProcessMap[ntProcessEvent.ProcessId] = processInfo;
-                        }
+                // Dequeue any captured NTProcess events; if ImageFileName is
+                // empty then the process stopped, otherwise it started.
+                pmConsumer.DequeueProcessEvents(ntProcessEvents);
+                for (auto ntProcessEvent : ntProcessEvents) {
+                    if (!ntProcessEvent.ImageFileName.empty()) {
+                        StartProcess(data, ntProcessEvent.ProcessId, ntProcessEvent.ImageFileName, now);
                     }
                 }
 
@@ -821,13 +866,11 @@ void EtwConsumingThread(const CommandLineArgs& args)
                 }
 
                 auto doneProcessingEvents = g_EtwProcessingThreadProcessing ? false : true;
-                PresentMon_Update(data, presents, lsrs, session.frequency_);
+                PresentMon_Update(data, presents, lsrs, now, session.frequency_);
 
-                if (args.mEtlFileName) {
-                    for (auto ntProcessEvent : ntProcessEvents) {
-                        if (ntProcessEvent.ImageFileName.empty()) {
-                            data.mProcessMap.erase(ntProcessEvent.ProcessId);
-                        }
+                for (auto ntProcessEvent : ntProcessEvents) {
+                    if (ntProcessEvent.ImageFileName.empty()) {
+                        StopProcess(data, ntProcessEvent.ProcessId);
                     }
                 }
 

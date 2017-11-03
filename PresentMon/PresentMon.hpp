@@ -35,11 +35,11 @@ SOFTWARE.
 #include "..\PresentData\MixedRealityTraceConsumer.hpp"
 
 struct ProcessInfo {
-    uint64_t mLastRefreshTicks = 0; // GetTickCount64
     std::string mModuleName;
     std::map<uint64_t, SwapChainData> mChainMap;
-    bool mTerminationProcess;
-    bool mProcessExists = false;
+    uint64_t mLastRefreshTicks; // GetTickCount64
+    bool mProcessExists;
+    bool mTargetProcess;
 };
 
 struct PresentMonData {
