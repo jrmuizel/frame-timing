@@ -354,7 +354,7 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
                 char ext[_MAX_EXT] = {};
                 _splitpath_s(args.mOutputFileName, drive, dir, name, ext);
                 _snprintf_s(pm.mOutputFilePath, _TRUNCATE, "%s%s%s-%d%s", drive, dir, name, args.mRecordingCount, ext);
-                _snprintf_s(pm.mLsrOutputFilePath, _TRUNCATE, "%s%s%s-%d%s_WMR", drive, dir, name, args.mRecordingCount, ext);
+                _snprintf_s(pm.mLsrOutputFilePath, _TRUNCATE, "%s%s%s-%d_WMR%s", drive, dir, name, args.mRecordingCount, ext);
             }
         } else {
             struct tm tm;
