@@ -33,6 +33,7 @@ enum class Verbosity {
 
 struct CommandLineArgs {
     std::vector<const char*> mTargetProcessNames;
+    std::vector<const char*> mExcludeProcessNames;
     const char *mOutputFileName;
     const char *mEtlFileName;
     UINT mTargetPid;

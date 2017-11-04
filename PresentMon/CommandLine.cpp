@@ -368,26 +368,6 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
         }
     }
 
-    // -process_name and -exclude don't make sense together; warn about cases
-    // that both include and exclude the same process name and just ignore all
-    // the other exclusions.
-    if (!args->mTargetProcessNames.empty()) {
-        for (auto exclude : args->mExcludeProcessNames) {
-            bool conflict = false;
-            for (auto target : args->mTargetProcessNames) {
-                if (_stricmp(exclude, target) == 0) {
-                    fprintf(stderr, "warning: -exclude and -process_name conflict, ignoring -exclude.\n");
-                    conflict = true;
-                    break;
-                }
-            }
-            if (conflict) {
-                break;
-            }
-        }
-        args->mExcludeProcessNames.clear();
-    }
-
     if (verbose) {
         if (simple) {
             fprintf(stderr, "warning: -simple and -verbose arguments are not compatible; ignoring -simple.\n");

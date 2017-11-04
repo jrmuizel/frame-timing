@@ -98,6 +98,13 @@ static void SetConsoleText(const char *text)
 
 static bool IsTargetProcess(CommandLineArgs const& args, uint32_t processId, char const* processName)
 {
+    // -exclude
+    for (auto excludeProcessName : args.mExcludeProcessNames) {
+        if (_stricmp(excludeProcessName, processName) == 0) {
+            return false;
+        }
+    }
+
     // -capture_all
     if (args.mTargetPid == 0 && args.mTargetProcessNames.empty()) {
         return true;
