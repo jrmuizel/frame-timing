@@ -429,8 +429,8 @@ void SetConsoleTitle(
     int argc,
     char** argv)
 {
-    char args[MAX_PATH] = {};
-    size_t idx = snprintf(args, MAX_PATH, "PresentMon");
+    char args[MAX_PATH] = "PresentMon";
+    size_t idx = strlen(args);
     if (!CombineArguments(argc, argv, args + idx, MAX_PATH - idx)) {
         args[MAX_PATH - 4] = '.';
         args[MAX_PATH - 3] = '.';
