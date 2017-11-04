@@ -355,6 +355,11 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
     }
 
     if (args->mHotkeySupport) {
+        if (args->mTerminateOnProcExit) {
+            fprintf(stderr, "warning: PresentMon won't terminate if capture is not enabled by the hotkey at\n");
+            fprintf(stderr, "         the time the target process exits.\n");
+        }
+
         if ((args->mHotkeyModifiers & MOD_CONTROL) != 0 && args->mHotkeyVirtualKeyCode == 0x44 /*C*/) {
             fprintf(stderr, "error: 'CTRL+C' cannot be used as a -hotkey, it is reserved for terminating the trace.\n");
             PrintHelp();
