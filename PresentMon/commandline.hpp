@@ -56,6 +56,7 @@ struct CommandLineArgs {
     bool mHotkeySupport = false;
     bool mTryToElevate = true;
     bool mIncludeWindowsMixedReality = false;
+    bool mMultiCsv = false;
 };
 
 bool ParseCommandLine(int argc, char** argv, CommandLineArgs* out);

@@ -96,14 +96,16 @@ static void SetConsoleText(const char *text)
     SetConsoleCursorPosition(hConsole, origin);
 }
 
-//  mOutputFilename mTargetProcessName  mHotkeySupport  FileName
-//  nullptr         nullptr             any             PresentMon-TIME.csv
-//  nullptr         PROCESSNAME         any             PresentMon-PROCESSNAME-TIME.csv
-//  PATH.EXT        any                 false           PATH.EXT
-//  PATH.EXT        any                 true            PATH-INDEX.EXT
+//  mOutputFilename mHotkeySupport mMultiCsv processName -> FileName
+//  PATH.EXT        true           true      PROCESSNAME -> PATH-PROCESSNAME-INDEX.EXT
+//  PATH.EXT        false          true      PROCESSNAME -> PATH-PROCESSNAME.EXT
+//  PATH.EXT        true           false     any         -> PATH-INDEX.EXT
+//  PATH.EXT        false          false     any         -> PATH.EXT
+//  nullptr         any            any       nullptr     -> PresentMon-TIME.csv
+//  nullptr         any            any       PROCESSNAME -> PresentMon-PROCESSNAME-TIME.csv
 //
 // If wmr, then append _WMR to name.
-static void GenerateOutputFilename(const PresentMonData& pm, bool wmr, char* path)
+static void GenerateOutputFilename(const PresentMonData& pm, const char* processName, bool wmr, char* path)
 {
     char ext[_MAX_EXT];
 
@@ -113,18 +115,22 @@ static void GenerateOutputFilename(const PresentMonData& pm, bool wmr, char* pat
         char name[_MAX_FNAME];
         _splitpath_s(pm.mArgs->mOutputFileName, drive, dir, name, ext);
 
+        int i = _snprintf_s(path, MAX_PATH, _TRUNCATE, "%s%s%s", drive, dir, name);
+
+        if (pm.mArgs->mMultiCsv) {
+            i += _snprintf_s(path + i, MAX_PATH - i, _TRUNCATE, "-%s", processName);
+        }
+
         if (pm.mArgs->mHotkeySupport) {
-            _snprintf_s(path, MAX_PATH, _TRUNCATE, "%s%s%s-%d", drive, dir, name, pm.mArgs->mRecordingCount);
-        } else {
-            _snprintf_s(path, MAX_PATH, _TRUNCATE, "%s%s%s", drive, dir, name);
+            i += _snprintf_s(path + i, MAX_PATH - i, _TRUNCATE, "-%d", pm.mArgs->mRecordingCount);
         }
     } else {
         strcpy_s(ext, ".csv");
 
-        if (pm.mArgs->mTargetProcessName == nullptr) {
+        if (processName == nullptr) {
             _snprintf_s(path, MAX_PATH, _TRUNCATE, "PresentMon-%s", pm.mCaptureTimeStr);
         } else {
-            _snprintf_s(path, MAX_PATH, _TRUNCATE, "PresentMon-%s-%s", pm.mArgs->mTargetProcessName, pm.mCaptureTimeStr);
+            _snprintf_s(path, MAX_PATH, _TRUNCATE, "PresentMon-%s-%s", processName, pm.mCaptureTimeStr);
         }
     }
 
@@ -135,71 +141,71 @@ static void GenerateOutputFilename(const PresentMonData& pm, bool wmr, char* pat
     strcat_s(path, MAX_PATH, ext);
 }
 
-static void CreateOutputFiles(PresentMonData& pm)
+static void CreateOutputFiles(PresentMonData& pm, const char* processName, FILE** outputFile, FILE** lsrOutputFile)
 {
     // Open output file and print CSV header
     char outputFilePath[MAX_PATH];
-    GenerateOutputFilename(pm, false, outputFilePath);
-    fopen_s(&pm.mOutputFile, outputFilePath, "w");
-    if (pm.mOutputFile) {
-        fprintf(pm.mOutputFile, "Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags");
+    GenerateOutputFilename(pm, processName, false, outputFilePath);
+    fopen_s(outputFile, outputFilePath, "w");
+    if (*outputFile) {
+        fprintf(*outputFile, "Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags");
         if (pm.mArgs->mVerbosity > Verbosity::Simple)
         {
-            fprintf(pm.mOutputFile, ",AllowsTearing,PresentMode");
+            fprintf(*outputFile, ",AllowsTearing,PresentMode");
         }
         if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
         {
-            fprintf(pm.mOutputFile, ",WasBatched,DwmNotified");
+            fprintf(*outputFile, ",WasBatched,DwmNotified");
         }
-        fprintf(pm.mOutputFile, ",Dropped,TimeInSeconds,MsBetweenPresents");
+        fprintf(*outputFile, ",Dropped,TimeInSeconds,MsBetweenPresents");
         if (pm.mArgs->mVerbosity > Verbosity::Simple)
         {
-            fprintf(pm.mOutputFile, ",MsBetweenDisplayChange");
+            fprintf(*outputFile, ",MsBetweenDisplayChange");
         }
-        fprintf(pm.mOutputFile, ",MsInPresentAPI");
+        fprintf(*outputFile, ",MsInPresentAPI");
         if (pm.mArgs->mVerbosity > Verbosity::Simple)
         {
-            fprintf(pm.mOutputFile, ",MsUntilRenderComplete,MsUntilDisplayed");
+            fprintf(*outputFile, ",MsUntilRenderComplete,MsUntilDisplayed");
         }
-        fprintf(pm.mOutputFile, "\n");
+        fprintf(*outputFile, "\n");
     }
 
     if (pm.mArgs->mIncludeWindowsMixedReality) {
         // Open output file and print CSV header
-        GenerateOutputFilename(pm, true, outputFilePath);
-        fopen_s(&pm.mLsrOutputFile, outputFilePath, "w");
-        if (pm.mLsrOutputFile) {
-            fprintf(pm.mLsrOutputFile, "Application,ProcessID,DwmProcessID");
+        GenerateOutputFilename(pm, processName, true, outputFilePath);
+        fopen_s(lsrOutputFile, outputFilePath, "w");
+        if (*lsrOutputFile) {
+            fprintf(*lsrOutputFile, "Application,ProcessID,DwmProcessID");
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(pm.mLsrOutputFile, ",HolographicFrameID");
+                fprintf(*lsrOutputFile, ",HolographicFrameID");
             }
-            fprintf(pm.mLsrOutputFile, ",TimeInSeconds");
+            fprintf(*lsrOutputFile, ",TimeInSeconds");
             if (pm.mArgs->mVerbosity > Verbosity::Simple)
             {
-                fprintf(pm.mLsrOutputFile, ",MsBetweenAppPresents,MsAppPresentToLsr");
+                fprintf(*lsrOutputFile, ",MsBetweenAppPresents,MsAppPresentToLsr");
             }
-            fprintf(pm.mLsrOutputFile, ",MsBetweenLsrs,AppMissed,LsrMissed");
+            fprintf(*lsrOutputFile, ",MsBetweenLsrs,AppMissed,LsrMissed");
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(pm.mLsrOutputFile, ",MsSourceReleaseFromRenderingToLsrAcquire,MsAppCpuRenderFrame");
+                fprintf(*lsrOutputFile, ",MsSourceReleaseFromRenderingToLsrAcquire,MsAppCpuRenderFrame");
             }
-            fprintf(pm.mLsrOutputFile, ",MsAppPoseLatency");
+            fprintf(*lsrOutputFile, ",MsAppPoseLatency");
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(pm.mLsrOutputFile, ",MsAppMisprediction,MsLsrCpuRenderFrame");
+                fprintf(*lsrOutputFile, ",MsAppMisprediction,MsLsrCpuRenderFrame");
             }
-            fprintf(pm.mLsrOutputFile, ",MsLsrPoseLatency,MsActualLsrPoseLatency,MsTimeUntilVsync,MsLsrThreadWakeupToGpuEnd,MsLsrThreadWakeupError");
+            fprintf(*lsrOutputFile, ",MsLsrPoseLatency,MsActualLsrPoseLatency,MsTimeUntilVsync,MsLsrThreadWakeupToGpuEnd,MsLsrThreadWakeupError");
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(pm.mLsrOutputFile, ",MsLsrThreadWakeupToCpuRenderFrameStart,MsCpuRenderFrameStartToHeadPoseCallbackStart,MsGetHeadPose,MsHeadPoseCallbackStopToInputLatch,MsInputLatchToGpuSubmission");
+                fprintf(*lsrOutputFile, ",MsLsrThreadWakeupToCpuRenderFrameStart,MsCpuRenderFrameStartToHeadPoseCallbackStart,MsGetHeadPose,MsHeadPoseCallbackStopToInputLatch,MsInputLatchToGpuSubmission");
             }
-            fprintf(pm.mLsrOutputFile, ",MsLsrPreemption,MsLsrExecution,MsCopyPreemption,MsCopyExecution,MsGpuEndToVsync");
+            fprintf(*lsrOutputFile, ",MsLsrPreemption,MsLsrExecution,MsCopyPreemption,MsCopyExecution,MsGpuEndToVsync");
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(pm.mLsrOutputFile, ",SuspendedThreadBeforeLsr,EarlyLsrDueToInvalidFence");
+                fprintf(*lsrOutputFile, ",SuspendedThreadBeforeLsr,EarlyLsrDueToInvalidFence");
             }
-            fprintf(pm.mLsrOutputFile, "\n");
+            fprintf(*lsrOutputFile, "\n");
         }
     }
 }
@@ -208,6 +214,11 @@ static void TerminateProcess(PresentMonData& pm, ProcessInfo const& proc)
 {
     if (!proc.mTargetProcess) {
         return;
+    }
+
+    // Save the output files in case the process is re-started
+    if (pm.mArgs->mMultiCsv) {
+        pm.mProcessOutputFiles.emplace(proc.mModuleName, std::make_pair(proc.mOutputFile, proc.mLsrOutputFile));
     }
 
     // Quit if this is the last process tracked for -terminate_on_proc_exit
@@ -237,6 +248,8 @@ static void StopProcess(PresentMonData& pm, uint32_t processId)
 static ProcessInfo* StartNewProcess(PresentMonData& pm, ProcessInfo* proc, uint32_t processId, std::string const& imageFileName, uint64_t now)
 {
     proc->mModuleName = imageFileName;
+    proc->mOutputFile = nullptr;
+    proc->mLsrOutputFile = nullptr;
     proc->mLastRefreshTicks = now;
     proc->mTargetProcess =
         (pm.mArgs->mTargetPid == 0 && pm.mArgs->mTargetProcessName == nullptr) || // all processes targetted
@@ -245,6 +258,21 @@ static ProcessInfo* StartNewProcess(PresentMonData& pm, ProcessInfo* proc, uint3
 
     if (!proc->mTargetProcess) {
         return nullptr;
+    }
+
+    // Create output files now if we're creating one per process or if we're
+    // waiting to know the single target process name specified by PID.
+    if (pm.mArgs->mMultiCsv) {
+        auto it = pm.mProcessOutputFiles.find(imageFileName);
+        if (it == pm.mProcessOutputFiles.end()) {
+            CreateOutputFiles(pm, imageFileName.c_str(), &proc->mOutputFile, &proc->mLsrOutputFile);
+        } else {
+            proc->mOutputFile = it->second.first;
+            proc->mLsrOutputFile = it->second.second;
+            pm.mProcessOutputFiles.erase(it);
+        }
+    } else if (pm.mArgs->mOutputFile && pm.mOutputFile == nullptr) {
+        CreateOutputFiles(pm, imageFileName.c_str(), &pm.mOutputFile, &pm.mLsrOutputFile);
     }
 
     // Include process in -terminate_on_proc_exit count
@@ -379,7 +407,8 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
 
     pm.mLateStageReprojectionData.AddLateStageReprojection(p);
 
-    if (pm.mLsrOutputFile && (p.FinalState == LateStageReprojectionResult::Presented || !pm.mArgs->mExcludeDropped)) {
+    auto file = pm.mArgs->mMultiCsv ? proc->mLsrOutputFile : pm.mLsrOutputFile;
+    if (file && (p.FinalState == LateStageReprojectionResult::Presented || !pm.mArgs->mExcludeDropped)) {
         auto len = pm.mLateStageReprojectionData.mLSRHistory.size();
         if (len > 1) {
             auto& curr = pm.mLateStageReprojectionData.mLSRHistory[len - 1];
@@ -387,31 +416,31 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
             const double deltaMilliseconds = 1000 * double(curr.QpcTime - prev.QpcTime) / perfFreq;
             const double timeInSeconds = (double)(int64_t)(p.QpcTime - pm.mStartupQpcTime) / perfFreq;
 
-            fprintf(pm.mLsrOutputFile, "%s,%d,%d", proc->mModuleName.c_str(), curr.GetAppProcessId(), curr.ProcessId);
+            fprintf(file, "%s,%d,%d", proc->mModuleName.c_str(), curr.GetAppProcessId(), curr.ProcessId);
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(pm.mLsrOutputFile, ",%d", curr.GetAppFrameId());
+                fprintf(file, ",%d", curr.GetAppFrameId());
             }
-            fprintf(pm.mLsrOutputFile, ",%.6lf", timeInSeconds);
+            fprintf(file, ",%.6lf", timeInSeconds);
             if (pm.mArgs->mVerbosity > Verbosity::Simple)
             {
                 const uint64_t currAppPresentTime = curr.GetAppPresentTime();
                 const uint64_t prevAppPresentTime = prev.GetAppPresentTime();
                 const double appPresentDeltaMilliseconds = 1000 * double(currAppPresentTime - prevAppPresentTime) / perfFreq;
                 const double appPresentToLsrMilliseconds = 1000 * double(curr.QpcTime - currAppPresentTime) / perfFreq;
-                fprintf(pm.mLsrOutputFile, ",%.6lf,%.6lf", appPresentDeltaMilliseconds, appPresentToLsrMilliseconds);
+                fprintf(file, ",%.6lf,%.6lf", appPresentDeltaMilliseconds, appPresentToLsrMilliseconds);
             }
-            fprintf(pm.mLsrOutputFile, ",%.6lf,%d,%d", deltaMilliseconds, !curr.NewSourceLatched, curr.MissedVsyncCount);
+            fprintf(file, ",%.6lf,%d,%d", deltaMilliseconds, !curr.NewSourceLatched, curr.MissedVsyncCount);
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(pm.mLsrOutputFile, ",%.6lf,%.6lf", 1000 * double(curr.Source.GetReleaseFromRenderingToAcquireForPresentationTime()) / perfFreq, 1000 * double(curr.GetAppCpuRenderFrameTime()) / perfFreq);
+                fprintf(file, ",%.6lf,%.6lf", 1000 * double(curr.Source.GetReleaseFromRenderingToAcquireForPresentationTime()) / perfFreq, 1000 * double(curr.GetAppCpuRenderFrameTime()) / perfFreq);
             }
-            fprintf(pm.mLsrOutputFile, ",%.6lf", curr.AppPredictionLatencyMs);
+            fprintf(file, ",%.6lf", curr.AppPredictionLatencyMs);
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(pm.mLsrOutputFile, ",%.6lf,%.6lf", curr.AppMispredictionMs, curr.GetLsrCpuRenderFrameMs());
+                fprintf(file, ",%.6lf,%.6lf", curr.AppMispredictionMs, curr.GetLsrCpuRenderFrameMs());
             }
-            fprintf(pm.mLsrOutputFile, ",%.6lf,%.6lf,%.6lf,%.6lf,%.6lf",
+            fprintf(file, ",%.6lf,%.6lf,%.6lf,%.6lf,%.6lf",
                 curr.LsrPredictionLatencyMs,
                 curr.GetLsrMotionToPhotonLatencyMs(),
                 curr.TimeUntilVsyncMs,
@@ -419,14 +448,14 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
                 curr.WakeupErrorMs);
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(pm.mLsrOutputFile, ",%.6lf,%.6lf,%.6lf,%.6lf,%.6lf",
+                fprintf(file, ",%.6lf,%.6lf,%.6lf,%.6lf,%.6lf",
                     curr.ThreadWakeupToCpuRenderFrameStartInMs,
                     curr.CpuRenderFrameStartToHeadPoseCallbackStartInMs,
                     curr.HeadPoseCallbackStartToHeadPoseCallbackStopInMs,
                     curr.HeadPoseCallbackStopToInputLatchInMs,
                     curr.InputLatchToGpuSubmissionInMs);
             }
-            fprintf(pm.mLsrOutputFile, ",%.6lf,%.6lf,%.6lf,%.6lf,%.6lf",
+            fprintf(file, ",%.6lf,%.6lf,%.6lf,%.6lf,%.6lf",
                 curr.GpuSubmissionToGpuStartInMs,
                 curr.GpuStartToGpuStopInMs,
                 curr.GpuStopToCopyStartInMs,
@@ -434,9 +463,9 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
                 curr.CopyStopToVsyncInMs);
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(pm.mLsrOutputFile, ",%d,%d", curr.SuspendedThreadBeforeLsr, curr.EarlyLsrDueToInvalidFence);
+                fprintf(file, ",%d,%d", curr.SuspendedThreadBeforeLsr, curr.EarlyLsrDueToInvalidFence);
             }
-            fprintf(pm.mLsrOutputFile, "\n");
+            fprintf(file, "\n");
         }
     }
 
@@ -454,7 +483,8 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
     auto& chain = proc->mChainMap[p.SwapChainAddress];
     chain.AddPresentToSwapChain(p);
 
-    if (pm.mOutputFile && (p.FinalState == PresentResult::Presented || !pm.mArgs->mExcludeDropped)) {
+    auto file = pm.mArgs->mMultiCsv ? proc->mOutputFile : pm.mOutputFile;
+    if (file && (p.FinalState == PresentResult::Presented || !pm.mArgs->mExcludeDropped)) {
         auto len = chain.mPresentHistory.size();
         auto displayedLen = chain.mDisplayedPresentHistory.size();
         if (len > 1) {
@@ -473,27 +503,27 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
             }
 
             double timeInSeconds = (double)(int64_t)(p.QpcTime - pm.mStartupQpcTime) / perfFreq;
-            fprintf(pm.mOutputFile, "%s,%d,0x%016llX,%s,%d,%d",
+            fprintf(file, "%s,%d,0x%016llX,%s,%d,%d",
                     proc->mModuleName.c_str(), appProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime), curr.SyncInterval, curr.PresentFlags);
             if (pm.mArgs->mVerbosity > Verbosity::Simple)
             {
-                fprintf(pm.mOutputFile, ",%d,%s", curr.SupportsTearing, PresentModeToString(curr.PresentMode));
+                fprintf(file, ",%d,%s", curr.SupportsTearing, PresentModeToString(curr.PresentMode));
             }
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(pm.mOutputFile, ",%d,%d", curr.WasBatched, curr.DwmNotified);
+                fprintf(file, ",%d,%d", curr.WasBatched, curr.DwmNotified);
             }
-            fprintf(pm.mOutputFile, ",%s,%.6lf,%.3lf", FinalStateToDroppedString(curr.FinalState), timeInSeconds, deltaMilliseconds);
+            fprintf(file, ",%s,%.6lf,%.3lf", FinalStateToDroppedString(curr.FinalState), timeInSeconds, deltaMilliseconds);
             if (pm.mArgs->mVerbosity > Verbosity::Simple)
             {
-                fprintf(pm.mOutputFile, ",%.3lf", timeSincePreviousDisplayed);
+                fprintf(file, ",%.3lf", timeSincePreviousDisplayed);
             }
-            fprintf(pm.mOutputFile, ",%.3lf", timeTakenMilliseconds);
+            fprintf(file, ",%.3lf", timeTakenMilliseconds);
             if (pm.mArgs->mVerbosity > Verbosity::Simple)
             {
-                fprintf(pm.mOutputFile, ",%.3lf,%.3lf", deltaReady, deltaDisplayed);
+                fprintf(file, ",%.3lf,%.3lf", deltaReady, deltaDisplayed);
             }
-            fprintf(pm.mOutputFile, "\n");
+            fprintf(file, "\n");
         }
     }
 
@@ -525,9 +555,10 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
             tm.tm_hour, tm.tm_min, tm.tm_sec);
     }
 
-    // Open CSV files
-    if (args.mOutputFile) {
-        CreateOutputFiles(pm);
+    // Create output files now if we're not creating one per process and we
+    // don't need to wait for the single process name specified by PID.
+    if (args.mOutputFile && !args.mMultiCsv && args.mTargetPid == 0) {
+        CreateOutputFiles(pm, pm.mArgs->mTargetProcessName, &pm.mOutputFile, &pm.mLsrOutputFile);
     }
 }
 
@@ -768,7 +799,19 @@ void PresentMon_Shutdown(PresentMonData& pm, uint32_t totalEventsLost, uint32_t 
     pm.mOutputFile = nullptr;
     pm.mLsrOutputFile = nullptr;
 
+    for (auto& p : pm.mProcessMap) {
+        auto proc = &p.second;
+        CloseFile(proc->mOutputFile, totalEventsLost, totalBuffersLost);
+        CloseFile(proc->mLsrOutputFile, totalEventsLost, totalBuffersLost);
+    }
+
+    for (auto& p : pm.mProcessOutputFiles) {
+        CloseFile(p.second.first, totalEventsLost, totalBuffersLost);
+        CloseFile(p.second.second, totalEventsLost, totalBuffersLost);
+    }
+
     pm.mProcessMap.clear();
+    pm.mProcessOutputFiles.clear();
 
     if (pm.mArgs->mSimpleConsole == false) {
         SetConsoleText("");

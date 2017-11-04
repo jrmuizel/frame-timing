@@ -229,6 +229,7 @@ void PrintHelp()
         "Output options:\n"
         "    -no_csv                    Do not create any output file.\n"
         "    -output_file [path]        Write CSV output to specified path. See README for defaults.\n"
+        "    -multi_csv                 Create a separate CSV file for each captured process.\n"
         "\n"
         "Control and filtering options:\n"
         "    -etl_file [path]           Consume events from an ETL file instead of a running process.\n"
@@ -283,6 +284,7 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
         // Output options
         else ARG1("-no_csv",                 args->mOutputFile                 = false)
         else ARG2("-output_file",            args->mOutputFileName             = argv[i])
+        else ARG1("-multi_csv",              args->mMultiCsv                   = true)
 
         // Control and filtering options
         else ARG1("-hotkey",                 AssignHotkey(&i, argc, argv, args))
@@ -318,6 +320,12 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
 
     if (args->mEtlFileName && args->mHotkeySupport) {
         fprintf(stderr, "error: -etl_file and -hotkey arguments are not compatible.\n");
+        PrintHelp();
+        return false;
+    }
+
+    if (args->mMultiCsv && !args->mOutputFile) {
+        fprintf(stderr, "error: -multi_csv and -no_csv arguments are not compatible.\n");
         PrintHelp();
         return false;
     }

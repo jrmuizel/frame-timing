@@ -43,6 +43,7 @@ Capture target options:
 Output options:
     -no_csv                    Do not create any output file.
     -output_file [path]        Write CSV output to specified path. See below for defaults.
+    -multi_csv                 Create a separate CSV file for each captured process.
 
 Control and filtering options:
     -etl_file [path]           Consume events from an ETL file instead of a running process.
@@ -72,11 +73,13 @@ The default CSV file name is `PresentMon-TIME.csv`, where `TIME` is the capture
 time in ISO 8601 format.
 
 If the CSV file contains a single target process (`-process_id` or
-`-process_name`) then the CSV filename is `PresentMon-PROCESSNAME-TIME.csv`.
+`-process_name` or `-multi_csv`) then the CSV filename is
+`PresentMon-PROCESSNAME-TIME.csv`.
 
 If an output file name is provided with `-output_file PATH.EXT` then that name
-will be used, but `-INDEX` is appended to `PATH` if `-hotkey` where `INDEX`
-increases each time the hotkey is used.
+will be used, but `-PROCESSNAME` is appended to `PATH` if `-multi_csv`, and
+`-INDEX` is appended if `-hotkey` where `INDEX` increases each time the hotkey
+is used.
 
 In all cases, `_WMR` is added to the file name if `-include_mixed_reality` is
 used.

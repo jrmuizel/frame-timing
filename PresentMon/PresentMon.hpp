@@ -38,6 +38,8 @@ struct ProcessInfo {
     std::string mModuleName;
     std::map<uint64_t, SwapChainData> mChainMap;
     uint64_t mLastRefreshTicks; // GetTickCount64
+    FILE *mOutputFile;          // Used if -multi_csv
+    FILE *mLsrOutputFile;       // Used if -multi_csv
     bool mTargetProcess;
 };
 
@@ -45,9 +47,10 @@ struct PresentMonData {
     char mCaptureTimeStr[18] = "";
     const CommandLineArgs *mArgs = nullptr;
     uint64_t mStartupQpcTime = 0;
-    FILE *mOutputFile = nullptr;
-    FILE *mLsrOutputFile = nullptr;
+    FILE *mOutputFile = nullptr;    // Used if not -multi_csv
+    FILE *mLsrOutputFile = nullptr; // Used if not -multi_csv
     std::map<uint32_t, ProcessInfo> mProcessMap;
+    std::map<std::string, std::pair<FILE*, FILE*> > mProcessOutputFiles;
     LateStageReprojectionData mLateStageReprojectionData;
     uint32_t mTerminationProcessCount = 0;
 };
