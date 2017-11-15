@@ -223,6 +223,13 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
         const uint64_t ptr = GetEventData<uint64_t>(pEventRecord, L"thisPtr");
         auto sourceIter = mrConsumer->FindOrCreatePresentationSource(ptr);
         sourceIter->second->ReleaseFromPresentationTime = *(uint64_t*)&hdr.TimeStamp;
+
+        // Update the active LSR event based on the latest info in the source.
+        // Note: We take a snapshot (copy) the data.
+        auto& pEvent = mrConsumer->mActiveLSR;
+        if (pEvent) {
+            pEvent->Source = *sourceIter->second;
+        }
     }
     else if (taskName.compare(L"OasisPresentationSource") == 0)
     {
@@ -262,16 +269,16 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
             const float timeUntilPhotonsMiddleMs = (timeUntilPhotonsTopMs + timeUntilPhotonsBottomMs) / 2;
             pEvent->LsrPredictionLatencyMs = timeUntilPhotonsMiddleMs;
 
-            // Now that we've latched, the source has been acquired for presentation.
-            auto sourceIter = mrConsumer->FindOrCreatePresentationSource(pEvent->Source.Ptr);
-            assert(sourceIter->second->AcquireForPresentationTime != 0);
-
             if (!mrConsumer->mSimpleMode) {
                 // Get the latest details about the Holographic Frame being used for presentation.
                 // Link Presentation Source -> Holographic Frame using the PresentId.
                 const uint32_t presentId = GetEventData<uint32_t>(pEventRecord, L"PresentId");
                 auto frameIter = mrConsumer->mHolographicFramesByPresentId.find(presentId);
                 if (frameIter != mrConsumer->mHolographicFramesByPresentId.end()) {
+                    // Now that we've latched, the source has been acquired for presentation.
+                    auto sourceIter = mrConsumer->FindOrCreatePresentationSource(pEvent->Source.Ptr);
+                    assert(sourceIter->second->AcquireForPresentationTime != 0);
+
                     // Update the source with information about the Holographic Frame being used.
                     sourceIter->second->pHolographicFrame = frameIter->second;
 
@@ -279,10 +286,6 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
                     mrConsumer->CompleteHolographicFrame(frameIter->second);
                 }
             }
-
-            // Update the LSR event based on the latest info in the source.
-            // Note: We take a snapshot (copy) the data.
-            pEvent->Source = *sourceIter->second;
          }
     }
     else if (taskName.compare(L"LsrThread_UnaccountedForVsyncsBetweenStatGathering") == 0)

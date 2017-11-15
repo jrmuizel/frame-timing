@@ -169,6 +169,11 @@ struct LateStageReprojectionEvent {
     LateStageReprojectionEvent(EVENT_HEADER const& hdr);
     ~LateStageReprojectionEvent();
 
+    inline bool IsValidAppFrame() const
+    {
+        return Source.pHolographicFrame != nullptr;
+    }
+
     inline uint32_t GetAppFrameId() const
     {
         return Source.pHolographicFrame ? Source.pHolographicFrame->FrameId : 0;
