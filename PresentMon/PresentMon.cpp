@@ -230,10 +230,6 @@ static void CreateOutputFiles(PresentMonData& pm, const char* processName, FILE*
                 fprintf(*lsrOutputFile, ",MsLsrThreadWakeupToCpuRenderFrameStart,MsCpuRenderFrameStartToHeadPoseCallbackStart,MsGetHeadPose,MsHeadPoseCallbackStopToInputLatch,MsInputLatchToGpuSubmission");
             }
             fprintf(*lsrOutputFile, ",MsLsrPreemption,MsLsrExecution,MsCopyPreemption,MsCopyExecution,MsGpuEndToVsync");
-            if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
-            {
-                fprintf(*lsrOutputFile, ",SuspendedThreadBeforeLsr,EarlyLsrDueToInvalidFence");
-            }
             fprintf(*lsrOutputFile, "\n");
         }
     }
@@ -483,12 +479,12 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
                 curr.LsrPredictionLatencyMs,
                 curr.GetLsrMotionToPhotonLatencyMs(),
                 curr.TimeUntilVsyncMs,
-                curr.GetLsrThreadWakeupToGpuEndMs(),
-                curr.WakeupErrorMs);
+                curr.GetLsrThreadWakeupStartLatchToGpuEndMs(),
+                curr.TotalWakeupErrorMs);
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
                 fprintf(file, ",%.6lf,%.6lf,%.6lf,%.6lf,%.6lf",
-                    curr.ThreadWakeupToCpuRenderFrameStartInMs,
+                    curr.ThreadWakeupStartLatchToCpuRenderFrameStartInMs,
                     curr.CpuRenderFrameStartToHeadPoseCallbackStartInMs,
                     curr.HeadPoseCallbackStartToHeadPoseCallbackStopInMs,
                     curr.HeadPoseCallbackStopToInputLatchInMs,
@@ -500,10 +496,6 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
                 curr.GpuStopToCopyStartInMs,
                 curr.CopyStartToCopyStopInMs,
                 curr.CopyStopToVsyncInMs);
-            if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
-            {
-                fprintf(file, ",%d,%d", curr.SuspendedThreadBeforeLsr, curr.EarlyLsrDueToInvalidFence);
-            }
             fprintf(file, "\n");
         }
     }

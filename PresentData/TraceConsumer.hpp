@@ -31,7 +31,7 @@ void PrintEventInformation(FILE* fp, EVENT_RECORD* pEventRecord);
 std::wstring GetEventTaskName(EVENT_RECORD* pEventRecord);
 
 template <typename T>
-bool GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name, T* out)
+bool GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name, T* out, bool bPrintOnError = true)
 {
     PROPERTY_DATA_DESCRIPTOR descriptor;
     descriptor.PropertyName = (ULONGLONG) name;
@@ -39,8 +39,10 @@ bool GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name, T* out)
 
     auto status = TdhGetProperty(pEventRecord, 0, nullptr, 1, &descriptor, sizeof(T), (BYTE*) out);
     if (status != ERROR_SUCCESS) {
-        fprintf(stderr, "error: could not get event %ls property (error=%lu).\n", name, status);
-        PrintEventInformation(stderr, pEventRecord);
+        if (bPrintOnError) {
+            fprintf(stderr, "error: could not get event %ls property (error=%lu).\n", name, status);
+            PrintEventInformation(stderr, pEventRecord);
+        }
         return false;
     }
 
@@ -56,4 +58,4 @@ T GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name)
     return value;
 }
 
-template <> bool GetEventData<std::string>(EVENT_RECORD* pEventRecord, wchar_t const* name, std::string* out);
+template <> bool GetEventData<std::string>(EVENT_RECORD* pEventRecord, wchar_t const* name, std::string* out, bool bPrintOnError);
