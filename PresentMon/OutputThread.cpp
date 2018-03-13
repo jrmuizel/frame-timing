@@ -480,11 +480,17 @@ done:
     if (terminatedProcessIndex > 0) {
         terminatedProcesses->erase(terminatedProcesses->begin(), terminatedProcesses->begin() + terminatedProcessIndex);
     }
+
+    if (DebugDone()) {
+        ExitMainThread();
+    }
 }
 
 void Output()
 {
+#if !DEBUG_VERBOSE
     auto const& args = GetCommandLineArgs();
+#endif
 
     // Structures to track processes and statistics from recorded events.
     LateStageReprojectionData lsrData;
@@ -515,6 +521,7 @@ void Output()
         // gIsRecording is the real timeline recording state.  Because we're
         // just reading it without correlation to gRecordingToggleHistory, we
         // don't need the critical section.
+#if !DEBUG_VERBOSE
         auto realtimeRecording = gIsRecording;
         switch (args.mConsoleOutputType) {
         case ConsoleOutput::None:
@@ -538,6 +545,7 @@ void Output()
             CommitConsole();
             break;
         }
+#endif
 
         // Everything is processed and output out at this point, so if we're
         // quiting we don't need to update the rest.

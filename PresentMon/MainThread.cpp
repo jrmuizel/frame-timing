@@ -84,9 +84,11 @@ static void StartRecording()
     gIsRecording = true;
 
     // Notify user we're recording
+#if !DEBUG_VERBOSE
     if (args.mConsoleOutputType == ConsoleOutput::Simple) {
         printf("Started recording.\n");
     }
+#endif
     if (args.mScrollLockIndicator) {
         EnableScrollLock(true);
     }
@@ -117,9 +119,11 @@ static void StopRecording()
     if (args.mScrollLockIndicator) {
         EnableScrollLock(false);
     }
+#if !DEBUG_VERBOSE
     if (args.mConsoleOutputType == ConsoleOutput::Simple) {
         printf("Stopped recording.\n");
     }
+#endif
 }
 
 // Handle Ctrl events (CTRL_C_EVENT, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT,

@@ -22,8 +22,6 @@ SOFTWARE.
 
 #include "PresentMon.hpp"
 
-#include "../PresentData/MixedRealityTraceConsumer.hpp"
-
 struct TraceProperties : public EVENT_TRACE_PROPERTIES {
     wchar_t mSessionName[MAX_PATH];
 };
@@ -271,6 +269,8 @@ bool StartTraceSession()
     if (!args.mEtlFileName) {
         QueryPerformanceCounter((LARGE_INTEGER*) &gQpcTraceStart);
     }
+
+    DebugInitialize(&gQpcTraceStart, gQpcFrequency);
 
     // -------------------------------------------------------------------------
     // Start the consumer and output threads

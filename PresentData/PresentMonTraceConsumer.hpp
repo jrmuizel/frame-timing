@@ -34,6 +34,8 @@ SOFTWARE.
 
 #include <initguid.h>
 #include <KernelTraceControl.h>
+
+#include "Debug.hpp"
 #include "TraceConsumer.hpp"
 
 struct __declspec(uuid("{CA11C036-0102-4A2D-A6AD-F03CFED5D3C9}")) DXGI_PROVIDER_GUID_HOLDER;
@@ -150,8 +152,16 @@ struct PresentEvent {
     // Additional transient state
     std::deque<std::shared_ptr<PresentEvent>> DependentPresents;
 
+#if DEBUG_VERBOSE
+    uint64_t Id;
+#endif
+
     PresentEvent(EVENT_HEADER const& hdr, ::Runtime runtime);
     ~PresentEvent();
+
+    void SetPresentMode(::PresentMode mode);
+    void SetDwmNotified(bool notified);
+    void SetTokenPtr(uint64_t tokenPtr);
 };
 
 // A high-level description of the sequence of events for each present type,
@@ -321,9 +331,9 @@ struct PMTraceConsumer
     void HandleDxgkSubmitPresentHistoryEventArgs(DxgkSubmitPresentHistoryEventArgs& args);
     void HandleDxgkPropagatePresentHistoryEventArgs(DxgkPropagatePresentHistoryEventArgs& args);
 
-    void CompletePresent(std::shared_ptr<PresentEvent> p);
+    void CompletePresent(std::shared_ptr<PresentEvent> p, uint32_t recurseDepth=0);
     decltype(mPresentByThreadId.begin()) FindOrCreatePresent(EVENT_HEADER const& hdr);
-    void RuntimePresentStart(PresentEvent &event);
+    void CreatePresent(PresentEvent &event);
     void RuntimePresentStop(EVENT_HEADER const& hdr, bool AllowPresentBatching);
 };
 
