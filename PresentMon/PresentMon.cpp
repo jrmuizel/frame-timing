@@ -230,10 +230,6 @@ static void CreateOutputFiles(PresentMonData& pm, const char* processName, FILE*
                 fprintf(*lsrOutputFile, ",MsLsrThreadWakeupToCpuRenderFrameStart,MsCpuRenderFrameStartToHeadPoseCallbackStart,MsGetHeadPose,MsHeadPoseCallbackStopToInputLatch,MsInputLatchToGpuSubmission");
             }
             fprintf(*lsrOutputFile, ",MsLsrPreemption,MsLsrExecution,MsCopyPreemption,MsCopyExecution,MsGpuEndToVsync");
-            if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
-            {
-                fprintf(*lsrOutputFile, ",SuspendedThreadBeforeLsr,EarlyLsrDueToInvalidFence");
-            }
             fprintf(*lsrOutputFile, "\n");
         }
     }
@@ -431,6 +427,10 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
         return; // process is not a target
     }
 
+    if ((pm.mArgs->mVerbosity > Verbosity::Simple) && (appProcessId == 0)) {
+        return;	// Incomplete event data
+    }
+
     pm.mLateStageReprojectionData.AddLateStageReprojection(p);
 
     auto file = pm.mArgs->mMultiCsv ? proc->mLsrOutputFile : pm.mLsrOutputFile;
@@ -450,10 +450,19 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
             fprintf(file, ",%.6lf", timeInSeconds);
             if (pm.mArgs->mVerbosity > Verbosity::Simple)
             {
-                const uint64_t currAppPresentTime = curr.GetAppPresentTime();
-                const uint64_t prevAppPresentTime = prev.GetAppPresentTime();
-                const double appPresentDeltaMilliseconds = 1000 * double(currAppPresentTime - prevAppPresentTime) / perfFreq;
-                const double appPresentToLsrMilliseconds = 1000 * double(curr.QpcTime - currAppPresentTime) / perfFreq;
+                double appPresentDeltaMilliseconds = 0.0;
+                double appPresentToLsrMilliseconds = 0.0;
+                if (curr.IsValidAppFrame())
+                {
+                    const uint64_t currAppPresentTime = curr.GetAppPresentTime();
+                    appPresentToLsrMilliseconds = 1000 * double(curr.QpcTime - currAppPresentTime) / perfFreq;
+
+                    if (prev.IsValidAppFrame() && (curr.GetAppProcessId() == prev.GetAppProcessId()))
+                    {
+                        const uint64_t prevAppPresentTime = prev.GetAppPresentTime();
+                        appPresentDeltaMilliseconds = 1000 * double(currAppPresentTime - prevAppPresentTime) / perfFreq;
+                    }
+                }
                 fprintf(file, ",%.6lf,%.6lf", appPresentDeltaMilliseconds, appPresentToLsrMilliseconds);
             }
             fprintf(file, ",%.6lf,%d,%d", deltaMilliseconds, !curr.NewSourceLatched, curr.MissedVsyncCount);
@@ -470,12 +479,12 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
                 curr.LsrPredictionLatencyMs,
                 curr.GetLsrMotionToPhotonLatencyMs(),
                 curr.TimeUntilVsyncMs,
-                curr.GetLsrThreadWakeupToGpuEndMs(),
-                curr.WakeupErrorMs);
+                curr.GetLsrThreadWakeupStartLatchToGpuEndMs(),
+                curr.TotalWakeupErrorMs);
             if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
             {
                 fprintf(file, ",%.6lf,%.6lf,%.6lf,%.6lf,%.6lf",
-                    curr.ThreadWakeupToCpuRenderFrameStartInMs,
+                    curr.ThreadWakeupStartLatchToCpuRenderFrameStartInMs,
                     curr.CpuRenderFrameStartToHeadPoseCallbackStartInMs,
                     curr.HeadPoseCallbackStartToHeadPoseCallbackStopInMs,
                     curr.HeadPoseCallbackStopToInputLatchInMs,
@@ -487,10 +496,6 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionEvent& p,
                 curr.GpuStopToCopyStartInMs,
                 curr.CopyStartToCopyStopInMs,
                 curr.CopyStopToVsyncInMs);
-            if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
-            {
-                fprintf(file, ",%d,%d", curr.SuspendedThreadBeforeLsr, curr.EarlyLsrDueToInvalidFence);
-            }
             fprintf(file, "\n");
         }
     }

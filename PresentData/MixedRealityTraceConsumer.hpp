@@ -138,7 +138,7 @@ struct LateStageReprojectionEvent {
     PresentationSource Source;  // A copy of the PresentationSource used when the input was latched.
     bool NewSourceLatched;
 
-    float ThreadWakeupToCpuRenderFrameStartInMs;
+    float ThreadWakeupStartLatchToCpuRenderFrameStartInMs;
     float CpuRenderFrameStartToHeadPoseCallbackStartInMs;
     float HeadPoseCallbackStartToHeadPoseCallbackStopInMs;
     float HeadPoseCallbackStopToInputLatchInMs;
@@ -152,12 +152,9 @@ struct LateStageReprojectionEvent {
     float LsrPredictionLatencyMs;
     float AppPredictionLatencyMs;
     float AppMispredictionMs;
-    float WakeupErrorMs;
+    float TotalWakeupErrorMs;
     float TimeUntilVsyncMs;
     float TimeUntilPhotonsMiddleMs;
-
-    bool EarlyLsrDueToInvalidFence;
-    bool SuspendedThreadBeforeLsr;
 
     uint32_t ProcessId;
     LateStageReprojectionResult FinalState;
@@ -168,6 +165,11 @@ struct LateStageReprojectionEvent {
 
     LateStageReprojectionEvent(EVENT_HEADER const& hdr);
     ~LateStageReprojectionEvent();
+
+    inline bool IsValidAppFrame() const
+    {
+        return Source.pHolographicFrame != nullptr;
+    }
 
     inline uint32_t GetAppFrameId() const
     {
@@ -197,9 +199,9 @@ struct LateStageReprojectionEvent {
             InputLatchToGpuSubmissionInMs;
     }
 
-    inline float GetLsrThreadWakeupToGpuEndMs() const
+    inline float GetLsrThreadWakeupStartLatchToGpuEndMs() const
     {
-        return ThreadWakeupToCpuRenderFrameStartInMs +
+        return ThreadWakeupStartLatchToCpuRenderFrameStartInMs +
             CpuRenderFrameStartToHeadPoseCallbackStartInMs +
             HeadPoseCallbackStartToHeadPoseCallbackStopInMs +
             HeadPoseCallbackStopToInputLatchInMs +

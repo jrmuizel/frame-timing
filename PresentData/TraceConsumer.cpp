@@ -175,7 +175,7 @@ std::wstring GetEventTaskName(EVENT_RECORD* pEventRecord)
 }
 
 template <>
-bool GetEventData<std::string>(EVENT_RECORD* pEventRecord, wchar_t const* name, std::string* out)
+bool GetEventData<std::string>(EVENT_RECORD* pEventRecord, wchar_t const* name, std::string* out, bool bPrintOnError)
 {
     PROPERTY_DATA_DESCRIPTOR descriptor;
     descriptor.PropertyName = (ULONGLONG) name;
@@ -184,7 +184,9 @@ bool GetEventData<std::string>(EVENT_RECORD* pEventRecord, wchar_t const* name, 
     ULONG propertySize = 0;
     auto status = TdhGetPropertySize(pEventRecord, 0, nullptr, 1, &descriptor, &propertySize);
     if (status != ERROR_SUCCESS) {
-        fprintf(stderr, "error: could not get event %ls property's size (error=%u).\n", name, status);
+        if (bPrintOnError) {
+            fprintf(stderr, "error: could not get event %ls property's size (error=%u).\n", name, status);
+        }
         return false;
     }
 
@@ -192,7 +194,9 @@ bool GetEventData<std::string>(EVENT_RECORD* pEventRecord, wchar_t const* name, 
     auto buffer = (BYTE*) out->data();
     status = TdhGetProperty(pEventRecord, 0, nullptr, 1, &descriptor, propertySize, buffer);
     if (status != ERROR_SUCCESS) {
-        fprintf(stderr, "error: could not get event %ls property (error=%u).\n", name, status);
+        if (bPrintOnError) {
+            fprintf(stderr, "error: could not get event %ls property (error=%u).\n", name, status);
+        }
         return false;
     }
 

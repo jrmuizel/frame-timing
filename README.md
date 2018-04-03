@@ -178,6 +178,4 @@ All of the above columns above, plus:
 | MsGetHeadPose                                | Time between Lsr pose sample start and pose sample end |
 | MsHeadPoseCallbackStopToInputLatch           | Time between Lsr pose sample end and input latch |
 | MsInputLatchToGpuSubmission                  | Time between Lsr input latch and GPU work submit |
-| SuspendedThreadBeforeLsr                     | The Lsr thread was suspended |
-| EarlyLsrDueToInvalidFence                    | The Lsr thread scheduling failed, Lsr was performed immediately. |
 
