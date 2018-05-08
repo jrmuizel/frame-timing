@@ -849,18 +849,38 @@ void PresentMon_Shutdown(PresentMonData& pm, uint32_t totalEventsLost, uint32_t 
     }
 }
 
-static bool g_EtwProcessingThreadProcessing = false;
+static bool g_TraceDone = false;
 static void EtwProcessingThread(TraceSession *session)
 {
-    assert(g_EtwProcessingThreadProcessing == true);
-
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
 
-    auto status = ProcessTrace(&session->traceHandle_, 1, NULL, NULL);
-    (void) status; // check: _status == ERROR_SUCCESS;
+    // You must call OpenTrace() prior to calling this function
+    //
+    // ProcessTrace() blocks the calling thread until it
+    //     1) delivers all events,
+    //     2) the BufferCallback function returns FALSE,
+    //     3) you call CloseTrace(),
+    //     4) the controller stops the trace session (if realtime collection).
+    //
+    // There may be a several second delay before the function returns.
+    //
+    // ProcessTrace() is supposed to return ERROR_CANCELLED if BufferCallback
+    // (EtwThreadsShouldQuit) returns FALSE; and ERROR_SUCCESS if the trace
+    // completes (parses the entire ETL, fills the maximum file size, or is
+    // explicitly closed).
+    //
+    // However, it seems to always return ERROR_SUCCESS.
 
-    // Notify EtwConsumingThread that processing is complete
-    g_EtwProcessingThreadProcessing = false;
+    auto status = ProcessTrace(&session->traceHandle_, 1, NULL, NULL);
+    (void) status;
+
+    // If ProcessTrace() finished on it's own, record that was the end
+    // condition and signal MainThread to shut everything down.
+    if (!EtwThreadsShouldQuit()) {
+        g_TraceDone = true;
+        PostStopRecording();
+        PostQuitProcess();
+    }
 }
 
 void EtwConsumingThread(const CommandLineArgs& args)
@@ -901,8 +921,10 @@ void EtwConsumingThread(const CommandLineArgs& args)
     session.AddHandler(Win7::DXGKMMIOFLIP_GUID,       (EventHandlerFn) &Win7::HandleDxgkMMIOFlip,       &pmConsumer);
 
     if (!(args.mEtlFileName == nullptr
-        ? session.InitializeRealtime("PresentMon", &EtwThreadsShouldQuit)
+        ? session.InitializeRealtime(args.mSessionName, &EtwThreadsShouldQuit)
         : session.InitializeEtlFile(args.mEtlFileName, &EtwThreadsShouldQuit))) {
+        PostStopRecording();
+        PostQuitProcess();
         return;
     }
 
@@ -915,7 +937,7 @@ void EtwConsumingThread(const CommandLineArgs& args)
 
     {
         // Launch the ETW producer thread
-        g_EtwProcessingThreadProcessing = true;
+        g_TraceDone = false;
         std::thread etwProcessingThread(EtwProcessingThread, &session);
 
         // Consume / Update based on the ETW output
@@ -966,7 +988,7 @@ void EtwConsumingThread(const CommandLineArgs& args)
                     lsrs.clear();
                 }
 
-                auto doneProcessingEvents = g_EtwProcessingThreadProcessing ? false : true;
+                auto doneProcessingEvents = EtwThreadsShouldQuit();
                 PresentMon_Update(data, presents, lsrs, now, session.frequency_);
 
                 for (auto ntProcessEvent : ntProcessEvents) {
@@ -1001,11 +1023,6 @@ void EtwConsumingThread(const CommandLineArgs& args)
                 }
 
                 if (doneProcessingEvents) {
-                    assert(EtwThreadsShouldQuit() || args.mEtlFileName);
-                    if (!EtwThreadsShouldQuit()) {
-                        PostStopRecording();
-                        PostQuitProcess();
-                    }
                     break;
                 }
 
@@ -1015,8 +1032,11 @@ void EtwConsumingThread(const CommandLineArgs& args)
             PresentMon_Shutdown(data, totalEventsLost, totalBuffersLost);
         }
 
+        if (!g_TraceDone) {
+            session.Stop();
+        }
+
         assert(etwProcessingThread.joinable());
-        assert(!g_EtwProcessingThreadProcessing);
         etwProcessingThread.join();
     }
 

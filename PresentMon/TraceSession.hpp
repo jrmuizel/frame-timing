@@ -1,5 +1,5 @@
 /*
-Copyright 2017 Intel Corporation
+Copyright 2017-2018 Intel Corporation
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -105,5 +105,7 @@ struct TraceSession {
     // Call CheckLostReports() at any time the session is initialized to query
     // how many events and buffers have been lost while tracing.
     bool CheckLostReports(uint32_t* eventsLost, uint32_t* buffersLost);
+
+    void Stop();
 };
 

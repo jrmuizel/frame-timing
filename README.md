@@ -73,6 +73,11 @@ Control and filtering options:
     -verbose                   Adds additional data to output not relevant to normal usage.
     -dont_restart_as_admin     Don't try to elevate privilege.
     -no_top                    Don't display active swap chains in the console window.
+    -session_name [name]       Use the specified name to start a new realtime ETW session, instead
+                               of the default "PresentMon". This can be used to start multiple
+                               realtime capture process at the same time (using distinct names).
+                               When a realtime PresentMon capture starts, any existing sessions
+                               with the same name are stopped.
     -include_mixed_reality     [Beta] Include Windows Mixed Reality data. If enabled, writes csv output
                                to a separate file (with "_WMR" suffix).
 ```

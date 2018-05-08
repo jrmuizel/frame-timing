@@ -1,5 +1,5 @@
 /*
-Copyright 2017 Intel Corporation
+Copyright 2017-2018 Intel Corporation
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -36,6 +36,7 @@ struct CommandLineArgs {
     std::vector<const char*> mExcludeProcessNames;
     const char *mOutputFileName;
     const char *mEtlFileName;
+    const char *mSessionName;
     UINT mTargetPid;
     UINT mDelay;
     UINT mTimer;

@@ -1,5 +1,5 @@
 /*
-Copyright 2017 Intel Corporation
+Copyright 2017-2018 Intel Corporation
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -220,15 +220,23 @@ bool TraceSession::InitializeRealtime(char const* traceSessionName, ShouldStopPr
     properties_.LoggerNameOffset = offsetof(TraceSession, loggerName_);
 
     auto status = StartTraceA(&sessionHandle_, traceSessionName, &properties_);
+
+    // If a session with this same name is already running, we stop it and
+    // start a new session.  This is useful if a previous process failed to
+    // properly shut down the session for some reason.
     if (status == ERROR_ALREADY_EXISTS) {
-#ifdef _DEBUG
-        fprintf(stderr, "warning: trying to start trace session that already exists.\n");
-#endif
+        fprintf(stderr,
+            "warning: a trace session named \"%s\" is already running; it will be stopped.\n"
+            "         Use -session_name with a different name to start a new session.\n",
+            traceSessionName);
+
         status = ControlTraceA((TRACEHANDLE) 0, traceSessionName, &properties_, EVENT_TRACE_CONTROL_STOP);
         if (status == ERROR_SUCCESS) {
             status = StartTraceA(&sessionHandle_, traceSessionName, &properties_);
         }
     }
+
+    // Report error if we failed to start a new session
     if (status != ERROR_SUCCESS) {
         fprintf(stderr, "error: failed to start trace session (error=%lu).\n", status);
         return false;
@@ -272,46 +280,63 @@ void TraceSession::Finalize()
         traceHandle_ = INVALID_PROCESSTRACE_HANDLE;
     }
 
-    if (sessionHandle_ != 0) {
-        status = ControlTraceW(sessionHandle_, nullptr, &properties_, EVENT_TRACE_CONTROL_STOP);
-
-        while (!eventProvider_.empty()) {
-            RemoveProvider(eventProvider_.begin()->first);
-        }
-        while (!eventHandler_.empty()) {
-            RemoveHandler(eventHandler_.begin()->first);
-        }
-
-        sessionHandle_ = 0;
+    while (!eventProvider_.empty()) {
+        RemoveProvider(eventProvider_.begin()->first);
     }
+    while (!eventHandler_.empty()) {
+        RemoveHandler(eventHandler_.begin()->first);
+    }
+
+    sessionHandle_ = 0;
+}
+
+void TraceSession::Stop()
+{
+    if (sessionHandle_ == 0) {
+        return;
+    }
+
+    auto status = ControlTraceW(sessionHandle_, nullptr, &properties_, EVENT_TRACE_CONTROL_STOP);
+    (void) status;
+
+    sessionHandle_ = 0;
 }
 
 bool TraceSession::CheckLostReports(uint32_t* eventsLost, uint32_t* buffersLost)
 {
-    if (sessionHandle_ == 0) {
-        *eventsLost = 0;
-        *buffersLost = 0;
-        return false;
+    bool ret = false;
+
+    if (sessionHandle_ != 0) {
+        auto status = ControlTraceW(sessionHandle_, nullptr, &properties_, EVENT_TRACE_CONTROL_QUERY);
+        switch (status) {
+        case ERROR_SUCCESS:
+            *eventsLost = properties_.EventsLost - eventsLostCount_;
+            *buffersLost = properties_.RealTimeBuffersLost - buffersLostCount_;
+            eventsLostCount_ = properties_.EventsLost;
+            buffersLostCount_ = properties_.RealTimeBuffersLost;
+            ret = *eventsLost + *buffersLost > 0;
+            break;
+
+        // The buffer &properties_ is too small to hold all the information for
+        // the session.  If you don't need the session's property information
+        // you can ignore this error.
+        case ERROR_MORE_DATA:
+
+        // The session is no longer running
+        case ERROR_WMI_INSTANCE_NOT_FOUND:
+
+            *eventsLost = 0;
+            *buffersLost = 0;
+            break;
+
+        default:
+            fprintf(stderr, "warning: failed to query trace status (%lu).\n", status);
+            *eventsLost = 0;
+            *buffersLost = 0;
+            break;
+        }
     }
 
-    auto status = ControlTraceW(sessionHandle_, nullptr, &properties_, EVENT_TRACE_CONTROL_QUERY);
-    if (status == ERROR_MORE_DATA) {    // The buffer &properties_ is too small to hold all the information
-        *eventsLost = 0;                // for the session.  If you don't need the session's property information
-        *buffersLost = 0;               // you can ignore this error.
-        return false;
-    }
-
-    if (status != ERROR_SUCCESS) {
-        fprintf(stderr, "error: failed to query trace status (%lu).\n", status);
-        *eventsLost = 0;
-        *buffersLost = 0;
-        return false;
-    }
-
-    *eventsLost = properties_.EventsLost - eventsLostCount_;
-    *buffersLost = properties_.RealTimeBuffersLost - buffersLostCount_;
-    eventsLostCount_ = properties_.EventsLost;
-    buffersLostCount_ = properties_.RealTimeBuffersLost;
-    return *eventsLost + *buffersLost > 0;
+    return ret;
 }
 

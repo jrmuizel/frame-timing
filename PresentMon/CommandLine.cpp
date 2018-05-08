@@ -1,5 +1,5 @@
 /*
-Copyright 2017 Intel Corporation
+Copyright 2017-2018 Intel Corporation
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -251,6 +251,11 @@ void PrintHelp()
         "    -verbose                   Adds additional data to output not relevant to normal usage.\n"
         "    -dont_restart_as_admin     Don't try to elevate privilege.\n"
         "    -no_top                    Don't display active swap chains in the console window.\n"
+        "    -session_name [name]       Use the specified name to start a new realtime ETW session, instead\n"
+        "                               of the default \"PresentMon\". This can be used to start multiple\n"
+        "                               realtime capture process at the same time (using distinct names).\n"
+        "                               When a realtime PresentMon capture starts, any existing sessions\n"
+        "                               with the same name are stopped.\n"
         "    -include_mixed_reality     [Beta] Include Windows Mixed Reality data. If enabled, writes csv output\n"
         "                               to a separate file (with \"_WMR\" suffix).\n"
         , PRESENT_MON_VERSION);
@@ -264,6 +269,7 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
     args->mExcludeProcessNames.clear();
     args->mOutputFileName = nullptr;
     args->mEtlFileName = nullptr;
+    args->mSessionName = "PresentMon";
     args->mTargetPid = 0;
     args->mDelay = 0;
     args->mTimer = 0;
@@ -333,6 +339,7 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
         else ARG1("-verbose",                verbose                           = true)
         else ARG1("-dont_restart_as_admin",  args->mTryToElevate               = false)
         else ARG1("-no_top",                 args->mSimpleConsole              = true)
+        else ARG2("-session_name",           args->mSessionName                = argv[i])
         else ARG1("-include_mixed_reality",  args->mIncludeWindowsMixedReality = true)
 
         // Provided argument wasn't recognized
@@ -348,6 +355,10 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
     if (args->mEtlFileName && args->mHotkeySupport) {
         fprintf(stderr, "warning: -etl_file and -hotkey arguments are not compatible; ignoring -hotkey.\n");
         args->mHotkeySupport = false;
+    }
+
+    if (args->mEtlFileName && strcmp(args->mSessionName, "PresentMon") != 0) {
+        fprintf(stderr, "warning: -session_name is not applicable when -etl_file parsing; ignoring -session_name.\n");
     }
 
     if (args->mMultiCsv && !args->mOutputFile) {
