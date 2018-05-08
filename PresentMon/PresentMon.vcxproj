@@ -121,7 +121,7 @@
     <CustomBuildStep>
       <Message>Generating version sources</Message>
       <Command>..\scripts\generate_version_sources.cmd $(PresentMonVersion) "$(IntDir)generated\version.h"</Command>
-      <Outputs>%(IntDir)generated\version.h</Outputs>
+      <Outputs>$(IntDir)generated\version.h</Outputs>
       <TreatOutputAsContent>false</TreatOutputAsContent>
     </CustomBuildStep>
   </ItemDefinitionGroup>
@@ -147,7 +147,7 @@
     <CustomBuildStep>
       <Message>Generating version sources</Message>
       <Command>..\scripts\generate_version_sources.cmd $(PresentMonVersion) "$(IntDir)generated\version.h"</Command>
-      <Outputs>%(IntDir)generated\version.h</Outputs>
+      <Outputs>$(IntDir)generated\version.h</Outputs>
       <TreatOutputAsContent>false</TreatOutputAsContent>
     </CustomBuildStep>
   </ItemDefinitionGroup>
@@ -177,7 +177,7 @@
     <CustomBuildStep>
       <Message>Generating version sources</Message>
       <Command>..\scripts\generate_version_sources.cmd $(PresentMonVersion) "$(IntDir)generated\version.h"</Command>
-      <Outputs>%(IntDir)generated\version.h</Outputs>
+      <Outputs>$(IntDir)generated\version.h</Outputs>
       <TreatOutputAsContent>false</TreatOutputAsContent>
     </CustomBuildStep>
   </ItemDefinitionGroup>
@@ -207,7 +207,7 @@
     <CustomBuildStep>
       <Message>Generating version sources</Message>
       <Command>..\scripts\generate_version_sources.cmd $(PresentMonVersion) "$(IntDir)generated\version.h"</Command>
-      <Outputs>%(IntDir)generated\version.h</Outputs>
+      <Outputs>$(IntDir)generated\version.h</Outputs>
       <TreatOutputAsContent>false</TreatOutputAsContent>
     </CustomBuildStep>
   </ItemDefinitionGroup>
