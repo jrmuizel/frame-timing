@@ -135,115 +135,6 @@ HWND CreateMessageQueue(CommandLineArgs& args)
     return hWnd;
 }
 
-bool HaveAdministratorPrivileges()
-{
-    enum {
-        PRIVILEGE_UNKNOWN,
-        PRIVILEGE_ELEVATED,
-        PRIVILEGE_NOT_ELEVATED,
-    } static privilege = PRIVILEGE_UNKNOWN;
-
-    if (privilege == PRIVILEGE_UNKNOWN) {
-        typedef BOOL(WINAPI *OpenProcessTokenProc)(HANDLE ProcessHandle, DWORD DesiredAccess, PHANDLE TokenHandle);
-        typedef BOOL(WINAPI *GetTokenInformationProc)(HANDLE TokenHandle, TOKEN_INFORMATION_CLASS TokenInformationClass, LPVOID TokenInformation, DWORD TokenInformationLength, DWORD *ReturnLength);
-        HMODULE advapi = LoadLibraryA("advapi32");
-        if (advapi) {
-            OpenProcessTokenProc OpenProcessToken = (OpenProcessTokenProc)GetProcAddress(advapi, "OpenProcessToken");
-            GetTokenInformationProc GetTokenInformation = (GetTokenInformationProc)GetProcAddress(advapi, "GetTokenInformation");
-            if (OpenProcessToken && GetTokenInformation) {
-                HANDLE hToken = NULL;
-                if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
-                    /** BEGIN WORKAROUND: struct TOKEN_ELEVATION and enum value
-                     * TokenElevation are not defined in the vs2003 headers, so
-                     * we reproduce them here. **/
-                    enum { WA_TokenElevation = 20 };
-                    struct {
-                        DWORD TokenIsElevated;
-                    } token = {};
-                    /** END WA **/
-
-                    DWORD dwSize = 0;
-                    if (GetTokenInformation(hToken, (TOKEN_INFORMATION_CLASS) WA_TokenElevation, &token, sizeof(token), &dwSize)) {
-                        privilege = token.TokenIsElevated ? PRIVILEGE_ELEVATED : PRIVILEGE_NOT_ELEVATED;
-                    }
-
-                    CloseHandle(hToken);
-                }
-            }
-            FreeLibrary(advapi);
-        }
-    }
-
-    return privilege == PRIVILEGE_ELEVATED;
-}
-
-bool SetPrivilege(HANDLE hToken, LPCSTR lpszPrivilege, bool bEnablePrivilege)
-{
-    bool bPrivilegeSet = false;
-    typedef BOOL(WINAPI *LookupPrivilegeValueAProc)(LPCSTR lpSystemName, LPCSTR lpName, PLUID lpLuid);
-    typedef BOOL(WINAPI *AdjustTokenPrivilegesProc)(HANDLE TokenHandle, BOOL DisableAllPrivileges, PTOKEN_PRIVILEGES NewState, DWORD BufferLength, PTOKEN_PRIVILEGES PreviousState, PDWORD ReturnLength);
-    HMODULE advapi = LoadLibraryA("advapi32");
-    if (advapi) {
-        LookupPrivilegeValueAProc LookupPrivilegeValueA = (LookupPrivilegeValueAProc)GetProcAddress(advapi, "LookupPrivilegeValueA");
-        AdjustTokenPrivilegesProc AdjustTokenPrivileges = (AdjustTokenPrivilegesProc)GetProcAddress(advapi, "AdjustTokenPrivileges");
-        if (LookupPrivilegeValueA && AdjustTokenPrivileges) {
-            LUID luid;
-            if (LookupPrivilegeValueA(NULL, lpszPrivilege, &luid)) {
-                TOKEN_PRIVILEGES tp;
-                tp.PrivilegeCount = 1;
-                tp.Privileges[0].Luid = luid;
-                tp.Privileges[0].Attributes = bEnablePrivilege ? SE_PRIVILEGE_ENABLED : 0;
-
-                if (AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(TOKEN_PRIVILEGES), (PTOKEN_PRIVILEGES)NULL, (PDWORD)NULL)) {
-                    if (GetLastError() != ERROR_NOT_ALL_ASSIGNED) {
-                        bPrivilegeSet = true;
-                    }
-                    else {
-                        fprintf(stderr, "error: token does not have the specified privilege.\n");
-                    }
-                }
-                else {
-                    fprintf(stderr, "error: failed to adjust token privileges (%u).\n", GetLastError());
-                }
-            }
-            else {
-                fprintf(stderr, "error: failed to lookup privilege value (%u).\n", GetLastError());
-            }
-        }
-        FreeLibrary(advapi);
-    }
-
-    return bPrivilegeSet;
-}
-
-bool AdjustPrivileges()
-{
-    // On some versions of Windows, DWM processes run under a separate account.
-    // We need permissions to get data about a process owned by another account.
-    bool bPrivilegesSet = false;
-    typedef BOOL(WINAPI *OpenProcessTokenProc)(HANDLE ProcessHandle, DWORD DesiredAccess, PHANDLE TokenHandle);
-    HMODULE advapi = LoadLibraryA("advapi32");
-    if (advapi) {
-        OpenProcessTokenProc OpenProcessToken = (OpenProcessTokenProc)GetProcAddress(advapi, "OpenProcessToken");
-        if (OpenProcessToken) {
-            HANDLE hToken = NULL;
-            if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &hToken)) {
-                if (SetPrivilege(hToken, "SeDebugPrivilege", true)) {
-                    bPrivilegesSet = true;
-                }
-                else {
-                    fprintf(stderr, "error: failed to enable SeDebugPrivilege.\n");
-                }
-
-                CloseHandle(hToken);
-            }
-        }
-        FreeLibrary(advapi);
-    }
-
-    return bPrivilegesSet;
-}
-
 }
 
 bool EtwThreadsShouldQuit()
@@ -274,22 +165,10 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // Check required privilege
-    if (!args.mEtlFileName && !HaveAdministratorPrivileges()) {
-        if (args.mTryToElevate) {
-            fprintf(stderr, "warning: process requires administrator privilege; attempting to elevate.\n");
-            if (!RestartAsAdministrator(argc, argv)) {
-                return 1;
-            }
-        } else {
-            fprintf(stderr, "error: process requires administrator privilege.\n");
-        }
-        return 2;
-    }
-
-    // Adjust process privileges for real-time
-    if (!args.mEtlFileName && !AdjustPrivileges()) {
-        fprintf(stderr, "warning: some processes may not show up because we don't have sufficient privileges.\n");
+    // Attempt to elevate process privilege as necessary
+    bool ElevatePrivilege(CommandLineArgs const &args, int argc, char** argv); // Privilege.cpp
+    if (!ElevatePrivilege(args, argc, argv)) {
+        return 0;
     }
 
     int ret = 0;
@@ -307,7 +186,7 @@ int main(int argc, char** argv)
     // WM_QUIT messages.
     HWND hWnd = CreateMessageQueue(args);
     if (hWnd == 0) {
-        ret = 3;
+        ret = 2;
         goto clean_up;
     }
 

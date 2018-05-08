@@ -59,6 +59,5 @@ struct CommandLineArgs {
 };
 
 bool ParseCommandLine(int argc, char** argv, CommandLineArgs* out);
-bool RestartAsAdministrator(int argc, char** argv);
 void SetConsoleTitle(int argc, char** argv);
 bool EnableScrollLock(bool enable);

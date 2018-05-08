@@ -4,6 +4,7 @@
     <ClCompile Include="CommandLine.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="PresentMon.cpp" />
+    <ClCompile Include="Privilege.cpp" />
     <ClCompile Include="TraceSession.cpp" />
   </ItemGroup>
   <ItemGroup>
