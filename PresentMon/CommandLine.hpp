@@ -43,11 +43,11 @@ struct CommandLineArgs {
     UINT mRecordingCount;
     UINT mHotkeyModifiers;
     UINT mHotkeyVirtualKeyCode;
+    Verbosity mVerbosity;
     bool mOutputFile;
     bool mScrollLockToggle;
     bool mScrollLockIndicator;
     bool mExcludeDropped;
-    Verbosity mVerbosity;
     bool mSimpleConsole;
     bool mTerminateOnProcExit;
     bool mTerminateAfterTimer;
@@ -55,6 +55,7 @@ struct CommandLineArgs {
     bool mTryToElevate;
     bool mIncludeWindowsMixedReality;
     bool mMultiCsv;
+    bool mStopExistingSession;
 };
 
 bool ParseCommandLine(int argc, char** argv, CommandLineArgs* out);

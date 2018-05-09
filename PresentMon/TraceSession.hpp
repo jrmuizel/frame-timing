@@ -99,7 +99,7 @@ struct TraceSession {
     // InitializeRealtime() and InitializeEtlFile() return false if the session
     // could not be created.
     bool InitializeEtlFile(char const* etlPath, ShouldStopProcessingEventsFn shouldStopProcessingEventsFn);
-    bool InitializeRealtime(char const* traceSessionName, ShouldStopProcessingEventsFn shouldStopProcessingEventsFn);
+    bool InitializeRealtime(char const* traceSessionName, bool stopExistingSession, ShouldStopProcessingEventsFn shouldStopProcessingEventsFn);
     void Finalize();
 
     // Call CheckLostReports() at any time the session is initialized to query

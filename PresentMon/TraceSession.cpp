@@ -199,7 +199,7 @@ bool TraceSession::InitializeEtlFile(char const* inputEtlPath, ShouldStopProcess
     return true;
 }
 
-bool TraceSession::InitializeRealtime(char const* traceSessionName, ShouldStopProcessingEventsFn shouldStopFn)
+bool TraceSession::InitializeRealtime(char const* traceSessionName, bool stopExistingSession, ShouldStopProcessingEventsFn shouldStopFn)
 {
     // Set up and start a real-time collection session
     memset(&properties_, 0, sizeof(properties_));
@@ -221,14 +221,23 @@ bool TraceSession::InitializeRealtime(char const* traceSessionName, ShouldStopPr
 
     auto status = StartTraceA(&sessionHandle_, traceSessionName, &properties_);
 
-    // If a session with this same name is already running, we stop it and
-    // start a new session.  This is useful if a previous process failed to
-    // properly shut down the session for some reason.
+    // If a session with this same name is already running, we either exit or
+    // stop it and start a new session.  This is useful if a previous process
+    // failed to properly shut down the session for some reason.
     if (status == ERROR_ALREADY_EXISTS) {
-        fprintf(stderr,
-            "warning: a trace session named \"%s\" is already running; it will be stopped.\n"
-            "         Use -session_name with a different name to start a new session.\n",
-            traceSessionName);
+        if (stopExistingSession) {
+            fprintf(stderr,
+                "warning: a trace session named \"%s\" is already running and it will be stopped.\n"
+                "         Use -session_name with a different name to start a new session.\n",
+                traceSessionName);
+        } else {
+            fprintf(stderr,
+                "error: a trace session named \"%s\" is already running. Use -stop_existing_session\n"
+                "       to stop the existing session, or use -session_name with a different name to\n"
+                "       start a new session.\n",
+                traceSessionName);
+            return false;
+        }
 
         status = ControlTraceA((TRACEHANDLE) 0, traceSessionName, &properties_, EVENT_TRACE_CONTROL_STOP);
         if (status == ERROR_SUCCESS) {

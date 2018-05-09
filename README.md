@@ -45,10 +45,12 @@ changes.
 ```html
 Capture target options:
     -captureall                Record all processes (default).
-    -process_name [exe name]   Record specific process specified by name; this argument can be
-                               repeated to capture multiple processes at the same time.
-    -process_id [integer]      Record specific process specified by ID.
-    -etl_file [path]           Consume events from an ETL file instead of a running process.
+    -process_name [exe name]   Record only the named process. If multiple processes with
+                               the same image name are running, it is undefined which one
+                               will be recorded. This argument can be repeated to capture
+                               more than one process at the same time.
+    -process_id [integer]      Record only the process specified by ID.
+    -etl_file [path]           Consume events from an ETL file instead of running processes.
 
 Output options:
     -no_csv                    Do not create any output file.
@@ -76,8 +78,10 @@ Control and filtering options:
     -session_name [name]       Use the specified name to start a new realtime ETW session, instead
                                of the default "PresentMon". This can be used to start multiple
                                realtime capture process at the same time (using distinct names).
-                               When a realtime PresentMon capture starts, any existing sessions
-                               with the same name are stopped.
+                               A realtime PresentMon capture cannot start if there are any
+                               existing sessions with the same name.
+    -stop_existing_session     If a trace session with the same name is already running, stop
+                               the existing session (to allow this one to proceed).
     -include_mixed_reality     [Beta] Include Windows Mixed Reality data. If enabled, writes csv output
                                to a separate file (with "_WMR" suffix).
 ```

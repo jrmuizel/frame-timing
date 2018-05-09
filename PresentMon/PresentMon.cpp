@@ -1,5 +1,5 @@
 /*
-Copyright 2017 Intel Corporation
+Copyright 2017-2018 Intel Corporation
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -921,7 +921,7 @@ void EtwConsumingThread(const CommandLineArgs& args)
     session.AddHandler(Win7::DXGKMMIOFLIP_GUID,       (EventHandlerFn) &Win7::HandleDxgkMMIOFlip,       &pmConsumer);
 
     if (!(args.mEtlFileName == nullptr
-        ? session.InitializeRealtime(args.mSessionName, &EtwThreadsShouldQuit)
+        ? session.InitializeRealtime(args.mSessionName, args.mStopExistingSession, &EtwThreadsShouldQuit)
         : session.InitializeEtlFile(args.mEtlFileName, &EtwThreadsShouldQuit))) {
         PostStopRecording();
         PostQuitProcess();

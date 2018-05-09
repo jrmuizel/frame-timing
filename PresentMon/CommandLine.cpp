@@ -223,10 +223,12 @@ void PrintHelp()
         "\n"
         "Capture target options:\n"
         "    -captureall                Record all processes (default).\n"
-        "    -process_name [exe name]   Record specific process specified by name; this argument can be\n"
-        "                               repeated to capture multiple processes at the same time.\n"
-        "    -process_id [integer]      Record specific process specified by ID.\n"
-        "    -etl_file [path]           Consume events from an ETL file instead of a running process.\n"
+        "    -process_name [exe name]   Record only the named process. If multiple processes with\n"
+        "                               the same image name are running, it is undefined which one\n"
+        "                               will be recorded. This argument can be repeated to capture\n"
+        "                               more than one process at the same time.\n"
+        "    -process_id [integer]      Record only the process specified by ID.\n"
+        "    -etl_file [path]           Consume events from an ETL file instead of running processes.\n"
         "\n"
         "Output options:\n"
         "    -no_csv                    Do not create any output file.\n"
@@ -254,8 +256,10 @@ void PrintHelp()
         "    -session_name [name]       Use the specified name to start a new realtime ETW session, instead\n"
         "                               of the default \"PresentMon\". This can be used to start multiple\n"
         "                               realtime capture process at the same time (using distinct names).\n"
-        "                               When a realtime PresentMon capture starts, any existing sessions\n"
-        "                               with the same name are stopped.\n"
+        "                               A realtime PresentMon capture cannot start if there are any\n"
+        "                               existing sessions with the same name.\n"
+        "    -stop_existing_session     If a trace session with the same name is already running, stop\n"
+        "                               the existing session (to allow this one to proceed).\n"
         "    -include_mixed_reality     [Beta] Include Windows Mixed Reality data. If enabled, writes csv output\n"
         "                               to a separate file (with \"_WMR\" suffix).\n"
         , PRESENT_MON_VERSION);
@@ -288,6 +292,7 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
     args->mTryToElevate = true;
     args->mIncludeWindowsMixedReality = false;
     args->mMultiCsv = false;
+    args->mStopExistingSession = false;
 
     bool simple = false;
     bool verbose = false;
@@ -340,6 +345,7 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
         else ARG1("-dont_restart_as_admin",  args->mTryToElevate               = false)
         else ARG1("-no_top",                 args->mSimpleConsole              = true)
         else ARG2("-session_name",           args->mSessionName                = argv[i])
+        else ARG1("-stop_existing_session",  args->mStopExistingSession        = true)
         else ARG1("-include_mixed_reality",  args->mIncludeWindowsMixedReality = true)
 
         // Provided argument wasn't recognized
