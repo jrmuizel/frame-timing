@@ -1,5 +1,5 @@
 /*
-Copyright 2017 Intel Corporation
+Copyright 2017-2018 Intel Corporation
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -68,9 +68,17 @@ BOOL WINAPI ConsoleCtrlHandler(
     )
 {
     (void) dwCtrlType;
-    PostStopRecording();
+
+    // PostStopRecording() won't work if user closed the window
+    if (EtwThreadsRunning()) {
+        assert(g_StopEtwThreads == false);
+        g_StopEtwThreads = true;
+        g_EtwConsumingThread.join();
+    }
+
     PostQuitProcess();
-    return TRUE;
+
+    return TRUE; // The signal was handled
 }
 
 LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -320,7 +328,18 @@ int main(int argc, char** argv)
     // Enter the main thread message loop.  This thread will block waiting for
     // any messages, which will control the hotkey-toggling and process
     // shutdown.
-    for (MSG message = {}; GetMessageW(&message, hWnd, 0, 0); ) {
+    for (MSG message = {};;) {
+        BOOL r = GetMessageW(&message, hWnd, 0, 0);
+        if (r == 0) { // Received WM_QUIT message
+            break;
+        }
+        if (r == -1) { // Indicates error in message loop, e.g. hWnd is no
+                       // longer valid. This can happen if PresentMon is killed.
+            if (EtwThreadsRunning()) {
+                StopEtwThreads(&args);
+            }
+            break;
+        }
         TranslateMessage(&message);
         DispatchMessageW(&message);
     }
