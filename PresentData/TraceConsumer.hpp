@@ -26,18 +26,19 @@ SOFTWARE.
 #include <stdio.h>
 #include <string>
 #include <tdh.h>
+#include <vector>
 
 void PrintEventInformation(FILE* fp, EVENT_RECORD* pEventRecord);
 std::wstring GetEventTaskName(EVENT_RECORD* pEventRecord);
 
 template <typename T>
-bool GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name, T* out, bool bPrintOnError = true)
+bool GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name, T* out, uint32_t arrayIndex, bool bPrintOnError = true)
 {
     PROPERTY_DATA_DESCRIPTOR descriptor;
-    descriptor.PropertyName = (ULONGLONG) name;
-    descriptor.ArrayIndex = ULONG_MAX;
+    descriptor.PropertyName = (ULONGLONG)name;
+    descriptor.ArrayIndex = arrayIndex;
 
-    auto status = TdhGetProperty(pEventRecord, 0, nullptr, 1, &descriptor, sizeof(T), (BYTE*) out);
+    auto status = TdhGetProperty(pEventRecord, 0, nullptr, 1, &descriptor, sizeof(T), (BYTE*)out);
     if (status != ERROR_SUCCESS) {
         if (bPrintOnError) {
             fprintf(stderr, "error: could not get event %ls property (error=%lu).\n", name, status);
@@ -47,6 +48,21 @@ bool GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name, T* out, bool 
     }
 
     return true;
+}
+
+template <typename T>
+T GetEventDataFromArray(EVENT_RECORD* pEventRecord, wchar_t const* name, uint32_t index)
+{
+    T value = {};
+    auto ok = GetEventData(pEventRecord, name, &value, index);
+    (void)ok;
+    return value;
+}
+
+template <typename T>
+bool GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name, T* out, bool bPrintOnError = true)
+{
+    return GetEventData<T>(pEventRecord, name, out, ULONG_MAX, bPrintOnError);
 }
 
 template <typename T>

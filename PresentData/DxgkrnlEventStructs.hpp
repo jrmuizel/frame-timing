@@ -49,7 +49,7 @@ struct DxgkMMIOFlipEventArgs : DxgkEventBase
     DxgKrnl_MMIOFlip_Flags Flags;
 };
 
-struct DxgkVSyncDPCEventArgs : DxgkEventBase
+struct DxgkSyncDPCEventArgs : DxgkEventBase
 {
     uint32_t FlipSubmitSequence;
 };

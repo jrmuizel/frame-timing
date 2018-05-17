@@ -254,9 +254,9 @@ void PMTraceConsumer::HandleDxgkMMIOFlip(DxgkMMIOFlipEventArgs& args)
     }
 }
 
-void PMTraceConsumer::HandleDxgkVSyncDPC(DxgkVSyncDPCEventArgs& args)
+void PMTraceConsumer::HandleDxgkSyncDPC(DxgkSyncDPCEventArgs& args)
 {
-    // The VSyncDPC contains a field telling us what flipped to screen.
+    // The VSyncDPC/HSyncDPC contains a field telling us what flipped to screen.
     // This is the way to track completion of a fullscreen present.
     auto eventIter = mPresentsBySubmitSequence.find(args.FlipSubmitSequence);
     if (eventIter == mPresentsBySubmitSequence.end()) {
@@ -372,6 +372,7 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         DxgKrnl_QueueComplete = 180,
         DxgKrnl_MMIOFlip = 116,
         DxgKrnl_MMIOFlipMPO = 259,
+        DxgKrnl_HSyncDPC = 382,
         DxgKrnl_VSyncDPC = 17,
         DxgKrnl_Present = 184,
         DxgKrnl_PresentHistoryDetailed = 215,
@@ -459,11 +460,13 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
             enum class DxgKrnl_MMIOFlipMPO_FlipEntryStatus {
                 FlipWaitVSync = 5,
                 FlipWaitComplete = 11,
+                FlipWaitHSync = 15,
                 // There are others, but they're more complicated to deal with.
             };
 
             auto FlipEntryStatusAfterFlip = GetEventData<DxgKrnl_MMIOFlipMPO_FlipEntryStatus>(pEventRecord, L"FlipEntryStatusAfterFlip");
-            if (FlipEntryStatusAfterFlip != DxgKrnl_MMIOFlipMPO_FlipEntryStatus::FlipWaitVSync) {
+            if (FlipEntryStatusAfterFlip != DxgKrnl_MMIOFlipMPO_FlipEntryStatus::FlipWaitVSync &&
+                FlipEntryStatusAfterFlip != DxgKrnl_MMIOFlipMPO_FlipEntryStatus::FlipWaitHSync) {
                 eventIter->second->FinalState = PresentResult::Presented;
                 eventIter->second->SupportsTearing = true;
                 if (FlipEntryStatusAfterFlip == DxgKrnl_MMIOFlipMPO_FlipEntryStatus::FlipWaitComplete) {
@@ -477,14 +480,32 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 
         break;
     }
+    case DxgKrnl_HSyncDPC:
+    {
+        // Used for Hardware Independent Flip, and Hardware Composed Flip to signal flipping to the screen 
+        // on Windows 10 build numbers 17134 and up where the associated display is connected to 
+        // integrated graphics
+        // MMIOFlipMPO [EntryStatus:FlipWaitHSync] ->HSync DPC
+
+        auto FlipCount = GetEventData<uint32_t>(pEventRecord, L"FlipEntryCount");
+        for (uint32_t i = 0; i < FlipCount; i++)
+        {
+            auto FlipId = GetEventDataFromArray<uint64_t>(pEventRecord, L"FlipSubmitSequence", i);
+            DxgkSyncDPCEventArgs Args = {};
+            Args.pEventHeader = &hdr;
+            Args.FlipSubmitSequence = (uint32_t)(FlipId >> 32u);
+            pmConsumer->HandleDxgkSyncDPC(Args);
+        }
+        break;
+    }
     case DxgKrnl_VSyncDPC:
     {
         auto FlipFenceId = GetEventData<uint64_t>(pEventRecord, L"FlipFenceId");
 
-        DxgkVSyncDPCEventArgs Args = {};
+        DxgkSyncDPCEventArgs Args = {};
         Args.pEventHeader = &hdr;
         Args.FlipSubmitSequence = (uint32_t)(FlipFenceId >> 32u);
-        pmConsumer->HandleDxgkVSyncDPC(Args);
+        pmConsumer->HandleDxgkSyncDPC(Args);
         break;
     }
     case DxgKrnl_Present:
@@ -630,11 +651,11 @@ void HandleDxgkQueuePacket(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsum
 
 void HandleDxgkVSyncDPC(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 {
-    DxgkVSyncDPCEventArgs Args = {};
+    DxgkSyncDPCEventArgs Args = {};
     Args.pEventHeader = &pEventRecord->EventHeader;
     auto pVSyncDPCEvent = reinterpret_cast<DXGKETW_SCHEDULER_VSYNC_DPC*>(pEventRecord->UserData);
     Args.FlipSubmitSequence = (uint32_t)(pVSyncDPCEvent->FlipFenceId.QuadPart >> 32u);
-    pmConsumer->HandleDxgkVSyncDPC(Args);
+    pmConsumer->HandleDxgkSyncDPC(Args);
 }
 
 void HandleDxgkMMIOFlip(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)

@@ -72,7 +72,7 @@ struct DxgkFlipEventArgs;
 struct DxgkQueueSubmitEventArgs;
 struct DxgkQueueCompleteEventArgs;
 struct DxgkMMIOFlipEventArgs;
-struct DxgkVSyncDPCEventArgs;
+struct DxgkSyncDPCEventArgs;
 struct DxgkSubmitPresentHistoryEventArgs;
 struct DxgkPropagatePresentHistoryEventArgs;
 
@@ -176,7 +176,7 @@ struct PMTraceConsumer
     //   N/A, not currently uniquely detectable (follows the same path as composed_flip)
     // Hardware Independent Flip,
     //   Follows composed flip, TokenStateChanged indicates IndependentFlip -> MMIOFlip (by submit sequence, for immediate flags) [->
-    //   VSyncDPC (by submit sequence, for screen time)]
+    //   VSyncDPC (by submit sequence, for screen time), or HSync DPC (if system is Windows 10 April 2018, and using integrated graphics)]
     // Hardware Composed Independent Flip,
     //   Identical to IndependentFlip, but MMIOFlipMPO is received instead
     // Composed Copy with GPU GDI (a.k.a. Win7 Blit),
@@ -271,7 +271,7 @@ struct PMTraceConsumer
     void HandleDxgkQueueSubmit(DxgkQueueSubmitEventArgs& args);
     void HandleDxgkQueueComplete(DxgkQueueCompleteEventArgs& args);
     void HandleDxgkMMIOFlip(DxgkMMIOFlipEventArgs& args);
-    void HandleDxgkVSyncDPC(DxgkVSyncDPCEventArgs& args);
+    void HandleDxgkSyncDPC(DxgkSyncDPCEventArgs& args);
     void HandleDxgkSubmitPresentHistoryEventArgs(DxgkSubmitPresentHistoryEventArgs& args);
     void HandleDxgkPropagatePresentHistoryEventArgs(DxgkPropagatePresentHistoryEventArgs& args);
 
