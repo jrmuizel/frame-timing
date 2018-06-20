@@ -1,7 +1,27 @@
 # Contributing
 
-We accept contributions as pull requests on GitHub, and will attempt to do so
-as quickly as possible.
+## Requesting Features and Reporting Issues
+
+We track feature requests and issues using GitHub Issues
+[here](https://github.com/GameTechDev/PresentMon/issues).
+
+Clearly describe the issue/request, as well as the impact and priority from
+your perspective.
+
+Provide an ETL trace with your issue report if possible:
+1. Obtain gpuview by installing the [Windows Performance Toolkit](https://www.google.com/search?q=windows+performance+toolkit+download&btnI)
+1. Start a capture by running gpuview's log.cmd (e.g., C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\gpuview\log.cmd) as administrator, and end the capture by running log.cmd again. The capture will be output to Merged.etl.  Try to capture for as short as possible to limit .etl size, while still capturing the problem.
+1. Test that the .etl capture exhibits the issue you are reporting, by running PresentMon with "-etl_file Merged.etl" (to read from the capture instead of the system).
+1. Provide the resulting Merged.etl file.
+
+## Contributing Source Code
+
+We accept contributions as pull requests on GitHub
+[here](https://github.com/GameTechDev/PresentMon/pulls).
+
+Clearly describe the pull request, as well as the impact and priority from your
+perspective.  Also, clearly describe each commit and limit the length of the
+commit message's first line to less than ~80 characters.
 
 PresentMon is licensed under the terms in
 [LICENSE](https://github.com/GameTechDev/PresentMon/blob/master/license.txt).

@@ -35,6 +35,11 @@ Binaries for main release versions of PresentMon are provided on GitHub:
 - [Latest release](https://github.com/GameTechDev/PresentMon/releases/latest)
 - [List of all releases](https://github.com/GameTechDev/PresentMon/releases)
 
+Please see
+[CONTRIBUTING](https://github.com/GameTechDev/PresentMon/blob/master/CONTRIBUTING.md)
+for information on how to request features, report issues, or contribute code
+changes.
+
 ## Command line options
 
 ```html
