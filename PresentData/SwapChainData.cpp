@@ -67,27 +67,30 @@ void SwapChainData::UpdateSwapChainInfo(PresentEvent&p, uint64_t now, uint64_t p
     mDwmNotified = p.DwmNotified;
 }
 
-double SwapChainData::ComputeFps(const std::deque<PresentEvent>& presentHistory, uint64_t qpcFreq) const
+double SwapChainData::ComputeDisplayedFps(uint64_t qpcFreq) const
 {
-    if (presentHistory.size() < 2) {
+    if (mDisplayedPresentHistory.size() < 2) {
         return 0.0;
     }
-    auto start = presentHistory.front().QpcTime;
-    auto end = presentHistory.back().QpcTime;
-    auto count = presentHistory.size() - 1;
+    auto start = mDisplayedPresentHistory.front().ScreenTime;
+    auto end = mDisplayedPresentHistory.back().ScreenTime;
+    auto count = mDisplayedPresentHistory.size() - 1;
 
     double deltaT = double(end - start) / qpcFreq;
     return count / deltaT;
 }
 
-double SwapChainData::ComputeDisplayedFps(uint64_t qpcFreq) const
-{
-    return ComputeFps(mDisplayedPresentHistory, qpcFreq);
-}
-
 double SwapChainData::ComputeFps(uint64_t qpcFreq) const
 {
-    return ComputeFps(mPresentHistory, qpcFreq);
+    if (mPresentHistory.size() < 2) {
+        return 0.0;
+    }
+    auto start = mPresentHistory.front().QpcTime;
+    auto end = mPresentHistory.back().QpcTime;
+    auto count = mPresentHistory.size() - 1;
+
+    double deltaT = double(end - start) / qpcFreq;
+    return count / deltaT;
 }
 
 double SwapChainData::ComputeLatency( uint64_t qpcFreq) const
