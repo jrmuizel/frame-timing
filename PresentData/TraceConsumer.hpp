@@ -77,9 +77,9 @@ bool EventMetadataContainer::GetEventData(EVENT_RECORD* pEventRecord, wchar_t co
 {
     SIZE_T Size = 0;
     const void* pData = GetEventDataImpl(pEventRecord, name, &Size);
-    if (pData != nullptr && Size == sizeof(*out))
+    if (pData != nullptr && Size <= sizeof(*out))
     {
-        *out = *reinterpret_cast<T const*>(pData);
+        memcpy(out, pData, Size);
         return true;
     }
     return GetEventDataFromTdh(pEventRecord, name, out);
