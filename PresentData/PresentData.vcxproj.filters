@@ -7,6 +7,7 @@
     <ClInclude Include="DxgkrnlEventStructs.hpp" />
     <ClInclude Include="MixedRealityTraceConsumer.hpp" />
     <ClInclude Include="LateStageReprojectionData.hpp" />
+    <ClInclude Include="KernelTraceControl.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="PresentMonTraceConsumer.cpp" />

@@ -26,6 +26,7 @@ SOFTWARE.
 #include <string>
 #include <windows.h>
 #include <tdh.h> // must include after windows.h
+#include <assert.h>
 
 #include "TraceConsumer.hpp"
 
@@ -128,7 +129,7 @@ void PrintEventProperty(FILE* fp, uintptr_t bufferAddr, EVENT_PROPERTY_INFO cons
 
 }
 
-void PrintEventInformation(FILE* fp, EVENT_RECORD* pEventRecord)
+void PrintEventInformationFromTdh(FILE* fp, EVENT_RECORD* pEventRecord)
 {
     ULONG bufferSize = 0;
     auto status = TdhGetEventInformation(pEventRecord, 0, nullptr, nullptr, &bufferSize);
@@ -154,7 +155,7 @@ void PrintEventInformation(FILE* fp, EVENT_RECORD* pEventRecord)
     }
 }
 
-std::wstring GetEventTaskName(EVENT_RECORD* pEventRecord)
+std::wstring GetEventTaskNameFromTdh(EVENT_RECORD* pEventRecord)
 {
     std::wstring taskName = L"";
     ULONG bufferSize = 0;
@@ -175,7 +176,7 @@ std::wstring GetEventTaskName(EVENT_RECORD* pEventRecord)
 }
 
 template <>
-bool GetEventData<std::string>(EVENT_RECORD* pEventRecord, wchar_t const* name, std::string* out, bool bPrintOnError)
+bool GetEventDataFromTdh<std::string>(EVENT_RECORD* pEventRecord, wchar_t const* name, std::string* out, bool bPrintOnError)
 {
     PROPERTY_DATA_DESCRIPTOR descriptor;
     descriptor.PropertyName = (ULONGLONG) name;
@@ -201,4 +202,66 @@ bool GetEventData<std::string>(EVENT_RECORD* pEventRecord, wchar_t const* name, 
     }
 
     return true;
+}
+
+void EventMetadataContainer::InsertMetadata(GUID const& Provider, EVENT_DESCRIPTOR const& EventDescriptor, TRACE_EVENT_INFO const* pInfo, SIZE_T TeiSize)
+{
+    auto& spCachedInfo = mMetadata[Provider][EventDescriptor];
+    if (!spCachedInfo)
+    {
+        spCachedInfo.reset(new byte[TeiSize]);
+        memcpy(spCachedInfo.get(), pInfo, TeiSize);
+    }
+}
+
+const void* EventMetadataContainer::GetEventDataImpl(EVENT_RECORD* pEventRecord, wchar_t const* name, SIZE_T* pSize)
+{
+    auto ProviderIter = mMetadata.find(pEventRecord->EventHeader.ProviderId);
+    if (ProviderIter == mMetadata.end())
+        return false;
+
+    auto EventIter = ProviderIter->second.find(pEventRecord->EventHeader.EventDescriptor);
+    if (EventIter == ProviderIter->second.end())
+        return false;
+
+    auto& tei = *reinterpret_cast<TRACE_EVENT_INFO*>(EventIter->second.get());
+    uint32_t DataOffset = 0;
+    for (uint32_t i = 0; i < tei.TopLevelPropertyCount; ++i)
+    {
+        auto& prop = tei.EventPropertyInfoArray[i];
+        // Don't handle nested structs or variable data lengths.
+        assert((prop.Flags & (PropertyParamLength | PropertyParamCount | PropertyStruct)) == 0);
+        if (prop.Flags & (PropertyParamLength | PropertyParamCount | PropertyStruct))
+        {
+            return nullptr;
+        }
+
+        uint32_t FieldSize = prop.length;
+        if (prop.nonStructType.InType == TDH_INTYPE_SIZET ||
+            prop.nonStructType.InType == TDH_INTYPE_POINTER)
+        {
+            FieldSize = (pEventRecord->EventHeader.Flags & EVENT_HEADER_FLAG_32_BIT_HEADER) ? 4 :
+                (pEventRecord->EventHeader.Flags & EVENT_HEADER_FLAG_64_BIT_HEADER) ? 8 : FieldSize;
+        }
+        if (wcscmp(TEI_PROPERTY_NAME(&tei, &prop), name) == 0)
+        {
+            *pSize = FieldSize * prop.count;
+            return reinterpret_cast<BYTE*>(pEventRecord->UserData) + DataOffset;
+        }
+        DataOffset += FieldSize;
+    }
+    return nullptr;
+}
+
+template <> bool EventMetadataContainer::GetEventData<std::string>(EVENT_RECORD* pEventRecord, wchar_t const* name, std::string* out)
+{
+    SIZE_T Size = 0;
+    const void* pData = GetEventDataImpl(pEventRecord, name, &Size);
+    if (pData != nullptr && Size > 0)
+    {
+        out->resize(Size + 1);
+        memcpy((BYTE*)out->data(), pData, Size);
+        return true;
+    }
+    return GetEventDataFromTdh(pEventRecord, name, out);
 }

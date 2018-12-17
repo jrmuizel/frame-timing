@@ -25,13 +25,36 @@ SOFTWARE.
 #include <windows.h>
 #include <stdio.h>
 #include <string>
+#include <map>
+#include <memory>
 #include <tdh.h>
 
-void PrintEventInformation(FILE* fp, EVENT_RECORD* pEventRecord);
-std::wstring GetEventTaskName(EVENT_RECORD* pEventRecord);
+inline bool operator<(GUID const& lhs, GUID const& rhs)
+{
+    return memcmp(&lhs, &rhs, sizeof(lhs)) < 0;
+}
+inline bool operator<(EVENT_DESCRIPTOR const& lhs, EVENT_DESCRIPTOR const& rhs)
+{
+    return memcmp(&lhs, &rhs, sizeof(lhs)) < 0;
+}
+class EventMetadataContainer
+{
+public:
+    void InsertMetadata(GUID const& Provider, EVENT_DESCRIPTOR const& EventDescriptor, TRACE_EVENT_INFO const* pInfo, SIZE_T TeiSize);
+
+    template <typename T> bool GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name, T* out);
+    template <typename T> T GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name);
+
+private:
+    const void* GetEventDataImpl(EVENT_RECORD* pEventRecord, wchar_t const* name, SIZE_T* pSize);
+    std::map<GUID, std::map<EVENT_DESCRIPTOR, std::unique_ptr<byte[]>>> mMetadata;
+};
+
+void PrintEventInformationFromTdh(FILE* fp, EVENT_RECORD* pEventRecord);
+std::wstring GetEventTaskNameFromTdh(EVENT_RECORD* pEventRecord);
 
 template <typename T>
-bool GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name, T* out, bool bPrintOnError = true)
+bool GetEventDataFromTdh(EVENT_RECORD* pEventRecord, wchar_t const* name, T* out, bool bPrintOnError = true)
 {
     PROPERTY_DATA_DESCRIPTOR descriptor;
     descriptor.PropertyName = (ULONGLONG) name;
@@ -41,7 +64,7 @@ bool GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name, T* out, bool 
     if (status != ERROR_SUCCESS) {
         if (bPrintOnError) {
             fprintf(stderr, "error: could not get event %ls property (error=%lu).\n", name, status);
-            PrintEventInformation(stderr, pEventRecord);
+            PrintEventInformationFromTdh(stderr, pEventRecord);
         }
         return false;
     }
@@ -50,12 +73,35 @@ bool GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name, T* out, bool 
 }
 
 template <typename T>
-T GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name)
+bool EventMetadataContainer::GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name, T* out)
+{
+    SIZE_T Size = 0;
+    const void* pData = GetEventDataImpl(pEventRecord, name, &Size);
+    if (pData != nullptr && Size == sizeof(*out))
+    {
+        *out = *reinterpret_cast<T const*>(pData);
+        return true;
+    }
+    return GetEventDataFromTdh(pEventRecord, name, out);
+}
+
+template <typename T>
+T GetEventDataFromTdh(EVENT_RECORD* pEventRecord, wchar_t const* name)
 {
     T value = {};
-    auto ok = GetEventData(pEventRecord, name, &value);
+    auto ok = GetEventDataFromTdh(pEventRecord, name, &value);
     (void) ok;
     return value;
 }
 
-template <> bool GetEventData<std::string>(EVENT_RECORD* pEventRecord, wchar_t const* name, std::string* out, bool bPrintOnError);
+template <typename T>
+T EventMetadataContainer::GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name)
+{
+    T value = {};
+    auto ok = GetEventData(pEventRecord, name, &value);
+    (void)ok;
+    return value;
+}
+
+template <> bool GetEventDataFromTdh<std::string>(EVENT_RECORD* pEventRecord, wchar_t const* name, std::string* out, bool bPrintOnError);
+template <> bool EventMetadataContainer::GetEventData<std::string>(EVENT_RECORD* pEventRecord, wchar_t const* name, std::string* out);
