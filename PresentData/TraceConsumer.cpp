@@ -218,11 +218,11 @@ const void* EventMetadataContainer::GetEventDataImpl(EVENT_RECORD* pEventRecord,
 {
     auto ProviderIter = mMetadata.find(pEventRecord->EventHeader.ProviderId);
     if (ProviderIter == mMetadata.end())
-        return false;
+        return nullptr;
 
     auto EventIter = ProviderIter->second.find(pEventRecord->EventHeader.EventDescriptor);
     if (EventIter == ProviderIter->second.end())
-        return false;
+        return nullptr;
 
     auto& tei = *reinterpret_cast<TRACE_EVENT_INFO*>(EventIter->second.get());
     uint32_t DataOffset = 0;
