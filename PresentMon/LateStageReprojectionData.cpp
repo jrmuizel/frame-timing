@@ -23,7 +23,6 @@ SOFTWARE.
 #include <algorithm>
 
 #include "PresentMon.hpp"
-#include "LateStageReprojectionData.hpp"
 
 enum {
     MAX_HISTORY_TIME = 3000,
@@ -31,10 +30,10 @@ enum {
     MAX_LSRS_IN_DEQUE = 120 * (MAX_HISTORY_TIME / 1000)
 };
 
-void LateStageReprojectionData::PruneDeque(std::deque<LateStageReprojectionEvent> &lsrHistory, uint64_t perfFreq, uint32_t msTimeDiff, uint32_t maxHistLen) {
-    while (!lsrHistory.empty() &&
-        (lsrHistory.size() > maxHistLen ||
-        ((double)(lsrHistory.back().QpcTime - lsrHistory.front().QpcTime) / perfFreq) * 1000 > msTimeDiff)) {
+void LateStageReprojectionData::PruneDeque(std::deque<LateStageReprojectionEvent> &lsrHistory, uint32_t msTimeDiff, uint32_t maxHistLen) {
+    while (!lsrHistory.empty() && (
+        lsrHistory.size() > maxHistLen ||
+        1000.0 * QpcDeltaToSeconds(lsrHistory.back().QpcTime - lsrHistory.front().QpcTime) > msTimeDiff)) {
         lsrHistory.pop_front();
     }
 }
@@ -68,16 +67,16 @@ void LateStageReprojectionData::AddLateStageReprojection(LateStageReprojectionEv
     mLSRHistory.push_back(p);
 }
 
-void LateStageReprojectionData::UpdateLateStageReprojectionInfo(uint64_t now, uint64_t perfFreq)
+void LateStageReprojectionData::UpdateLateStageReprojectionInfo(uint64_t now)
 {
-    PruneDeque(mSourceHistory, perfFreq, MAX_HISTORY_TIME, MAX_LSRS_IN_DEQUE);
-    PruneDeque(mDisplayedLSRHistory, perfFreq, MAX_HISTORY_TIME, MAX_LSRS_IN_DEQUE);
-    PruneDeque(mLSRHistory, perfFreq, MAX_HISTORY_TIME, MAX_LSRS_IN_DEQUE);
+    PruneDeque(mSourceHistory, MAX_HISTORY_TIME, MAX_LSRS_IN_DEQUE);
+    PruneDeque(mDisplayedLSRHistory, MAX_HISTORY_TIME, MAX_LSRS_IN_DEQUE);
+    PruneDeque(mLSRHistory, MAX_HISTORY_TIME, MAX_LSRS_IN_DEQUE);
 
     mLastUpdateTicks = now;
 }
 
-double LateStageReprojectionData::ComputeHistoryTime(const std::deque<LateStageReprojectionEvent>& lsrHistory, uint64_t qpcFreq) const
+double LateStageReprojectionData::ComputeHistoryTime(const std::deque<LateStageReprojectionEvent>& lsrHistory) const
 {
     if (lsrHistory.size() < 2) {
         return 0.0;
@@ -85,7 +84,7 @@ double LateStageReprojectionData::ComputeHistoryTime(const std::deque<LateStageR
 
     auto start = lsrHistory.front().QpcTime;
     auto end = lsrHistory.back().QpcTime;
-    return double(end - start) / qpcFreq;
+    return QpcDeltaToSeconds(end - start);
 }
 
 size_t LateStageReprojectionData::ComputeHistorySize() const
@@ -97,12 +96,12 @@ size_t LateStageReprojectionData::ComputeHistorySize() const
     return mLSRHistory.size();
 }
 
-double LateStageReprojectionData::ComputeHistoryTime(uint64_t qpcFreq) const
+double LateStageReprojectionData::ComputeHistoryTime() const
 {
-    return ComputeHistoryTime(mLSRHistory, qpcFreq);
+    return ComputeHistoryTime(mLSRHistory);
 }
 
-double LateStageReprojectionData::ComputeFps(const std::deque<LateStageReprojectionEvent>& lsrHistory, uint64_t qpcFreq) const
+double LateStageReprojectionData::ComputeFps(const std::deque<LateStageReprojectionEvent>& lsrHistory) const
 {
     if (lsrHistory.size() < 2) {
         return 0.0;
@@ -111,26 +110,25 @@ double LateStageReprojectionData::ComputeFps(const std::deque<LateStageReproject
     auto end = lsrHistory.back().QpcTime;
     auto count = lsrHistory.size() - 1;
 
-    double deltaT = double(end - start) / qpcFreq;
-    return count / deltaT;
+    return count / QpcDeltaToSeconds(end - start);
 }
 
-double LateStageReprojectionData::ComputeSourceFps(uint64_t qpcFreq) const
+double LateStageReprojectionData::ComputeSourceFps() const
 {
-    return ComputeFps(mSourceHistory, qpcFreq);
+    return ComputeFps(mSourceHistory);
 }
 
-double LateStageReprojectionData::ComputeDisplayedFps(uint64_t qpcFreq) const
+double LateStageReprojectionData::ComputeDisplayedFps() const
 {
-    return ComputeFps(mDisplayedLSRHistory, qpcFreq);
+    return ComputeFps(mDisplayedLSRHistory);
 }
 
-double LateStageReprojectionData::ComputeFps(uint64_t qpcFreq) const
+double LateStageReprojectionData::ComputeFps() const
 {
-    return ComputeFps(mLSRHistory, qpcFreq);
+    return ComputeFps(mLSRHistory);
 }
 
-LateStageReprojectionRuntimeStats LateStageReprojectionData::ComputeRuntimeStats(uint64_t qpcFreq) const
+LateStageReprojectionRuntimeStats LateStageReprojectionData::ComputeRuntimeStats() const
 {
     LateStageReprojectionRuntimeStats stats = {};
     if (mLSRHistory.size() < 2) {
@@ -191,8 +189,8 @@ LateStageReprojectionRuntimeStats LateStageReprojectionData::ComputeRuntimeStats
     stats.mAppProcessId = mLSRHistory[count - 1].GetAppProcessId();
     stats.mLsrProcessId = mLSRHistory[count - 1].ProcessId;
 
-    stats.mAppSourceCpuRenderTimeInMs = 1000 * double(totalAppSourceCpuRenderTime) / qpcFreq;
-    stats.mAppSourceReleaseToLsrAcquireInMs = 1000 * double(totalAppSourceReleaseToLsrAcquireTime) / qpcFreq;
+    stats.mAppSourceCpuRenderTimeInMs = 1000.0 * QpcDeltaToSeconds(totalAppSourceCpuRenderTime);
+    stats.mAppSourceReleaseToLsrAcquireInMs = 1000.0 * QpcDeltaToSeconds(totalAppSourceReleaseToLsrAcquireTime);
 
     stats.mAppSourceReleaseToLsrAcquireInMs /= count;
     stats.mAppSourceCpuRenderTimeInMs /= count;
@@ -210,7 +208,7 @@ bool LateStageReprojectionData::IsStale(uint64_t now) const
     return now - mLastUpdateTicks > LSR_TIMEOUT_THRESHOLD_TICKS;
 }
 
-void UpdateLSRCSV(PresentMonData& pm, LateStageReprojectionData& lsr, ProcessInfo* proc, LateStageReprojectionEvent& p, uint64_t perfFreq)
+void UpdateLSRCSV(PresentMonData& pm, LateStageReprojectionData& lsr, ProcessInfo* proc, LateStageReprojectionEvent& p)
 {
     auto const& args = GetCommandLineArgs();
 
@@ -220,8 +218,8 @@ void UpdateLSRCSV(PresentMonData& pm, LateStageReprojectionData& lsr, ProcessInf
         if (len > 1) {
             auto& curr = lsr.mLSRHistory[len - 1];
             auto& prev = lsr.mLSRHistory[len - 2];
-            const double deltaMilliseconds = 1000 * double(curr.QpcTime - prev.QpcTime) / perfFreq;
-            const double timeInSeconds = (double)(int64_t)(p.QpcTime - pm.mStartupQpcTime) / perfFreq;
+            const double deltaMilliseconds = 1000.0 * QpcDeltaToSeconds(curr.QpcTime - prev.QpcTime);
+            const double timeInSeconds = QpcToSeconds(p.QpcTime);
 
             fprintf(file, "%s,%d,%d", proc->mModuleName.c_str(), curr.GetAppProcessId(), curr.ProcessId);
             if (args.mVerbosity >= Verbosity::Verbose)
@@ -236,12 +234,12 @@ void UpdateLSRCSV(PresentMonData& pm, LateStageReprojectionData& lsr, ProcessInf
                 if (curr.IsValidAppFrame())
                 {
                     const uint64_t currAppPresentTime = curr.GetAppPresentTime();
-                    appPresentToLsrMilliseconds = 1000 * double(curr.QpcTime - currAppPresentTime) / perfFreq;
+                    appPresentToLsrMilliseconds = 1000.0 * QpcDeltaToSeconds(curr.QpcTime - currAppPresentTime);
 
                     if (prev.IsValidAppFrame() && (curr.GetAppProcessId() == prev.GetAppProcessId()))
                     {
                         const uint64_t prevAppPresentTime = prev.GetAppPresentTime();
-                        appPresentDeltaMilliseconds = 1000 * double(currAppPresentTime - prevAppPresentTime) / perfFreq;
+                        appPresentDeltaMilliseconds = 1000.0 * QpcDeltaToSeconds(currAppPresentTime - prevAppPresentTime);
                     }
                 }
                 fprintf(file, ",%.6lf,%.6lf", appPresentDeltaMilliseconds, appPresentToLsrMilliseconds);
@@ -249,7 +247,7 @@ void UpdateLSRCSV(PresentMonData& pm, LateStageReprojectionData& lsr, ProcessInf
             fprintf(file, ",%.6lf,%d,%d", deltaMilliseconds, !curr.NewSourceLatched, curr.MissedVsyncCount);
             if (args.mVerbosity >= Verbosity::Verbose)
             {
-                fprintf(file, ",%.6lf,%.6lf", 1000 * double(curr.Source.GetReleaseFromRenderingToAcquireForPresentationTime()) / perfFreq, 1000 * double(curr.GetAppCpuRenderFrameTime()) / perfFreq);
+                fprintf(file, ",%.6lf,%.6lf", 1000 * QpcDeltaToSeconds(curr.Source.GetReleaseFromRenderingToAcquireForPresentationTime()), 1000.0 * QpcDeltaToSeconds(curr.GetAppCpuRenderFrameTime()));
             }
             fprintf(file, ",%.6lf", curr.AppPredictionLatencyMs);
             if (args.mVerbosity >= Verbosity::Verbose)
@@ -282,7 +280,7 @@ void UpdateLSRCSV(PresentMonData& pm, LateStageReprojectionData& lsr, ProcessInf
     }
 }
 
-void UpdateConsole(PresentMonData const& pm, LateStageReprojectionData& lsr, uint64_t now, uint64_t perfFreq, std::string* display)
+void UpdateConsole(PresentMonData const& pm, LateStageReprojectionData& lsr, uint64_t now, std::string* display)
 {
     auto const& args = GetCommandLineArgs();
 
@@ -293,12 +291,12 @@ void UpdateConsole(PresentMonData const& pm, LateStageReprojectionData& lsr, uin
             lsr.IsStale(now) ? " [STALE]" : "");
         *display += str;
 
-        const LateStageReprojectionRuntimeStats runtimeStats = lsr.ComputeRuntimeStats(perfFreq);
-        const double historyTime = lsr.ComputeHistoryTime(perfFreq);
+        const LateStageReprojectionRuntimeStats runtimeStats = lsr.ComputeRuntimeStats();
+        const double historyTime = lsr.ComputeHistoryTime();
 
         {
             // App
-            const double fps = lsr.ComputeSourceFps(perfFreq);
+            const double fps = lsr.ComputeSourceFps();
             const size_t historySize = lsr.ComputeHistorySize();
 
             if (args.mVerbosity > Verbosity::Simple) {
@@ -335,7 +333,7 @@ void UpdateConsole(PresentMonData const& pm, LateStageReprojectionData& lsr, uin
 
         {
             // LSR
-            const double fps = lsr.ComputeFps(perfFreq);
+            const double fps = lsr.ComputeFps();
             auto const& lsrProcess = pm.mProcessMap.find(runtimeStats.mLsrProcessId)->second;
 
             _snprintf_s(str, _TRUNCATE, "\tCompositor - %s[%d]:\n\t\t%.2lf ms/frame (%.1lf fps, %.1lf displayed fps, %.2lf ms CPU)\n",
@@ -343,7 +341,7 @@ void UpdateConsole(PresentMonData const& pm, LateStageReprojectionData& lsr, uin
                 runtimeStats.mLsrProcessId,
                 1000.0 / fps,
                 fps,
-                lsr.ComputeDisplayedFps(perfFreq),
+                lsr.ComputeDisplayedFps(),
                 runtimeStats.mLsrCpuRenderTimeInMs);
             *display += str;
 

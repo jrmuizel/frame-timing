@@ -28,10 +28,10 @@ enum {
     MAX_PRESENTS_IN_DEQUE = 60 * (MAX_HISTORY_TIME / 1000)
 };
 
-void SwapChainData::PruneDeque(std::deque<PresentEvent> &presentHistory, uint64_t perfFreq, uint32_t msTimeDiff, uint32_t maxHistLen) {
-    while (!presentHistory.empty() &&
-        (presentHistory.size() > maxHistLen ||
-        ((double)(presentHistory.back().QpcTime - presentHistory.front().QpcTime) / perfFreq) * 1000 > msTimeDiff)) {
+void SwapChainData::PruneDeque(std::deque<PresentEvent> &presentHistory, uint32_t msTimeDiff, uint32_t maxHistLen) {
+    while (!presentHistory.empty() && (
+        presentHistory.size() > maxHistLen ||
+        1000.0 * QpcDeltaToSeconds(presentHistory.back().QpcTime - presentHistory.front().QpcTime) > msTimeDiff)) {
         presentHistory.pop_front();
     }
 }
@@ -49,10 +49,10 @@ void SwapChainData::AddPresentToSwapChain(PresentEvent& p)
     mPresentHistory.push_back(p);
 }
 
-void SwapChainData::UpdateSwapChainInfo(PresentEvent&p, uint64_t now, uint64_t perfFreq)
+void SwapChainData::UpdateSwapChainInfo(PresentEvent&p, uint64_t now)
 {
-    PruneDeque(mDisplayedPresentHistory, perfFreq, MAX_HISTORY_TIME, MAX_PRESENTS_IN_DEQUE);
-    PruneDeque(mPresentHistory, perfFreq, MAX_HISTORY_TIME, MAX_PRESENTS_IN_DEQUE);
+    PruneDeque(mDisplayedPresentHistory, MAX_HISTORY_TIME, MAX_PRESENTS_IN_DEQUE);
+    PruneDeque(mPresentHistory, MAX_HISTORY_TIME, MAX_PRESENTS_IN_DEQUE);
 
     mLastUpdateTicks = now;
     mRuntime = p.Runtime;
@@ -67,7 +67,7 @@ void SwapChainData::UpdateSwapChainInfo(PresentEvent&p, uint64_t now, uint64_t p
     mDwmNotified = p.DwmNotified;
 }
 
-double SwapChainData::ComputeDisplayedFps(uint64_t qpcFreq) const
+double SwapChainData::ComputeDisplayedFps() const
 {
     if (mDisplayedPresentHistory.size() < 2) {
         return 0.0;
@@ -76,11 +76,10 @@ double SwapChainData::ComputeDisplayedFps(uint64_t qpcFreq) const
     auto end = mDisplayedPresentHistory.back().ScreenTime;
     auto count = mDisplayedPresentHistory.size() - 1;
 
-    double deltaT = double(end - start) / qpcFreq;
-    return count / deltaT;
+    return count / QpcDeltaToSeconds(end - start);
 }
 
-double SwapChainData::ComputeFps(uint64_t qpcFreq) const
+double SwapChainData::ComputeFps() const
 {
     if (mPresentHistory.size() < 2) {
         return 0.0;
@@ -89,11 +88,10 @@ double SwapChainData::ComputeFps(uint64_t qpcFreq) const
     auto end = mPresentHistory.back().QpcTime;
     auto count = mPresentHistory.size() - 1;
 
-    double deltaT = double(end - start) / qpcFreq;
-    return count / deltaT;
+    return count / QpcDeltaToSeconds(end - start);
 }
 
-double SwapChainData::ComputeLatency( uint64_t qpcFreq) const
+double SwapChainData::ComputeLatency() const
 {
     if (mDisplayedPresentHistory.size() < 2) {
         return 0.0;
@@ -101,11 +99,11 @@ double SwapChainData::ComputeLatency( uint64_t qpcFreq) const
 
     uint64_t totalLatency = std::accumulate(mDisplayedPresentHistory.begin(), mDisplayedPresentHistory.end() - 1, 0ull,
         [](uint64_t current, PresentEvent const& e) { return current + e.ScreenTime - e.QpcTime; });
-    double average = ((double)(totalLatency) / qpcFreq) / (mDisplayedPresentHistory.size() - 1);
+    double average = QpcDeltaToSeconds(totalLatency) / (mDisplayedPresentHistory.size() - 1);
     return average;
 }
 
-double SwapChainData::ComputeCpuFrameTime(uint64_t qpcFreq) const
+double SwapChainData::ComputeCpuFrameTime() const
 {
     if (mPresentHistory.size() < 2) {
         return 0.0;
@@ -115,7 +113,7 @@ double SwapChainData::ComputeCpuFrameTime(uint64_t qpcFreq) const
         [](uint64_t current, PresentEvent const& e) { return current + e.TimeTaken; });
     uint64_t totalTime = mPresentHistory.back().QpcTime - mPresentHistory.front().QpcTime;
 
-    double timeNotInPresent = double(totalTime - timeInPresent) / qpcFreq;
+    double timeNotInPresent = QpcDeltaToSeconds(totalTime - timeInPresent);
     return timeNotInPresent / (mPresentHistory.size() - 1);
 }
 

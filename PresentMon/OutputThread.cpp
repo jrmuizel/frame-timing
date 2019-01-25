@@ -24,7 +24,6 @@ SOFTWARE.
 #include <shlwapi.h>
 
 #include "PresentMon.hpp"
-#include "LateStageReprojectionData.hpp"
 
 template <typename Map, typename F>
 static void map_erase_if(Map& m, F pred)
@@ -210,7 +209,7 @@ static bool UpdateProcessInfo_Realtime(PresentMonData& pm, ProcessInfo& info, ui
     return true;
 }
 
-void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perfFreq)
+void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now)
 {
     auto proc = StartProcessIfNew(pm, p.ProcessId, now);
     if (proc == nullptr) {
@@ -220,31 +219,12 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
     auto& chain = proc->mChainMap[p.SwapChainAddress];
     chain.AddPresentToSwapChain(p);
 
-    UpdateCSV(pm, proc, chain, p, perfFreq);
+    UpdateCSV(pm, proc, chain, p);
 
-    chain.UpdateSwapChainInfo(p, now, perfFreq);
+    chain.UpdateSwapChainInfo(p, now);
 }
 
-void PresentMon_Init(PresentMonData& pm)
-{
-    auto const& args = GetCommandLineArgs();
-
-    if (!args.mEtlFileName)
-    {
-        QueryPerformanceCounter((PLARGE_INTEGER)&pm.mStartupQpcTime);
-    }
-    else
-    {
-        // Reading events from ETL file so current QPC value is irrelevant. Update this 
-        // later from first event in the file.
-        pm.mStartupQpcTime = 0;
-    }
-
-    // Create any CSV files that don't need process info to be created
-    CreateNonProcessCSVs(pm);
-}
-
-void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionData& lsr, LateStageReprojectionEvent& p, uint64_t now, uint64_t perfFreq)
+void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionData& lsr, LateStageReprojectionEvent& p, uint64_t now)
 {
     auto const& args = GetCommandLineArgs();
 
@@ -260,25 +240,25 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionData& lsr
 
     lsr.AddLateStageReprojection(p);
 
-    UpdateLSRCSV(pm, lsr, proc, p, perfFreq);
+    UpdateLSRCSV(pm, lsr, proc, p);
 
-    lsr.UpdateLateStageReprojectionInfo(now, perfFreq);
+    lsr.UpdateLateStageReprojectionInfo(now);
 }
 
-void PresentMon_Update(PresentMonData& pm, LateStageReprojectionData& lsr, std::vector<std::shared_ptr<PresentEvent>>& presents, std::vector<std::shared_ptr<LateStageReprojectionEvent>>& lsrs, uint64_t now, uint64_t perfFreq)
+void PresentMon_Update(PresentMonData& pm, LateStageReprojectionData& lsr, std::vector<std::shared_ptr<PresentEvent>>& presents, std::vector<std::shared_ptr<LateStageReprojectionEvent>>& lsrs, uint64_t now)
 {
     auto const& args = GetCommandLineArgs();
 
     // store the new presents into processes
     for (auto& p : presents)
     {
-        AddPresent(pm, *p, now, perfFreq);
+        AddPresent(pm, *p, now);
     }
 
     // store the new lsrs
     for (auto& p : lsrs)
     {
-        AddLateStageReprojection(pm, lsr, *p, now, perfFreq);
+        AddLateStageReprojection(pm, lsr, *p, now);
     }
 
     // Update realtime process info
@@ -297,8 +277,8 @@ void PresentMon_Update(PresentMonData& pm, LateStageReprojectionData& lsr, std::
     // Display information to console
     if (!args.mSimpleConsole) {
         std::string display;
-        UpdateConsole(pm, now, perfFreq, &display);
-        UpdateConsole(pm, lsr, now, perfFreq, &display);
+        UpdateConsole(pm, now, &display);
+        UpdateConsole(pm, lsr, now, &display);
         SetConsoleText(display.c_str());
     }
 }
@@ -325,41 +305,8 @@ void EtwConsumingThread()
         return;
     }
 
-    PresentMonData pmData;
-    LateStageReprojectionData lsrData;
-    PMTraceConsumer pmConsumer(args.mVerbosity == Verbosity::Simple);
-    MRTraceConsumer mrConsumer(args.mVerbosity == Verbosity::Simple);
-
-    TraceSession session;
-
-    if (args.mIncludeWindowsMixedReality) {
-        session.AddProviderAndHandler(DHD_PROVIDER_GUID, TRACE_LEVEL_VERBOSE, 0x1C00000, 0, (EventHandlerFn)&HandleDHDEvent, &mrConsumer);
-        if (args.mVerbosity != Verbosity::Simple) {
-            session.AddProviderAndHandler(SPECTRUMCONTINUOUS_PROVIDER_GUID, TRACE_LEVEL_VERBOSE, 0x800000, 0, (EventHandlerFn)&HandleSpectrumContinuousEvent, &mrConsumer);
-        }
-    }
-
-    session.AddProviderAndHandler(DXGI_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 0, 0, (EventHandlerFn) &HandleDXGIEvent, &pmConsumer);
-    session.AddProviderAndHandler(D3D9_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 0, 0, (EventHandlerFn) &HandleD3D9Event, &pmConsumer);
-    if (args.mVerbosity != Verbosity::Simple) {
-        session.AddProviderAndHandler(DXGKRNL_PROVIDER_GUID,   TRACE_LEVEL_INFORMATION, 1,      0, (EventHandlerFn) &HandleDXGKEvent,   &pmConsumer);
-        session.AddProviderAndHandler(WIN32K_PROVIDER_GUID,    TRACE_LEVEL_INFORMATION, 0x1000, 0, (EventHandlerFn) &HandleWin32kEvent, &pmConsumer);
-        session.AddProviderAndHandler(DWM_PROVIDER_GUID,       TRACE_LEVEL_VERBOSE,     0,      0, (EventHandlerFn) &HandleDWMEvent,    &pmConsumer);
-        session.AddProviderAndHandler(Win7::DWM_PROVIDER_GUID, TRACE_LEVEL_VERBOSE, 0, 0, (EventHandlerFn) &HandleDWMEvent, &pmConsumer);
-        session.AddProvider(Win7::DXGKRNL_PROVIDER_GUID, TRACE_LEVEL_INFORMATION, 1, 0);
-    }
-    session.AddHandler(EventMetadataGuid,             (EventHandlerFn) &HandleMetadataEvent,            &pmConsumer);
-    session.AddHandler(NT_PROCESS_EVENT_GUID,         (EventHandlerFn) &HandleNTProcessEvent,           &pmConsumer);
-    session.AddHandler(Win7::DXGKBLT_GUID,            (EventHandlerFn) &Win7::HandleDxgkBlt,            &pmConsumer);
-    session.AddHandler(Win7::DXGKFLIP_GUID,           (EventHandlerFn) &Win7::HandleDxgkFlip,           &pmConsumer);
-    session.AddHandler(Win7::DXGKPRESENTHISTORY_GUID, (EventHandlerFn) &Win7::HandleDxgkPresentHistory, &pmConsumer);
-    session.AddHandler(Win7::DXGKQUEUEPACKET_GUID,    (EventHandlerFn) &Win7::HandleDxgkQueuePacket,    &pmConsumer);
-    session.AddHandler(Win7::DXGKVSYNCDPC_GUID,       (EventHandlerFn) &Win7::HandleDxgkVSyncDPC,       &pmConsumer);
-    session.AddHandler(Win7::DXGKMMIOFLIP_GUID,       (EventHandlerFn) &Win7::HandleDxgkMMIOFlip,       &pmConsumer);
-
-    if (!(args.mEtlFileName == nullptr
-        ? session.InitializeRealtime(args.mSessionName, args.mStopExistingSession, &EtwThreadsShouldQuit)
-        : session.InitializeEtlFile(args.mEtlFileName, &EtwThreadsShouldQuit))) {
+    TRACEHANDLE traceHandle = INVALID_PROCESSTRACE_HANDLE;
+    if (!StartTraceSession(&traceHandle)) {
         PostStopRecording();
         PostQuitProcess();
         return;
@@ -374,11 +321,16 @@ void EtwConsumingThread()
 
     {
         // Launch the ETW producer thread
-        StartConsumerThread(session.traceHandle_);
+        StartConsumerThread(traceHandle);
 
         // Consume / Update based on the ETW output
         {
-            PresentMon_Init(pmData);
+            PresentMonData pmData;
+            LateStageReprojectionData lsrData;
+
+            // Create any CSV files that don't need process info to be created
+            CreateNonProcessCSVs(pmData);
+
             auto timerRunning = args.mTimer > 0;
             auto timerEnd = GetTickCount64() + args.mTimer * 1000;
 
@@ -399,51 +351,30 @@ void EtwConsumingThread()
                 lsrs.clear();
                 ntProcessEvents.clear();
 
-                // If we are reading events from ETL file set start time to match time stamp of first event
-                if (args.mEtlFileName && pmData.mStartupQpcTime == 0)
-                {
-                    pmData.mStartupQpcTime = session.startTime_;
-                }
-
                 uint64_t now = GetTickCount64();
 
-                // Dequeue any captured NTProcess events; if ImageFileName is
+                // Dequeue any captured events
+                DequeueAnalyzedInfo(&ntProcessEvents, &presents, &lsrs);
+
+                // Process captured NTProcess events; if ImageFileName is
                 // empty then the process stopped, otherwise it started.
-                pmConsumer.DequeueProcessEvents(ntProcessEvents);
                 for (auto ntProcessEvent : ntProcessEvents) {
                     if (!ntProcessEvent.ImageFileName.empty()) {
                         StartProcess(pmData, ntProcessEvent.ProcessId, ntProcessEvent.ImageFileName, now);
                     }
                 }
 
-                pmConsumer.DequeuePresents(presents);
-                mrConsumer.DequeueLSRs(lsrs);
                 if (args.mScrollLockToggle && (GetKeyState(VK_SCROLL) & 1) == 0) {
                     presents.clear();
                     lsrs.clear();
                 }
 
                 auto doneProcessingEvents = EtwThreadsShouldQuit();
-                PresentMon_Update(pmData, lsrData, presents, lsrs, now, session.frequency_);
+                PresentMon_Update(pmData, lsrData, presents, lsrs, now);
 
                 for (auto ntProcessEvent : ntProcessEvents) {
                     if (ntProcessEvent.ImageFileName.empty()) {
                         StopProcess(pmData, ntProcessEvent.ProcessId);
-                    }
-                }
-
-                uint32_t eventsLost = 0;
-                uint32_t buffersLost = 0;
-                if (session.CheckLostReports(&eventsLost, &buffersLost)) {
-                    printf("Lost %u events, %u buffers.", eventsLost, buffersLost);
-
-                    totalEventsLost += eventsLost;
-                    totalBuffersLost += buffersLost;
-
-                    // FIXME: How do we set a threshold here?
-                    if (eventsLost > 100) {
-                        PostStopRecording();
-                        PostQuitProcess();
                     }
                 }
 
@@ -464,17 +395,16 @@ void EtwConsumingThread()
                 Sleep(100);
             }
 
+            uint32_t eventsLost = 0;
+            uint32_t buffersLost = 0;
+            CheckLostReports(&eventsLost, &buffersLost);
             PresentMon_Shutdown(pmData, totalEventsLost, totalBuffersLost);
         }
 
-        if (IsConsumerThreadRunning()) {
-            session.Stop();
-        }
-
+        StopTraceSession();
         WaitForConsumerThreadToExit();
+        FinalizeTraceSession();
     }
-
-    session.Finalize();
 
     if (args.mScrollLockIndicator) {
         EnableScrollLock(false);

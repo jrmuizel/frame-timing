@@ -390,10 +390,6 @@ bool ParseCommandLine(int argc, char** argv)
         args->mHotkeySupport = false;
     }
 
-    if (args->mEtlFileName && strcmp(args->mSessionName, "PresentMon") != 0) {
-        fprintf(stderr, "warning: -session_name is not applicable when -etl_file parsing; ignoring -session_name.\n");
-    }
-
     if (args->mMultiCsv && !args->mOutputFile) {
         args->mMultiCsv = false; // -multi_csv and -no_csv provided, don't need a warning on this one
     }

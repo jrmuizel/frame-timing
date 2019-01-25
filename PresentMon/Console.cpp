@@ -83,7 +83,7 @@ void SetConsoleText(const char *text)
     SetConsoleCursorPosition(hConsole, origin);
 }
 
-void UpdateConsole(PresentMonData const& pm, uint64_t now, uint64_t perfFreq, std::string* display)
+void UpdateConsole(PresentMonData const& pm, uint64_t now, std::string* display)
 {
     auto const& args = GetCommandLineArgs();
 
@@ -105,7 +105,7 @@ void UpdateConsole(PresentMonData const& pm, uint64_t now, uint64_t perfFreq, st
 
         for (auto& chain : proc.mChainMap)
         {
-            double fps = chain.second.ComputeFps(perfFreq);
+            double fps = chain.second.ComputeFps();
 
             _snprintf_s(str, _TRUNCATE, "\t%016llX (%s): SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, ",
                 chain.first,
@@ -117,16 +117,16 @@ void UpdateConsole(PresentMonData const& pm, uint64_t now, uint64_t perfFreq, st
             *display += str;
 
             if (args.mVerbosity > Verbosity::Simple) {
-                _snprintf_s(str, _TRUNCATE, "%.1lf displayed fps, ", chain.second.ComputeDisplayedFps(perfFreq));
+                _snprintf_s(str, _TRUNCATE, "%.1lf displayed fps, ", chain.second.ComputeDisplayedFps());
                 *display += str;
             }
 
-            _snprintf_s(str, _TRUNCATE, "%.2lf ms CPU", chain.second.ComputeCpuFrameTime(perfFreq) * 1000.0);
+            _snprintf_s(str, _TRUNCATE, "%.2lf ms CPU", chain.second.ComputeCpuFrameTime() * 1000.0);
             *display += str;
 
             if (args.mVerbosity > Verbosity::Simple) {
                 _snprintf_s(str, _TRUNCATE, ", %.2lf ms latency) (%s",
-                    1000.0 * chain.second.ComputeLatency(perfFreq),
+                    1000.0 * chain.second.ComputeLatency(),
                     PresentModeToString(chain.second.mLastPresentMode));
                 *display += str;
 

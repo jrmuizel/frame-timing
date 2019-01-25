@@ -87,23 +87,23 @@ struct LateStageReprojectionData {
     std::deque<LateStageReprojectionEvent> mDisplayedLSRHistory;
     std::deque<LateStageReprojectionEvent> mSourceHistory;
 
-    void PruneDeque(std::deque<LateStageReprojectionEvent>& lsrHistory, uint64_t perfFreq, uint32_t msTimeDiff, uint32_t maxHistLen);
+    void PruneDeque(std::deque<LateStageReprojectionEvent>& lsrHistory, uint32_t msTimeDiff, uint32_t maxHistLen);
     void AddLateStageReprojection(LateStageReprojectionEvent& p);
-    void UpdateLateStageReprojectionInfo(uint64_t now, uint64_t perfFreq);
-    double ComputeHistoryTime(uint64_t qpcFreq) const;
-    double ComputeSourceFps(uint64_t qpcFreq) const;
-    double ComputeDisplayedFps(uint64_t qpcFreq) const;
-    double ComputeFps(uint64_t qpcFreq) const;
+    void UpdateLateStageReprojectionInfo(uint64_t now);
+    double ComputeHistoryTime() const;
+    double ComputeSourceFps() const;
+    double ComputeDisplayedFps() const;
+    double ComputeFps() const;
     size_t ComputeHistorySize() const;
-    LateStageReprojectionRuntimeStats ComputeRuntimeStats(uint64_t perfFreq) const;
+    LateStageReprojectionRuntimeStats ComputeRuntimeStats() const;
 
     bool IsStale(uint64_t now) const;
     bool HasData() const { return !mLSRHistory.empty(); }
 
 private:
-    double ComputeFps(const std::deque<LateStageReprojectionEvent>& lsrHistory, uint64_t qpcFreq) const;
-    double ComputeHistoryTime(const std::deque<LateStageReprojectionEvent>& lsrHistory, uint64_t qpcFreq) const;
+    double ComputeFps(const std::deque<LateStageReprojectionEvent>& lsrHistory) const;
+    double ComputeHistoryTime(const std::deque<LateStageReprojectionEvent>& lsrHistory) const;
 };
 
-void UpdateLSRCSV(PresentMonData& pm, LateStageReprojectionData& lsr, ProcessInfo* proc, LateStageReprojectionEvent& p, uint64_t perfFreq);
-void UpdateConsole(PresentMonData const& pm, LateStageReprojectionData& lsr, uint64_t now, uint64_t perfFreq, std::string* display);
+void UpdateLSRCSV(PresentMonData& pm, LateStageReprojectionData& lsr, ProcessInfo* proc, LateStageReprojectionEvent& p);
+void UpdateConsole(PresentMonData const& pm, LateStageReprojectionData& lsr, uint64_t now, std::string* display);

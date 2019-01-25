@@ -22,7 +22,6 @@ SOFTWARE.
 
 #include "PresentMon.hpp"
 
-static bool gThreadRunning = false;
 static std::thread gThread;
 
 static void Consume(TRACEHANDLE traceHandle)
@@ -32,10 +31,10 @@ static void Consume(TRACEHANDLE traceHandle)
     // You must call OpenTrace() prior to calling this function
     //
     // ProcessTrace() blocks the calling thread until it
-    //     1) delivers all events,
-    //     2) the BufferCallback function returns FALSE,
-    //     3) you call CloseTrace(),
-    //     4) the controller stops the trace session (if realtime collection).
+    //     1) delivers all events, or
+    //     2) the BufferCallback function returns FALSE, or
+    //     3) you call CloseTrace(), or
+    //     4) the controller stops the trace session.
     //
     // There may be a several second delay before the function returns.
     //
@@ -49,10 +48,9 @@ static void Consume(TRACEHANDLE traceHandle)
     auto status = ProcessTrace(&traceHandle, 1, NULL, NULL);
     (void) status;
 
-    // If ProcessTrace() finished on it's own, record that was the end
-    // condition and signal MainThread to shut everything down.
+    // If ProcessTrace() finished on it's own signal MainThread to shut
+    // everything down.
     if (!EtwThreadsShouldQuit()) {
-        gThreadRunning = false;
         PostStopRecording();
         PostQuitProcess();
     }
@@ -60,13 +58,7 @@ static void Consume(TRACEHANDLE traceHandle)
 
 void StartConsumerThread(TRACEHANDLE traceHandle)
 {
-    gThreadRunning = true;
     gThread = std::thread(Consume, traceHandle);
-}
-
-bool IsConsumerThreadRunning()
-{
-    return gThreadRunning;
 }
 
 void WaitForConsumerThreadToExit()

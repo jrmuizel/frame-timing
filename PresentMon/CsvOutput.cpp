@@ -261,7 +261,7 @@ void CloseCSVs(PresentMonData& pm, uint32_t totalEventsLost, uint32_t totalBuffe
     pm.mProcessOutputFiles.clear();
 }
 
-void UpdateCSV(PresentMonData& pm, ProcessInfo* proc, SwapChainData const& chain, PresentEvent& p, uint64_t perfFreq)
+void UpdateCSV(PresentMonData& pm, ProcessInfo* proc, SwapChainData const& chain, PresentEvent& p)
 {
     auto const& args = GetCommandLineArgs();
 
@@ -272,19 +272,19 @@ void UpdateCSV(PresentMonData& pm, ProcessInfo* proc, SwapChainData const& chain
         if (len > 1) {
             auto& curr = chain.mPresentHistory[len - 1];
             auto& prev = chain.mPresentHistory[len - 2];
-            double deltaMilliseconds = 1000 * double(curr.QpcTime - prev.QpcTime) / perfFreq;
-            double deltaReady = curr.ReadyTime == 0 ? 0.0 : (1000 * double(curr.ReadyTime - curr.QpcTime) / perfFreq);
-            double deltaDisplayed = curr.FinalState == PresentResult::Presented ? (1000 * double(curr.ScreenTime - curr.QpcTime) / perfFreq) : 0.0;
-            double timeTakenMilliseconds = 1000 * double(curr.TimeTaken) / perfFreq;
+            double deltaMilliseconds = 1000.0 * QpcDeltaToSeconds(curr.QpcTime - prev.QpcTime);
+            double deltaReady = curr.ReadyTime == 0 ? 0.0 : (1000.0 * QpcDeltaToSeconds(curr.ReadyTime - curr.QpcTime));
+            double deltaDisplayed = curr.FinalState == PresentResult::Presented ? (1000.0 * QpcDeltaToSeconds(curr.ScreenTime - curr.QpcTime)) : 0.0;
+            double timeTakenMilliseconds = 1000.0 * QpcDeltaToSeconds(curr.TimeTaken);
 
             double timeSincePreviousDisplayed = 0.0;
             if (curr.FinalState == PresentResult::Presented && displayedLen > 1) {
                 assert(chain.mDisplayedPresentHistory[displayedLen - 1].QpcTime == curr.QpcTime);
                 auto& prevDisplayed = chain.mDisplayedPresentHistory[displayedLen - 2];
-                timeSincePreviousDisplayed = 1000 * double(curr.ScreenTime - prevDisplayed.ScreenTime) / perfFreq;
+                timeSincePreviousDisplayed = 1000.0 * QpcDeltaToSeconds(curr.ScreenTime - prevDisplayed.ScreenTime);
             }
 
-            double timeInSeconds = (double)(int64_t)(p.QpcTime - pm.mStartupQpcTime) / perfFreq;
+            double timeInSeconds = QpcToSeconds(p.QpcTime);
             fprintf(file, "%s,%d,0x%016llX,%s,%d,%d",
                     proc->mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime), curr.SyncInterval, curr.PresentFlags);
             if (args.mVerbosity > Verbosity::Simple)
