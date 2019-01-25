@@ -32,6 +32,10 @@ SOFTWARE.
 #include <windows.h>
 #include <evntcons.h> // must include after windows.h
 
+#include <initguid.h>
+#include <KernelTraceControl.h>
+#include "TraceConsumer.hpp"
+
 struct __declspec(uuid("{CA11C036-0102-4A2D-A6AD-F03CFED5D3C9}")) DXGI_PROVIDER_GUID_HOLDER;
 struct __declspec(uuid("{802ec45a-1e99-4b83-9920-87c98277ba9d}")) DXGKRNL_PROVIDER_GUID_HOLDER;
 struct __declspec(uuid("{8c416c79-d49b-4f01-a467-e56d3aa8234c}")) WIN32K_PROVIDER_GUID_HOLDER;
@@ -155,6 +159,8 @@ struct PMTraceConsumer
 {
     PMTraceConsumer(bool simple) : mSimpleMode(simple) { }
     ~PMTraceConsumer();
+
+    EventMetadataContainer mMetadata;
 
     bool mSimpleMode;
 
@@ -287,6 +293,7 @@ void HandleD3D9Event(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
 void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
 void HandleWin32kEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
 void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
+void HandleMetadataEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
 
 // These are only for Win7 support
 namespace Win7

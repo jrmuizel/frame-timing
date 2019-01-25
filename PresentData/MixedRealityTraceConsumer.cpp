@@ -191,11 +191,11 @@ void MRTraceConsumer::HolographicFrameStop(std::shared_ptr<HolographicFrame> p)
 void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
 {
     auto const& hdr = pEventRecord->EventHeader;
-    const std::wstring taskName = GetEventTaskName(pEventRecord);
+    const std::wstring taskName = GetEventTaskNameFromTdh(pEventRecord);
 
     if (taskName.compare(L"AcquireForRendering") == 0)
     {
-        const uint64_t ptr = GetEventData<uint64_t>(pEventRecord, L"thisPtr");
+        const uint64_t ptr = GetEventDataFromTdh<uint64_t>(pEventRecord, L"thisPtr");
         auto sourceIter = mrConsumer->FindOrCreatePresentationSource(ptr);
         sourceIter->second->AcquireForRenderingTime = *(uint64_t*)&hdr.TimeStamp;
 
@@ -206,19 +206,19 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
     }
     else if (taskName.compare(L"ReleaseFromRendering") == 0)
     {
-        const uint64_t ptr = GetEventData<uint64_t>(pEventRecord, L"thisPtr");
+        const uint64_t ptr = GetEventDataFromTdh<uint64_t>(pEventRecord, L"thisPtr");
         auto sourceIter = mrConsumer->FindOrCreatePresentationSource(ptr);
         sourceIter->second->ReleaseFromRenderingTime = *(uint64_t*)&hdr.TimeStamp;
     }
     else if (taskName.compare(L"AcquireForPresentation") == 0)
     {
-        const uint64_t ptr = GetEventData<uint64_t>(pEventRecord, L"thisPtr");
+        const uint64_t ptr = GetEventDataFromTdh<uint64_t>(pEventRecord, L"thisPtr");
         auto sourceIter = mrConsumer->FindOrCreatePresentationSource(ptr);
         sourceIter->second->AcquireForPresentationTime = *(uint64_t*)&hdr.TimeStamp;
     }
     else if (taskName.compare(L"ReleaseFromPresentation") == 0)
     {
-        const uint64_t ptr = GetEventData<uint64_t>(pEventRecord, L"thisPtr");
+        const uint64_t ptr = GetEventDataFromTdh<uint64_t>(pEventRecord, L"thisPtr");
         auto sourceIter = mrConsumer->FindOrCreatePresentationSource(ptr);
         sourceIter->second->ReleaseFromPresentationTime = *(uint64_t*)&hdr.TimeStamp;
 
@@ -231,10 +231,10 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
     }
     else if (taskName.compare(L"OasisPresentationSource") == 0)
     {
-        std::string eventType = GetEventData<std::string>(pEventRecord, L"EventType");
+        std::string eventType = GetEventDataFromTdh<std::string>(pEventRecord, L"EventType");
         eventType.pop_back(); // Pop the null-terminator so the compare works.
         if (eventType.compare("Destruction") == 0) {
-            const uint64_t ptr = GetEventData<uint64_t>(pEventRecord, L"thisPtr");
+            const uint64_t ptr = GetEventDataFromTdh<uint64_t>(pEventRecord, L"thisPtr");
             mrConsumer->CompletePresentationSource(ptr);
         }
     }
@@ -248,12 +248,12 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
 
         // Start a new LSR.
         pEvent = std::make_shared<LateStageReprojectionEvent>(hdr);
-        GetEventData(pEventRecord, L"SourcePtr", &pEvent->Source.Ptr);
-        GetEventData(pEventRecord, L"NewSourceLatched", &pEvent->NewSourceLatched);
-        GetEventData(pEventRecord, L"TimeUntilVblankMs", &pEvent->TimeUntilVsyncMs);
-        GetEventData(pEventRecord, L"TimeUntilPhotonsMiddleMs", &pEvent->TimeUntilPhotonsMiddleMs);
-        GetEventData(pEventRecord, L"PredictionSampleTimeToPhotonsVisibleMs", &pEvent->AppPredictionLatencyMs);
-        GetEventData(pEventRecord, L"MispredictionMs", &pEvent->AppMispredictionMs);
+        GetEventDataFromTdh(pEventRecord, L"SourcePtr", &pEvent->Source.Ptr);
+        GetEventDataFromTdh(pEventRecord, L"NewSourceLatched", &pEvent->NewSourceLatched);
+        GetEventDataFromTdh(pEventRecord, L"TimeUntilVblankMs", &pEvent->TimeUntilVsyncMs);
+        GetEventDataFromTdh(pEventRecord, L"TimeUntilPhotonsMiddleMs", &pEvent->TimeUntilPhotonsMiddleMs);
+        GetEventDataFromTdh(pEventRecord, L"PredictionSampleTimeToPhotonsVisibleMs", &pEvent->AppPredictionLatencyMs);
+        GetEventDataFromTdh(pEventRecord, L"MispredictionMs", &pEvent->AppMispredictionMs);
         assert(pEvent->Source.Ptr != 0);
     }
     else if (taskName.compare(L"LsrThread_LatchedInput") == 0)
@@ -262,15 +262,15 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
         auto& pEvent = mrConsumer->mActiveLSR;
         if (pEvent) {
             // New pose latched.
-            const float timeUntilPhotonsTopMs = GetEventData<float>(pEventRecord, L"TimeUntilTopPhotonsMs");
-            const float timeUntilPhotonsBottomMs = GetEventData<float>(pEventRecord, L"TimeUntilBottomPhotonsMs");
+            const float timeUntilPhotonsTopMs = GetEventDataFromTdh<float>(pEventRecord, L"TimeUntilTopPhotonsMs");
+            const float timeUntilPhotonsBottomMs = GetEventDataFromTdh<float>(pEventRecord, L"TimeUntilBottomPhotonsMs");
             const float timeUntilPhotonsMiddleMs = (timeUntilPhotonsTopMs + timeUntilPhotonsBottomMs) / 2;
             pEvent->LsrPredictionLatencyMs = timeUntilPhotonsMiddleMs;
 
             if (!mrConsumer->mSimpleMode) {
                 // Get the latest details about the Holographic Frame being used for presentation.
                 // Link Presentation Source -> Holographic Frame using the PresentId.
-                const uint32_t presentId = GetEventData<uint32_t>(pEventRecord, L"PresentId");
+                const uint32_t presentId = GetEventDataFromTdh<uint32_t>(pEventRecord, L"PresentId");
                 auto frameIter = mrConsumer->mHolographicFramesByPresentId.find(presentId);
                 if (frameIter != mrConsumer->mHolographicFramesByPresentId.end()) {
                     // Now that we've latched, the source has been acquired for presentation.
@@ -292,7 +292,7 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
         auto& pEvent = mrConsumer->mActiveLSR;
         if (pEvent) {
             // We have missed some extra Vsyncs we need to account for.
-            const uint32_t unaccountedForMissedVSyncCount = GetEventData<uint32_t>(pEventRecord, L"unaccountedForVsyncsBetweenStatGathering");
+            const uint32_t unaccountedForMissedVSyncCount = GetEventDataFromTdh<uint32_t>(pEventRecord, L"unaccountedForVsyncsBetweenStatGathering");
             assert(unaccountedForMissedVSyncCount >= 1);
             pEvent->MissedVsyncCount += unaccountedForMissedVSyncCount;
         }
@@ -303,7 +303,7 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
         auto& pEvent = mrConsumer->mActiveLSR;
         if (pEvent) {
             // If the missed reason is for Present, increment our missed Vsync count.
-            const uint32_t MissedReason = GetEventData<uint32_t>(pEventRecord, L"reason");
+            const uint32_t MissedReason = GetEventDataFromTdh<uint32_t>(pEventRecord, L"reason");
             if (MissedReason == 0) {
                 pEvent->MissedVsyncCount++;
             }
@@ -315,27 +315,27 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
         auto& pEvent = mrConsumer->mActiveLSR;
         if (pEvent) {
             // Newer versions of the event have a different name, but we don't want to spew if we don't find it.
-            if (!GetEventData(pEventRecord, L"startLatchToCpuRenderFrameStartInMs", &pEvent->ThreadWakeupStartLatchToCpuRenderFrameStartInMs, false))
+            if (!GetEventDataFromTdh(pEventRecord, L"startLatchToCpuRenderFrameStartInMs", &pEvent->ThreadWakeupStartLatchToCpuRenderFrameStartInMs, false))
             {
-                GetEventData(pEventRecord, L"threadWakeupToCpuRenderFrameStartInMs", &pEvent->ThreadWakeupStartLatchToCpuRenderFrameStartInMs);
+                GetEventDataFromTdh(pEventRecord, L"threadWakeupToCpuRenderFrameStartInMs", &pEvent->ThreadWakeupStartLatchToCpuRenderFrameStartInMs);
             }
-            GetEventData(pEventRecord, L"cpuRenderFrameStartToHeadPoseCallbackStartInMs", &pEvent->CpuRenderFrameStartToHeadPoseCallbackStartInMs);
-            GetEventData(pEventRecord, L"headPoseCallbackDurationInMs", &pEvent->HeadPoseCallbackStartToHeadPoseCallbackStopInMs);
-            GetEventData(pEventRecord, L"headPoseCallbackEndToInputLatchInMs", &pEvent->HeadPoseCallbackStopToInputLatchInMs);
-            GetEventData(pEventRecord, L"inputLatchToGpuSubmissionInMs", &pEvent->InputLatchToGpuSubmissionInMs);
-            GetEventData(pEventRecord, L"gpuSubmissionToGpuStartInMs", &pEvent->GpuSubmissionToGpuStartInMs);
-            GetEventData(pEventRecord, L"gpuStartToGpuStopInMs", &pEvent->GpuStartToGpuStopInMs);
-            GetEventData(pEventRecord, L"gpuStopToCopyStartInMs", &pEvent->GpuStopToCopyStartInMs);
-            GetEventData(pEventRecord, L"copyStartToCopyStopInMs", &pEvent->CopyStartToCopyStopInMs);
-            GetEventData(pEventRecord, L"copyStopToVsyncInMs", &pEvent->CopyStopToVsyncInMs);
+            GetEventDataFromTdh(pEventRecord, L"cpuRenderFrameStartToHeadPoseCallbackStartInMs", &pEvent->CpuRenderFrameStartToHeadPoseCallbackStartInMs);
+            GetEventDataFromTdh(pEventRecord, L"headPoseCallbackDurationInMs", &pEvent->HeadPoseCallbackStartToHeadPoseCallbackStopInMs);
+            GetEventDataFromTdh(pEventRecord, L"headPoseCallbackEndToInputLatchInMs", &pEvent->HeadPoseCallbackStopToInputLatchInMs);
+            GetEventDataFromTdh(pEventRecord, L"inputLatchToGpuSubmissionInMs", &pEvent->InputLatchToGpuSubmissionInMs);
+            GetEventDataFromTdh(pEventRecord, L"gpuSubmissionToGpuStartInMs", &pEvent->GpuSubmissionToGpuStartInMs);
+            GetEventDataFromTdh(pEventRecord, L"gpuStartToGpuStopInMs", &pEvent->GpuStartToGpuStopInMs);
+            GetEventDataFromTdh(pEventRecord, L"gpuStopToCopyStartInMs", &pEvent->GpuStopToCopyStartInMs);
+            GetEventDataFromTdh(pEventRecord, L"copyStartToCopyStopInMs", &pEvent->CopyStartToCopyStopInMs);
+            GetEventDataFromTdh(pEventRecord, L"copyStopToVsyncInMs", &pEvent->CopyStopToVsyncInMs);
 
             // Newer versions of the event have a different name, but we don't want to spew if we don't find it.
-            if (!GetEventData(pEventRecord, L"totalWakeupErrorMs", &pEvent->TotalWakeupErrorMs, false))
+            if (!GetEventDataFromTdh(pEventRecord, L"totalWakeupErrorMs", &pEvent->TotalWakeupErrorMs, false))
             {
-                GetEventData(pEventRecord, L"wakeupErrorInMs", &pEvent->TotalWakeupErrorMs);
+                GetEventDataFromTdh(pEventRecord, L"wakeupErrorInMs", &pEvent->TotalWakeupErrorMs);
             }
 
-            const bool bFrameSubmittedOnSchedule = GetEventData<bool>(pEventRecord, L"frameSubmittedOnSchedule");
+            const bool bFrameSubmittedOnSchedule = GetEventDataFromTdh<bool>(pEventRecord, L"frameSubmittedOnSchedule");
             if (bFrameSubmittedOnSchedule) {
                 pEvent->FinalState = LateStageReprojectionResult::Presented;
             }
@@ -349,12 +349,12 @@ void HandleDHDEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
 void HandleSpectrumContinuousEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* mrConsumer)
 {
     auto const& hdr = pEventRecord->EventHeader;
-    const std::wstring taskName = GetEventTaskName(pEventRecord);
+    const std::wstring taskName = GetEventTaskNameFromTdh(pEventRecord);
 
     if (taskName.compare(L"HolographicFrame") == 0)
     {
         // Ignore rehydrated frames.
-        const bool bIsRehydration = GetEventData<bool>(pEventRecord, L"isRehydration");
+        const bool bIsRehydration = GetEventDataFromTdh<bool>(pEventRecord, L"isRehydration");
         if (!bIsRehydration) {
             switch (pEventRecord->EventHeader.EventDescriptor.Opcode)
             {
@@ -362,7 +362,7 @@ void HandleSpectrumContinuousEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* 
             {
                 // CreateNextFrame() was called by the App.
                 auto pFrame = std::make_shared<HolographicFrame>(hdr);
-                GetEventData(pEventRecord, L"holographicFrameID", &pFrame->FrameId);
+                GetEventDataFromTdh(pEventRecord, L"holographicFrameID", &pFrame->FrameId);
 
                 mrConsumer->HolographicFrameStart(pFrame);
                 break;
@@ -370,7 +370,7 @@ void HandleSpectrumContinuousEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* 
             case EVENT_TRACE_TYPE_STOP:
             {
                 // PresentUsingCurrentPrediction() was called by the App.
-                const uint32_t holographicFrameId = GetEventData<uint32_t>(pEventRecord, L"holographicFrameID");
+                const uint32_t holographicFrameId = GetEventDataFromTdh<uint32_t>(pEventRecord, L"holographicFrameID");
                 auto frameIter = mrConsumer->mHolographicFramesByFrameId.find(holographicFrameId);
                 if (frameIter == mrConsumer->mHolographicFramesByFrameId.end()) {
                     return;
@@ -392,13 +392,13 @@ void HandleSpectrumContinuousEvent(EVENT_RECORD* pEventRecord, MRTraceConsumer* 
     else if (taskName.compare(L"HolographicFrameMetadata_GetNewPoseForReprojection") == 0)
     {
         // Link holographicFrameId -> presentId.
-        const uint32_t holographicFrameId = GetEventData<uint32_t>(pEventRecord, L"holographicFrameId");
+        const uint32_t holographicFrameId = GetEventDataFromTdh<uint32_t>(pEventRecord, L"holographicFrameId");
         auto frameIter = mrConsumer->mHolographicFramesByFrameId.find(holographicFrameId);
         if (frameIter == mrConsumer->mHolographicFramesByFrameId.end()) {
             return;
         }
 
-        GetEventData(pEventRecord, L"presentId", &frameIter->second->PresentId);
+        GetEventDataFromTdh(pEventRecord, L"presentId", &frameIter->second->PresentId);
 
         // Only complete the frame once we've seen all the events for it.
         if (frameIter->second->PresentId != 0 && frameIter->second->StopTime != 0) {
