@@ -199,17 +199,13 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="DxgkrnlEventStructs.hpp" />
-    <ClInclude Include="LateStageReprojectionData.hpp" />
     <ClInclude Include="MixedRealityTraceConsumer.hpp" />
     <ClInclude Include="PresentMonTraceConsumer.hpp" />
-    <ClInclude Include="SwapChainData.hpp" />
     <ClInclude Include="TraceConsumer.hpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="LateStageReprojectionData.cpp" />
     <ClCompile Include="MixedRealityTraceConsumer.cpp" />
     <ClCompile Include="PresentMonTraceConsumer.cpp" />
-    <ClCompile Include="SwapChainData.cpp" />
     <ClCompile Include="TraceConsumer.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

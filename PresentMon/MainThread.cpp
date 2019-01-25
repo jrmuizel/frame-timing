@@ -1,5 +1,5 @@
 /*
-Copyright 2017-2018 Intel Corporation
+Copyright 2017-2019 Intel Corporation
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -22,9 +22,7 @@ SOFTWARE.
 
 #include <assert.h>
 #include <thread>
-#include <windows.h>
 
-#include "CommandLine.hpp"
 #include "PresentMon.hpp"
 
 namespace {
@@ -135,6 +133,31 @@ HWND CreateMessageQueue(CommandLineArgs& args)
     return hWnd;
 }
 
+}
+
+bool EnableScrollLock(bool enable)
+{
+    auto enabled = (GetKeyState(VK_SCROLL) & 1) == 1;
+    if (enabled != enable) {
+        auto extraInfo = GetMessageExtraInfo();
+        INPUT input[2] = {};
+
+        input[0].type = INPUT_KEYBOARD;
+        input[0].ki.wVk = VK_SCROLL;
+        input[0].ki.dwExtraInfo = extraInfo;
+
+        input[1].type = INPUT_KEYBOARD;
+        input[1].ki.wVk = VK_SCROLL;
+        input[1].ki.dwFlags = KEYEVENTF_KEYUP;
+        input[1].ki.dwExtraInfo = extraInfo;
+
+        auto sendCount = SendInput(2, input, sizeof(INPUT));
+        if (sendCount != 2) {
+            fprintf(stderr, "warning: could not toggle scroll lock.\n");
+        }
+    }
+
+    return enabled;
 }
 
 bool EtwThreadsShouldQuit()

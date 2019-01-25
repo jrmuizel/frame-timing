@@ -1,5 +1,5 @@
 /*
-Copyright 2017-2018 Intel Corporation
+Copyright 2017-2019 Intel Corporation
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -21,33 +21,10 @@ SOFTWARE.
 */
 
 #include <generated/version.h>
-#include <stdio.h>
 
-#include "CommandLine.hpp"
+#include "PresentMon.hpp"
 
 namespace {
-
-bool CombineArguments(
-    int argc,
-    char** argv,
-    char* out,
-    size_t outSize)
-{
-    size_t idx = 0;
-    for (int i = 1; i < argc && idx < outSize; ++i) {
-        if (idx >= outSize) {
-            return false; // was truncated
-        }
-
-        if (argv[i][0] != '\"' && strchr(argv[i], ' ')) {
-            idx += snprintf(out + idx, outSize - idx, " \"%s\"", argv[i]);
-        } else {
-            idx += snprintf(out + idx, outSize - idx, " %s", argv[i]);
-        }
-    }
-
-    return true;
-}
 
 bool ParseModifier(char* arg, UINT* inoutModifier)
 {
@@ -401,45 +378,5 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
     }
 
     return true;
-}
-
-void SetConsoleTitle(
-    int argc,
-    char** argv)
-{
-    char args[MAX_PATH] = "PresentMon";
-    size_t idx = strlen(args);
-    if (!CombineArguments(argc, argv, args + idx, MAX_PATH - idx)) {
-        args[MAX_PATH - 4] = '.';
-        args[MAX_PATH - 3] = '.';
-        args[MAX_PATH - 2] = '.';
-    }
-
-    SetConsoleTitleA(args);
-}
-
-bool EnableScrollLock(bool enable)
-{
-    auto enabled = (GetKeyState(VK_SCROLL) & 1) == 1;
-    if (enabled != enable) {
-        auto extraInfo = GetMessageExtraInfo();
-        INPUT input[2] = {};
-
-        input[0].type = INPUT_KEYBOARD;
-        input[0].ki.wVk = VK_SCROLL;
-        input[0].ki.dwExtraInfo = extraInfo;
-
-        input[1].type = INPUT_KEYBOARD;
-        input[1].ki.wVk = VK_SCROLL;
-        input[1].ki.dwFlags = KEYEVENTF_KEYUP;
-        input[1].ki.dwExtraInfo = extraInfo;
-
-        auto sendCount = SendInput(2, input, sizeof(INPUT));
-        if (sendCount != 2) {
-            fprintf(stderr, "warning: could not toggle scroll lock.\n");
-        }
-    }
-
-    return enabled;
 }
 
