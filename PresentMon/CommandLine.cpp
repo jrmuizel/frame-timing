@@ -26,6 +26,8 @@ SOFTWARE.
 
 namespace {
 
+CommandLineArgs gCommandLineArgs;
+
 bool ParseModifier(char* arg, UINT* inoutModifier)
 {
     struct {
@@ -244,8 +246,15 @@ void PrintHelp()
 
 }
 
-bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
+CommandLineArgs const& GetCommandLineArgs()
 {
+    return gCommandLineArgs;
+}
+
+bool ParseCommandLine(int argc, char** argv)
+{
+    auto args = &gCommandLineArgs;
+
     args->mTargetProcessNames.clear();
     args->mExcludeProcessNames.clear();
     args->mOutputFileName = nullptr;
@@ -254,7 +263,6 @@ bool ParseCommandLine(int argc, char** argv, CommandLineArgs* args)
     args->mTargetPid = 0;
     args->mDelay = 0;
     args->mTimer = 0;
-    args->mRecordingCount = 0;
     args->mHotkeyModifiers = MOD_NOREPEAT;
     args->mHotkeyVirtualKeyCode = VK_F11;
     args->mOutputFile = true;

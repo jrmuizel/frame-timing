@@ -35,8 +35,10 @@ static void map_erase_if(Map& m, F pred)
     }
 }
 
-static bool IsTargetProcess(CommandLineArgs const& args, uint32_t processId, char const* processName)
+static bool IsTargetProcess(uint32_t processId, char const* processName)
 {
+    auto const& args = GetCommandLineArgs();
+
     // -exclude
     for (auto excludeProcessName : args.mExcludeProcessNames) {
         if (_stricmp(excludeProcessName, processName) == 0) {
@@ -66,17 +68,19 @@ static bool IsTargetProcess(CommandLineArgs const& args, uint32_t processId, cha
 
 static void TerminateProcess(PresentMonData& pm, ProcessInfo const& proc)
 {
+    auto const& args = GetCommandLineArgs();
+
     if (!proc.mTargetProcess) {
         return;
     }
 
     // Save the output files in case the process is re-started
-    if (pm.mArgs->mMultiCsv) {
+    if (args.mMultiCsv) {
         pm.mProcessOutputFiles.emplace(proc.mModuleName, std::make_pair(proc.mOutputFile, proc.mLsrOutputFile));
     }
 
     // Quit if this is the last process tracked for -terminate_on_proc_exit
-    if (pm.mArgs->mTerminateOnProcExit) {
+    if (args.mTerminateOnProcExit) {
         pm.mTerminationProcessCount -= 1;
         if (pm.mTerminationProcessCount == 0) {
             PostStopRecording();
@@ -101,11 +105,13 @@ static void StopProcess(PresentMonData& pm, uint32_t processId)
 
 static ProcessInfo* StartNewProcess(PresentMonData& pm, ProcessInfo* proc, uint32_t processId, std::string const& imageFileName, uint64_t now)
 {
+    auto const& args = GetCommandLineArgs();
+
     proc->mModuleName = imageFileName;
     proc->mOutputFile = nullptr;
     proc->mLsrOutputFile = nullptr;
     proc->mLastRefreshTicks = now;
-    proc->mTargetProcess = IsTargetProcess(*pm.mArgs, processId, imageFileName.c_str());
+    proc->mTargetProcess = IsTargetProcess(processId, imageFileName.c_str());
 
     if (!proc->mTargetProcess) {
         return nullptr;
@@ -115,7 +121,7 @@ static ProcessInfo* StartNewProcess(PresentMonData& pm, ProcessInfo* proc, uint3
     CreateProcessCSVs(pm, proc, imageFileName);
 
     // Include process in -terminate_on_proc_exit count
-    if (pm.mArgs->mTerminateOnProcExit) {
+    if (args.mTerminateOnProcExit) {
         pm.mTerminationProcessCount += 1;
     }
 
@@ -135,6 +141,8 @@ static ProcessInfo* StartProcess(PresentMonData& pm, uint32_t processId, std::st
 
 static ProcessInfo* StartProcessIfNew(PresentMonData& pm, uint32_t processId, uint64_t now)
 {
+    auto const& args = GetCommandLineArgs();
+
     auto it = pm.mProcessMap.find(processId);
     if (it != pm.mProcessMap.end()) {
         auto proc = &it->second;
@@ -142,7 +150,7 @@ static ProcessInfo* StartProcessIfNew(PresentMonData& pm, uint32_t processId, ui
     }
 
     std::string imageFileName("<error>");
-    if (!pm.mArgs->mEtlFileName) {
+    if (!args.mEtlFileName) {
         HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
         if (h) {
             char path[MAX_PATH] = "<error>";
@@ -217,9 +225,9 @@ void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now, uint64_t perf
     chain.UpdateSwapChainInfo(p, now, perfFreq);
 }
 
-void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
+void PresentMon_Init(PresentMonData& pm)
 {
-    pm.mArgs = &args;
+    auto const& args = GetCommandLineArgs();
 
     if (!args.mEtlFileName)
     {
@@ -238,13 +246,15 @@ void PresentMon_Init(const CommandLineArgs& args, PresentMonData& pm)
 
 void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionData& lsr, LateStageReprojectionEvent& p, uint64_t now, uint64_t perfFreq)
 {
+    auto const& args = GetCommandLineArgs();
+
     const uint32_t appProcessId = p.GetAppProcessId();
     auto proc = StartProcessIfNew(pm, appProcessId, now);
     if (proc == nullptr) {
         return; // process is not a target
     }
 
-    if ((pm.mArgs->mVerbosity > Verbosity::Simple) && (appProcessId == 0)) {
+    if ((args.mVerbosity > Verbosity::Simple) && (appProcessId == 0)) {
         return; // Incomplete event data
     }
 
@@ -257,6 +267,8 @@ void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionData& lsr
 
 void PresentMon_Update(PresentMonData& pm, LateStageReprojectionData& lsr, std::vector<std::shared_ptr<PresentEvent>>& presents, std::vector<std::shared_ptr<LateStageReprojectionEvent>>& lsrs, uint64_t now, uint64_t perfFreq)
 {
+    auto const& args = GetCommandLineArgs();
+
     // store the new presents into processes
     for (auto& p : presents)
     {
@@ -270,7 +282,7 @@ void PresentMon_Update(PresentMonData& pm, LateStageReprojectionData& lsr, std::
     }
 
     // Update realtime process info
-    if (!pm.mArgs->mEtlFileName) {
+    if (!args.mEtlFileName) {
         std::vector<std::map<uint32_t, ProcessInfo>::iterator> remove;
         for (auto ii = pm.mProcessMap.begin(), ie = pm.mProcessMap.end(); ii != ie; ++ii) {
             if (!UpdateProcessInfo_Realtime(pm, ii->second, now, ii->first)) {
@@ -283,7 +295,7 @@ void PresentMon_Update(PresentMonData& pm, LateStageReprojectionData& lsr, std::
     }
 
     // Display information to console
-    if (!pm.mArgs->mSimpleConsole) {
+    if (!args.mSimpleConsole) {
         std::string display;
         UpdateConsole(pm, now, perfFreq, &display);
         UpdateConsole(pm, lsr, now, perfFreq, &display);
@@ -293,17 +305,21 @@ void PresentMon_Update(PresentMonData& pm, LateStageReprojectionData& lsr, std::
 
 void PresentMon_Shutdown(PresentMonData& pm, uint32_t totalEventsLost, uint32_t totalBuffersLost)
 {
+    auto const& args = GetCommandLineArgs();
+
     CloseCSVs(pm, totalEventsLost, totalBuffersLost);
 
     pm.mProcessMap.clear();
 
-    if (pm.mArgs->mSimpleConsole == false) {
+    if (args.mSimpleConsole == false) {
         SetConsoleText("");
     }
 }
 
-void EtwConsumingThread(const CommandLineArgs& args)
+void EtwConsumingThread()
 {
+    auto const& args = GetCommandLineArgs();
+
     Sleep(args.mDelay * 1000);
     if (EtwThreadsShouldQuit()) {
         return;
@@ -362,7 +378,7 @@ void EtwConsumingThread(const CommandLineArgs& args)
 
         // Consume / Update based on the ETW output
         {
-            PresentMon_Init(args, pmData);
+            PresentMon_Init(pmData);
             auto timerRunning = args.mTimer > 0;
             auto timerEnd = GetTickCount64() + args.mTimer * 1000;
 
@@ -384,7 +400,7 @@ void EtwConsumingThread(const CommandLineArgs& args)
                 ntProcessEvents.clear();
 
                 // If we are reading events from ETL file set start time to match time stamp of first event
-                if (pmData.mArgs->mEtlFileName && pmData.mStartupQpcTime == 0)
+                if (args.mEtlFileName && pmData.mStartupQpcTime == 0)
                 {
                     pmData.mStartupQpcTime = session.startTime_;
                 }

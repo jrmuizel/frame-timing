@@ -51,7 +51,6 @@ struct CommandLineArgs {
     UINT mTargetPid;
     UINT mDelay;
     UINT mTimer;
-    UINT mRecordingCount;
     UINT mHotkeyModifiers;
     UINT mHotkeyVirtualKeyCode;
     Verbosity mVerbosity;
@@ -69,7 +68,6 @@ struct CommandLineArgs {
     bool mStopExistingSession;
 };
 
-bool ParseCommandLine(int argc, char** argv, CommandLineArgs* out);
 void SetConsoleTitle(int argc, char** argv);
 bool EnableScrollLock(bool enable);
 
@@ -109,7 +107,6 @@ struct ProcessInfo {
 
 struct PresentMonData {
     char mCaptureTimeStr[18] = "";
-    const CommandLineArgs *mArgs = nullptr;
     uint64_t mStartupQpcTime = 0;
     FILE *mOutputFile = nullptr;    // Used if not -multi_csv
     FILE *mLsrOutputFile = nullptr; // Used if not -multi_csv
@@ -200,11 +197,15 @@ struct TraceSession {
     void Stop();
 };
 
-void EtwConsumingThread(const CommandLineArgs& args);
+void EtwConsumingThread();
 
 bool EtwThreadsShouldQuit();
 void PostStopRecording();
 void PostQuitProcess();
+
+// CommandLine.cpp:
+bool ParseCommandLine(int argc, char** argv);
+CommandLineArgs const& GetCommandLineArgs();
 
 // Console.cpp:
 void SetConsoleText(const char *text);
@@ -216,6 +217,7 @@ void StartConsumerThread(TRACEHANDLE traceHandle);
 void WaitForConsumerThreadToExit();
 
 // CsvOutput.cpp:
+void IncrementRecordingCount();
 void CreateNonProcessCSVs(PresentMonData& pm);
 void CreateProcessCSVs(PresentMonData& pm, ProcessInfo* proc, std::string const& imageFileName);
 void CloseCSVs(PresentMonData& pm, uint32_t totalEventsLost, uint32_t totalBuffersLost);
@@ -225,3 +227,7 @@ void UpdateCSV(PresentMonData& pm, ProcessInfo* proc, SwapChainData const& chain
 const char* FinalStateToDroppedString(PresentResult res);
 const char* PresentModeToString(PresentMode mode);
 const char* RuntimeToString(Runtime rt);
+
+// Privilege.cpp:
+bool ElevatePrivilege(int argc, char** argv);
+

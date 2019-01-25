@@ -212,8 +212,10 @@ bool LateStageReprojectionData::IsStale(uint64_t now) const
 
 void UpdateLSRCSV(PresentMonData& pm, LateStageReprojectionData& lsr, ProcessInfo* proc, LateStageReprojectionEvent& p, uint64_t perfFreq)
 {
-    auto file = pm.mArgs->mMultiCsv ? proc->mLsrOutputFile : pm.mLsrOutputFile;
-    if (file && (p.FinalState == LateStageReprojectionResult::Presented || !pm.mArgs->mExcludeDropped)) {
+    auto const& args = GetCommandLineArgs();
+
+    auto file = args.mMultiCsv ? proc->mLsrOutputFile : pm.mLsrOutputFile;
+    if (file && (p.FinalState == LateStageReprojectionResult::Presented || !args.mExcludeDropped)) {
         auto len = lsr.mLSRHistory.size();
         if (len > 1) {
             auto& curr = lsr.mLSRHistory[len - 1];
@@ -222,12 +224,12 @@ void UpdateLSRCSV(PresentMonData& pm, LateStageReprojectionData& lsr, ProcessInf
             const double timeInSeconds = (double)(int64_t)(p.QpcTime - pm.mStartupQpcTime) / perfFreq;
 
             fprintf(file, "%s,%d,%d", proc->mModuleName.c_str(), curr.GetAppProcessId(), curr.ProcessId);
-            if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+            if (args.mVerbosity >= Verbosity::Verbose)
             {
                 fprintf(file, ",%d", curr.GetAppFrameId());
             }
             fprintf(file, ",%.6lf", timeInSeconds);
-            if (pm.mArgs->mVerbosity > Verbosity::Simple)
+            if (args.mVerbosity > Verbosity::Simple)
             {
                 double appPresentDeltaMilliseconds = 0.0;
                 double appPresentToLsrMilliseconds = 0.0;
@@ -245,12 +247,12 @@ void UpdateLSRCSV(PresentMonData& pm, LateStageReprojectionData& lsr, ProcessInf
                 fprintf(file, ",%.6lf,%.6lf", appPresentDeltaMilliseconds, appPresentToLsrMilliseconds);
             }
             fprintf(file, ",%.6lf,%d,%d", deltaMilliseconds, !curr.NewSourceLatched, curr.MissedVsyncCount);
-            if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+            if (args.mVerbosity >= Verbosity::Verbose)
             {
                 fprintf(file, ",%.6lf,%.6lf", 1000 * double(curr.Source.GetReleaseFromRenderingToAcquireForPresentationTime()) / perfFreq, 1000 * double(curr.GetAppCpuRenderFrameTime()) / perfFreq);
             }
             fprintf(file, ",%.6lf", curr.AppPredictionLatencyMs);
-            if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+            if (args.mVerbosity >= Verbosity::Verbose)
             {
                 fprintf(file, ",%.6lf,%.6lf", curr.AppMispredictionMs, curr.GetLsrCpuRenderFrameMs());
             }
@@ -260,7 +262,7 @@ void UpdateLSRCSV(PresentMonData& pm, LateStageReprojectionData& lsr, ProcessInf
                 curr.TimeUntilVsyncMs,
                 curr.GetLsrThreadWakeupStartLatchToGpuEndMs(),
                 curr.TotalWakeupErrorMs);
-            if (pm.mArgs->mVerbosity >= Verbosity::Verbose)
+            if (args.mVerbosity >= Verbosity::Verbose)
             {
                 fprintf(file, ",%.6lf,%.6lf,%.6lf,%.6lf,%.6lf",
                     curr.ThreadWakeupStartLatchToCpuRenderFrameStartInMs,
@@ -282,6 +284,8 @@ void UpdateLSRCSV(PresentMonData& pm, LateStageReprojectionData& lsr, ProcessInf
 
 void UpdateConsole(PresentMonData const& pm, LateStageReprojectionData& lsr, uint64_t now, uint64_t perfFreq, std::string* display)
 {
+    auto const& args = GetCommandLineArgs();
+
     // LSR info
     if (lsr.HasData()) {
         char str[256] = {};
@@ -297,7 +301,7 @@ void UpdateConsole(PresentMonData const& pm, LateStageReprojectionData& lsr, uin
             const double fps = lsr.ComputeSourceFps(perfFreq);
             const size_t historySize = lsr.ComputeHistorySize();
 
-            if (pm.mArgs->mVerbosity > Verbosity::Simple) {
+            if (args.mVerbosity > Verbosity::Simple) {
                 auto const& appProcess = pm.mProcessMap.find(runtimeStats.mAppProcessId)->second;
                 _snprintf_s(str, _TRUNCATE, "\tApp - %s[%d]:\n\t\t%.2lf ms/frame (%.1lf fps, %.2lf ms CPU",
                     appProcess.mModuleName.c_str(),

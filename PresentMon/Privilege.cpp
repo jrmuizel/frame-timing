@@ -167,8 +167,10 @@ bool RestartAsAdministrator(
 
 }
 
-bool ElevatePrivilege(CommandLineArgs const &args, int argc, char** argv)
+bool ElevatePrivilege(int argc, char** argv)
 {
+    auto const& args = GetCommandLineArgs();
+
     // If we are processing an ETL file, then we don't need elevated privilege
     if (args.mEtlFileName != nullptr) {
         return true;

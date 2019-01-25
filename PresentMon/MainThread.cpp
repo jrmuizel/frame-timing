@@ -44,21 +44,21 @@ bool EtwThreadsRunning()
     return g_EtwConsumingThread.joinable();
 }
 
-void StartEtwThreads(CommandLineArgs const& args)
+void StartEtwThreads()
 {
     assert(!EtwThreadsRunning());
     assert(EtwThreadsShouldQuit());
     g_StopEtwThreads = false;
-    g_EtwConsumingThread = std::thread(EtwConsumingThread, args);
+    g_EtwConsumingThread = std::thread(EtwConsumingThread);
 }
 
-void StopEtwThreads(CommandLineArgs* args)
+void StopEtwThreads()
 {
     assert(EtwThreadsRunning());
     assert(g_StopEtwThreads == false);
     g_StopEtwThreads = true;
     g_EtwConsumingThread.join();
-    args->mRecordingCount++;
+    IncrementRecordingCount();
 }
 
 BOOL WINAPI ConsoleCtrlHandler(
@@ -81,22 +81,20 @@ BOOL WINAPI ConsoleCtrlHandler(
 
 LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-    auto args = (CommandLineArgs*) GetWindowLongPtrW(hWnd, GWLP_USERDATA);
-
     switch (uMsg) {
     case WM_HOTKEY:
         if (wParam == HOTKEY_ID) {
             if (EtwThreadsRunning()) {
-                StopEtwThreads(args);
+                StopEtwThreads();
             } else {
-                StartEtwThreads(*args);
+                StartEtwThreads();
             }
         }
         break;
 
     case WM_STOP_ETW_THREADS:
         if (EtwThreadsRunning()) {
-            StopEtwThreads(args);
+            StopEtwThreads();
         }
         break;
     }
@@ -104,7 +102,7 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     return DefWindowProc(hWnd, uMsg, wParam, lParam);
 }
 
-HWND CreateMessageQueue(CommandLineArgs& args)
+HWND CreateMessageQueue()
 {
     WNDCLASSEXW Class = { sizeof(Class) };
     Class.lpfnWndProc = WindowProc;
@@ -120,6 +118,7 @@ HWND CreateMessageQueue(CommandLineArgs& args)
         return 0;
     }
 
+    auto const& args = GetCommandLineArgs();
     if (args.mHotkeySupport) {
         if (!RegisterHotKey(hWnd, HOTKEY_ID, args.mHotkeyModifiers, args.mHotkeyVirtualKeyCode)) {
             fprintf(stderr, "error: failed to register hotkey.\n");
@@ -127,8 +126,6 @@ HWND CreateMessageQueue(CommandLineArgs& args)
             return 0;
         }
     }
-
-    SetWindowLongPtrW(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&args));
 
     return hWnd;
 }
@@ -165,8 +162,10 @@ bool EtwThreadsShouldQuit()
     return g_StopEtwThreads;
 }
 
-void PostToggleRecording(CommandLineArgs const& args)
+void PostToggleRecording()
 {
+    auto const& args = GetCommandLineArgs();
+
     PostMessage(g_hWnd, WM_HOTKEY, HOTKEY_ID, args.mHotkeyModifiers & ~MOD_NOREPEAT);
 }
 
@@ -183,14 +182,12 @@ void PostQuitProcess()
 int main(int argc, char** argv)
 {
     // Parse command line arguments
-    CommandLineArgs args;
-    if (!ParseCommandLine(argc, argv, &args)) {
+    if (!ParseCommandLine(argc, argv)) {
         return 1;
     }
 
     // Attempt to elevate process privilege as necessary
-    bool ElevatePrivilege(CommandLineArgs const &args, int argc, char** argv); // Privilege.cpp
-    if (!ElevatePrivilege(args, argc, argv)) {
+    if (!ElevatePrivilege(argc, argv)) {
         return 0;
     }
 
@@ -201,13 +198,14 @@ int main(int argc, char** argv)
 
     // If the user wants to use the scroll lock key as an indicator of when
     // present mon is recording events, make sure it is disabled to start.
+    auto const& args = GetCommandLineArgs();
     if (args.mScrollLockIndicator) {
         g_originalScrollLockEnabled = EnableScrollLock(false);
     }
 
     // Create a message queue to handle WM_HOTKEY, WM_STOP_ETW_THREADS, and
     // WM_QUIT messages.
-    HWND hWnd = CreateMessageQueue(args);
+    HWND hWnd = CreateMessageQueue();
     if (hWnd == 0) {
         ret = 2;
         goto clean_up;
@@ -224,7 +222,7 @@ int main(int argc, char** argv)
     // If the user didn't specify -hotkey, simulate a hotkey press to start the
     // recording right away.
     if (!args.mHotkeySupport) {
-        PostToggleRecording(args);
+        PostToggleRecording();
     }
 
     // Enter the main thread message loop.  This thread will block waiting for
@@ -238,7 +236,7 @@ int main(int argc, char** argv)
         if (r == -1) { // Indicates error in message loop, e.g. hWnd is no
                        // longer valid. This can happen if PresentMon is killed.
             if (EtwThreadsRunning()) {
-                StopEtwThreads(&args);
+                StopEtwThreads();
             }
             break;
         }

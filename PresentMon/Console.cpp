@@ -122,6 +122,8 @@ void SetConsoleText(const char *text)
 
 void UpdateConsole(PresentMonData const& pm, uint64_t now, uint64_t perfFreq, std::string* display)
 {
+    auto const& args = GetCommandLineArgs();
+
     // ProcessInfo
     for (auto const& p : pm.mProcessMap) {
         auto processId = p.first;
@@ -151,7 +153,7 @@ void UpdateConsole(PresentMonData const& pm, uint64_t now, uint64_t perfFreq, st
                 fps);
             *display += str;
 
-            if (pm.mArgs->mVerbosity > Verbosity::Simple) {
+            if (args.mVerbosity > Verbosity::Simple) {
                 _snprintf_s(str, _TRUNCATE, "%.1lf displayed fps, ", chain.second.ComputeDisplayedFps(perfFreq));
                 *display += str;
             }
@@ -159,7 +161,7 @@ void UpdateConsole(PresentMonData const& pm, uint64_t now, uint64_t perfFreq, st
             _snprintf_s(str, _TRUNCATE, "%.2lf ms CPU", chain.second.ComputeCpuFrameTime(perfFreq) * 1000.0);
             *display += str;
 
-            if (pm.mArgs->mVerbosity > Verbosity::Simple) {
+            if (args.mVerbosity > Verbosity::Simple) {
                 _snprintf_s(str, _TRUNCATE, ", %.2lf ms latency) (%s",
                     1000.0 * chain.second.ComputeLatency(perfFreq),
                     PresentModeToString(chain.second.mLastPresentMode));
@@ -172,13 +174,13 @@ void UpdateConsole(PresentMonData const& pm, uint64_t now, uint64_t perfFreq, st
 
                 if ((chain.second.mLastPresentMode == PresentMode::Hardware_Composed_Independent_Flip ||
                      chain.second.mLastPresentMode == PresentMode::Hardware_Independent_Flip) &&
-                    pm.mArgs->mVerbosity >= Verbosity::Verbose &&
+                    args.mVerbosity >= Verbosity::Verbose &&
                     chain.second.mDwmNotified) {
                     _snprintf_s(str, _TRUNCATE, ", DWM notified");
                     *display += str;
                 }
 
-                if (pm.mArgs->mVerbosity >= Verbosity::Verbose &&
+                if (args.mVerbosity >= Verbosity::Verbose &&
                     chain.second.mHasBeenBatched) {
                     _snprintf_s(str, _TRUNCATE, ", batched");
                     *display += str;
