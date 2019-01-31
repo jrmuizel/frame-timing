@@ -67,13 +67,11 @@ void LateStageReprojectionData::AddLateStageReprojection(LateStageReprojectionEv
     mLSRHistory.push_back(p);
 }
 
-void LateStageReprojectionData::UpdateLateStageReprojectionInfo(uint64_t now)
+void LateStageReprojectionData::UpdateLateStageReprojectionInfo()
 {
     PruneDeque(mSourceHistory, MAX_HISTORY_TIME, MAX_LSRS_IN_DEQUE);
     PruneDeque(mDisplayedLSRHistory, MAX_HISTORY_TIME, MAX_LSRS_IN_DEQUE);
     PruneDeque(mLSRHistory, MAX_HISTORY_TIME, MAX_LSRS_IN_DEQUE);
-
-    mLastUpdateTicks = now;
 }
 
 double LateStageReprojectionData::ComputeHistoryTime(const std::deque<LateStageReprojectionEvent>& lsrHistory) const
@@ -203,11 +201,6 @@ LateStageReprojectionRuntimeStats LateStageReprojectionData::ComputeRuntimeStats
     return stats;
 }
 
-bool LateStageReprojectionData::IsStale(uint64_t now) const
-{
-    return now - mLastUpdateTicks > LSR_TIMEOUT_THRESHOLD_TICKS;
-}
-
 void UpdateLSRCSV(PresentMonData& pm, LateStageReprojectionData& lsr, ProcessInfo* proc, LateStageReprojectionEvent& p)
 {
     auto const& args = GetCommandLineArgs();
@@ -280,15 +273,14 @@ void UpdateLSRCSV(PresentMonData& pm, LateStageReprojectionData& lsr, ProcessInf
     }
 }
 
-void UpdateConsole(PresentMonData const& pm, LateStageReprojectionData& lsr, uint64_t now, std::string* display)
+void UpdateConsole(std::unordered_map<uint32_t, ProcessInfo> const& activeProcesses, LateStageReprojectionData& lsr, std::string* display)
 {
     auto const& args = GetCommandLineArgs();
 
     // LSR info
     if (lsr.HasData()) {
         char str[256] = {};
-        _snprintf_s(str, _TRUNCATE, "\nWindows Mixed Reality:%s\n",
-            lsr.IsStale(now) ? " [STALE]" : "");
+        _snprintf_s(str, _TRUNCATE, "\nWindows Mixed Reality:\n");
         *display += str;
 
         const LateStageReprojectionRuntimeStats runtimeStats = lsr.ComputeRuntimeStats();
@@ -300,7 +292,7 @@ void UpdateConsole(PresentMonData const& pm, LateStageReprojectionData& lsr, uin
             const size_t historySize = lsr.ComputeHistorySize();
 
             if (args.mVerbosity > Verbosity::Simple) {
-                auto const& appProcess = pm.mProcessMap.find(runtimeStats.mAppProcessId)->second;
+                auto const& appProcess = activeProcesses.find(runtimeStats.mAppProcessId)->second;
                 _snprintf_s(str, _TRUNCATE, "\tApp - %s[%d]:\n\t\t%.2lf ms/frame (%.1lf fps, %.2lf ms CPU",
                     appProcess.mModuleName.c_str(),
                     runtimeStats.mAppProcessId,
@@ -334,7 +326,7 @@ void UpdateConsole(PresentMonData const& pm, LateStageReprojectionData& lsr, uin
         {
             // LSR
             const double fps = lsr.ComputeFps();
-            auto const& lsrProcess = pm.mProcessMap.find(runtimeStats.mLsrProcessId)->second;
+            auto const& lsrProcess = activeProcesses.find(runtimeStats.mLsrProcessId)->second;
 
             _snprintf_s(str, _TRUNCATE, "\tCompositor - %s[%d]:\n\t\t%.2lf ms/frame (%.1lf fps, %.1lf displayed fps, %.2lf ms CPU)\n",
                 lsrProcess.mModuleName.c_str(),

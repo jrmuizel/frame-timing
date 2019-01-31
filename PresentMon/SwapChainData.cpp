@@ -24,7 +24,6 @@ SOFTWARE.
 
 enum {
     MAX_HISTORY_TIME = 2000,
-    CHAIN_TIMEOUT_THRESHOLD_TICKS = 10000, // 10 sec
     MAX_PRESENTS_IN_DEQUE = 60 * (MAX_HISTORY_TIME / 1000)
 };
 
@@ -49,12 +48,11 @@ void SwapChainData::AddPresentToSwapChain(PresentEvent& p)
     mPresentHistory.push_back(p);
 }
 
-void SwapChainData::UpdateSwapChainInfo(PresentEvent&p, uint64_t now)
+void SwapChainData::UpdateSwapChainInfo(PresentEvent&p)
 {
     PruneDeque(mDisplayedPresentHistory, MAX_HISTORY_TIME, MAX_PRESENTS_IN_DEQUE);
     PruneDeque(mPresentHistory, MAX_HISTORY_TIME, MAX_PRESENTS_IN_DEQUE);
 
-    mLastUpdateTicks = now;
     mRuntime = p.Runtime;
     mLastSyncInterval = p.SyncInterval;
     mLastFlags = p.PresentFlags;
@@ -117,7 +115,3 @@ double SwapChainData::ComputeCpuFrameTime() const
     return timeNotInPresent / (mPresentHistory.size() - 1);
 }
 
-bool SwapChainData::IsStale(uint64_t now) const
-{
-    return now - mLastUpdateTicks > CHAIN_TIMEOUT_THRESHOLD_TICKS;
-}

@@ -83,77 +83,70 @@ void SetConsoleText(const char *text)
     SetConsoleCursorPosition(hConsole, origin);
 }
 
-void UpdateConsole(PresentMonData const& pm, uint64_t now, std::string* display)
+void UpdateConsole(uint32_t processId, ProcessInfo const& processInfo, std::string* display)
 {
     auto const& args = GetCommandLineArgs();
 
-    // ProcessInfo
-    for (auto const& p : pm.mProcessMap) {
-        auto processId = p.first;
-        auto const& proc = p.second;
+    // Don't display non-target or empty processes
+    if (!processInfo.mTargetProcess ||
+        processInfo.mModuleName.empty() ||
+        processInfo.mChainMap.empty()) {
+        return;
+    }
 
-        // Don't display non-specified or empty processes
-        if (!proc.mTargetProcess ||
-            proc.mModuleName.empty() ||
-            proc.mChainMap.empty()) {
-            continue;
-        }
+    char str[256] = {};
+    _snprintf_s(str, _TRUNCATE, "\n%s[%d]:\n", processInfo.mModuleName.c_str(), processId);
+    *display += str;
 
-        char str[256] = {};
-        _snprintf_s(str, _TRUNCATE, "\n%s[%d]:\n", proc.mModuleName.c_str(), processId);
+    for (auto& chain : processInfo.mChainMap)
+    {
+        double fps = chain.second.ComputeFps();
+
+        _snprintf_s(str, _TRUNCATE, "\t%016llX (%s): SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, ",
+            chain.first,
+            RuntimeToString(chain.second.mRuntime),
+            chain.second.mLastSyncInterval,
+            chain.second.mLastFlags,
+            1000.0/fps,
+            fps);
         *display += str;
 
-        for (auto& chain : proc.mChainMap)
-        {
-            double fps = chain.second.ComputeFps();
-
-            _snprintf_s(str, _TRUNCATE, "\t%016llX (%s): SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, ",
-                chain.first,
-                RuntimeToString(chain.second.mRuntime),
-                chain.second.mLastSyncInterval,
-                chain.second.mLastFlags,
-                1000.0/fps,
-                fps);
-            *display += str;
-
-            if (args.mVerbosity > Verbosity::Simple) {
-                _snprintf_s(str, _TRUNCATE, "%.1lf displayed fps, ", chain.second.ComputeDisplayedFps());
-                *display += str;
-            }
-
-            _snprintf_s(str, _TRUNCATE, "%.2lf ms CPU", chain.second.ComputeCpuFrameTime() * 1000.0);
-            *display += str;
-
-            if (args.mVerbosity > Verbosity::Simple) {
-                _snprintf_s(str, _TRUNCATE, ", %.2lf ms latency) (%s",
-                    1000.0 * chain.second.ComputeLatency(),
-                    PresentModeToString(chain.second.mLastPresentMode));
-                *display += str;
-
-                if (chain.second.mLastPresentMode == PresentMode::Hardware_Composed_Independent_Flip) {
-                    _snprintf_s(str, _TRUNCATE, ": Plane %d", chain.second.mLastPlane);
-                    *display += str;
-                }
-
-                if ((chain.second.mLastPresentMode == PresentMode::Hardware_Composed_Independent_Flip ||
-                     chain.second.mLastPresentMode == PresentMode::Hardware_Independent_Flip) &&
-                    args.mVerbosity >= Verbosity::Verbose &&
-                    chain.second.mDwmNotified) {
-                    _snprintf_s(str, _TRUNCATE, ", DWM notified");
-                    *display += str;
-                }
-
-                if (args.mVerbosity >= Verbosity::Verbose &&
-                    chain.second.mHasBeenBatched) {
-                    _snprintf_s(str, _TRUNCATE, ", batched");
-                    *display += str;
-                }
-            }
-
-            _snprintf_s(str, _TRUNCATE, ")%s\n",
-                (now - chain.second.mLastUpdateTicks) > 1000 ? " [STALE]" : "");
+        if (args.mVerbosity > Verbosity::Simple) {
+            _snprintf_s(str, _TRUNCATE, "%.1lf displayed fps, ", chain.second.ComputeDisplayedFps());
             *display += str;
         }
+
+        _snprintf_s(str, _TRUNCATE, "%.2lf ms CPU", chain.second.ComputeCpuFrameTime() * 1000.0);
+        *display += str;
+
+        if (args.mVerbosity > Verbosity::Simple) {
+            _snprintf_s(str, _TRUNCATE, ", %.2lf ms latency) (%s",
+                1000.0 * chain.second.ComputeLatency(),
+                PresentModeToString(chain.second.mLastPresentMode));
+            *display += str;
+
+            if (chain.second.mLastPresentMode == PresentMode::Hardware_Composed_Independent_Flip) {
+                _snprintf_s(str, _TRUNCATE, ": Plane %d", chain.second.mLastPlane);
+                *display += str;
+            }
+
+            if ((chain.second.mLastPresentMode == PresentMode::Hardware_Composed_Independent_Flip ||
+                 chain.second.mLastPresentMode == PresentMode::Hardware_Independent_Flip) &&
+                args.mVerbosity >= Verbosity::Verbose &&
+                chain.second.mDwmNotified) {
+                _snprintf_s(str, _TRUNCATE, ", DWM notified");
+                *display += str;
+            }
+
+            if (args.mVerbosity >= Verbosity::Verbose &&
+                chain.second.mHasBeenBatched) {
+                _snprintf_s(str, _TRUNCATE, ", batched");
+                *display += str;
+            }
+        }
+
+        _snprintf_s(str, _TRUNCATE, ")\n");
+        *display += str;
     }
 }
 

@@ -1038,6 +1038,8 @@ void HandleNTProcessEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsume
 {
     NTProcessEvent event;
 
+    event.QpcTime = *(uint64_t*) &pEventRecord->EventHeader.TimeStamp;
+
     switch (pEventRecord->EventHeader.EventDescriptor.Opcode) {
     case EVENT_TRACE_TYPE_START:
     case EVENT_TRACE_TYPE_DC_START:

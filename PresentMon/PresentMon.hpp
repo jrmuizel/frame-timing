@@ -48,6 +48,8 @@ which is controlled from MainThread based on user input or timer.
 #include "../PresentData/MixedRealityTraceConsumer.hpp"
 #include "../PresentData/PresentMonTraceConsumer.hpp"
 
+#include <unordered_map>
+
 enum class Verbosity {
     Simple,
     Normal,
@@ -81,7 +83,6 @@ struct CommandLineArgs {
 
 struct SwapChainData {
     Runtime mRuntime = Runtime::Other;
-    uint64_t mLastUpdateTicks = 0;
     uint32_t mLastSyncInterval = UINT32_MAX;
     uint32_t mLastFlags = UINT32_MAX;
     std::deque<PresentEvent> mPresentHistory;
@@ -93,12 +94,11 @@ struct SwapChainData {
     
     void PruneDeque(std::deque<PresentEvent> &presentHistory, uint32_t msTimeDiff, uint32_t maxHistLen);
     void AddPresentToSwapChain(PresentEvent& p);
-    void UpdateSwapChainInfo(PresentEvent&p, uint64_t now);
+    void UpdateSwapChainInfo(PresentEvent&p);
     double ComputeDisplayedFps() const;
     double ComputeFps() const;
     double ComputeLatency() const;
     double ComputeCpuFrameTime() const;
-    bool IsStale(uint64_t now) const;
 private:
     double ComputeFps(const std::deque<PresentEvent>& presentHistory) const;
 };
@@ -106,7 +106,7 @@ private:
 struct ProcessInfo {
     std::string mModuleName;
     std::map<uint64_t, SwapChainData> mChainMap;
-    uint64_t mLastRefreshTicks; // GetTickCount64
+    HANDLE mHandle;
     FILE *mOutputFile;          // Used if -multi_csv
     FILE *mLsrOutputFile;       // Used if -multi_csv
     bool mTargetProcess;
@@ -116,9 +116,7 @@ struct PresentMonData {
     char mCaptureTimeStr[18] = "";
     FILE *mOutputFile = nullptr;    // Used if not -multi_csv
     FILE *mLsrOutputFile = nullptr; // Used if not -multi_csv
-    std::map<uint32_t, ProcessInfo> mProcessMap;
     std::map<std::string, std::pair<FILE*, FILE*> > mProcessOutputFiles;
-    uint32_t mTerminationProcessCount = 0;
 };
 
 #include "LateStageReprojectionData.hpp"
@@ -129,7 +127,7 @@ CommandLineArgs const& GetCommandLineArgs();
 
 // Console.cpp:
 void SetConsoleText(const char *text);
-void UpdateConsole(PresentMonData const& pm, uint64_t updateTime, std::string* display);
+void UpdateConsole(uint32_t processId, ProcessInfo const& processInfo, std::string* display);
 
 // ConsumerThread.cpp:
 void StartConsumerThread(TRACEHANDLE traceHandle);
@@ -139,8 +137,8 @@ void WaitForConsumerThreadToExit();
 void IncrementRecordingCount();
 void CreateNonProcessCSVs(PresentMonData& pm);
 void CreateProcessCSVs(PresentMonData& pm, ProcessInfo* proc, std::string const& imageFileName);
-void CloseCSVs(PresentMonData& pm, uint32_t totalEventsLost, uint32_t totalBuffersLost);
-void UpdateCSV(PresentMonData& pm, ProcessInfo* proc, SwapChainData const& chain, PresentEvent& p);
+void CloseCSVs(PresentMonData& pm, std::unordered_map<uint32_t, ProcessInfo>* activeProcesses, uint32_t totalEventsLost, uint32_t totalBuffersLost);
+void UpdateCSV(PresentMonData& pm, ProcessInfo const& processInfo, SwapChainData const& chain, PresentEvent& p);
 const char* FinalStateToDroppedString(PresentResult res);
 const char* PresentModeToString(PresentMode mode);
 const char* RuntimeToString(Runtime rt);

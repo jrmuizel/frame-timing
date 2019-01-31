@@ -110,8 +110,9 @@ enum class Runtime
 };
 
 struct NTProcessEvent {
-    uint32_t ProcessId;
     std::string ImageFileName;  // If ImageFileName.empty(), then event is that process ending
+    uint64_t QpcTime;
+    uint32_t ProcessId;
 };
 
 struct PresentEvent {

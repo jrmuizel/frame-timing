@@ -238,19 +238,19 @@ void CreateProcessCSVs(PresentMonData& pm, ProcessInfo* proc, std::string const&
     }
 }
 
-void CloseCSVs(PresentMonData& pm, uint32_t totalEventsLost, uint32_t totalBuffersLost)
+void CloseCSVs(PresentMonData& pm, std::unordered_map<uint32_t, ProcessInfo>* activeProcesses, uint32_t totalEventsLost, uint32_t totalBuffersLost)
 {
     CloseFile(pm.mOutputFile, totalEventsLost, totalBuffersLost);
     CloseFile(pm.mLsrOutputFile, totalEventsLost, totalBuffersLost);
     pm.mOutputFile = nullptr;
     pm.mLsrOutputFile = nullptr;
 
-    for (auto& p : pm.mProcessMap) {
-        auto proc = &p.second;
-        CloseFile(proc->mOutputFile, totalEventsLost, totalBuffersLost);
-        CloseFile(proc->mLsrOutputFile, totalEventsLost, totalBuffersLost);
-        proc->mOutputFile = nullptr;
-        proc->mLsrOutputFile = nullptr;
+    for (auto& p : *activeProcesses) {
+        auto processInfo = &p.second;
+        CloseFile(processInfo->mOutputFile, totalEventsLost, totalBuffersLost);
+        CloseFile(processInfo->mLsrOutputFile, totalEventsLost, totalBuffersLost);
+        processInfo->mOutputFile = nullptr;
+        processInfo->mLsrOutputFile = nullptr;
     }
 
     for (auto& p : pm.mProcessOutputFiles) {
@@ -261,11 +261,11 @@ void CloseCSVs(PresentMonData& pm, uint32_t totalEventsLost, uint32_t totalBuffe
     pm.mProcessOutputFiles.clear();
 }
 
-void UpdateCSV(PresentMonData& pm, ProcessInfo* proc, SwapChainData const& chain, PresentEvent& p)
+void UpdateCSV(PresentMonData& pm, ProcessInfo const& processInfo, SwapChainData const& chain, PresentEvent& p)
 {
     auto const& args = GetCommandLineArgs();
 
-    auto file = args.mMultiCsv ? proc->mOutputFile : pm.mOutputFile;
+    auto file = args.mMultiCsv ? processInfo.mOutputFile : pm.mOutputFile;
     if (file && (p.FinalState == PresentResult::Presented || !args.mExcludeDropped)) {
         auto len = chain.mPresentHistory.size();
         auto displayedLen = chain.mDisplayedPresentHistory.size();
@@ -286,7 +286,7 @@ void UpdateCSV(PresentMonData& pm, ProcessInfo* proc, SwapChainData const& chain
 
             double timeInSeconds = QpcToSeconds(p.QpcTime);
             fprintf(file, "%s,%d,0x%016llX,%s,%d,%d",
-                    proc->mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime), curr.SyncInterval, curr.PresentFlags);
+                    processInfo.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime), curr.SyncInterval, curr.PresentFlags);
             if (args.mVerbosity > Verbosity::Simple)
             {
                 fprintf(file, ",%d,%s", curr.SupportsTearing, PresentModeToString(curr.PresentMode));
