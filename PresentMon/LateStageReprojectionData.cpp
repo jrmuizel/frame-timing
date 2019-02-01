@@ -273,15 +273,14 @@ void UpdateLSRCSV(PresentMonData& pm, LateStageReprojectionData& lsr, ProcessInf
     }
 }
 
-void UpdateConsole(std::unordered_map<uint32_t, ProcessInfo> const& activeProcesses, LateStageReprojectionData& lsr, std::string* display)
+void UpdateConsole(std::unordered_map<uint32_t, ProcessInfo> const& activeProcesses, LateStageReprojectionData& lsr)
 {
     auto const& args = GetCommandLineArgs();
 
     // LSR info
     if (lsr.HasData()) {
-        char str[256] = {};
-        _snprintf_s(str, _TRUNCATE, "\nWindows Mixed Reality:\n");
-        *display += str;
+        ConsolePrintLn("");
+        ConsolePrintLn("Windows Mixed Reality:");
 
         const LateStageReprojectionRuntimeStats runtimeStats = lsr.ComputeRuntimeStats();
         const double historyTime = lsr.ComputeHistoryTime();
@@ -293,34 +292,22 @@ void UpdateConsole(std::unordered_map<uint32_t, ProcessInfo> const& activeProces
 
             if (args.mVerbosity > Verbosity::Simple) {
                 auto const& appProcess = activeProcesses.find(runtimeStats.mAppProcessId)->second;
-                _snprintf_s(str, _TRUNCATE, "\tApp - %s[%d]:\n\t\t%.2lf ms/frame (%.1lf fps, %.2lf ms CPU",
-                    appProcess.mModuleName.c_str(),
-                    runtimeStats.mAppProcessId,
-                    1000.0 / fps,
-                    fps,
-                    runtimeStats.mAppSourceCpuRenderTimeInMs);
-                *display += str;
-            }
-            else
-            {
-                _snprintf_s(str, _TRUNCATE, "\tApp:\n\t\t%.2lf ms/frame (%.1lf fps",
-                    1000.0 / fps,
-                    fps);
-                *display += str;
+                ConsolePrintLn("    App - %s[%d]:", appProcess.mModuleName.c_str(), runtimeStats.mAppProcessId);
+                ConsolePrint("        %.2lf ms/frame (%.1lf fps, %.2lf ms CPU", 1000.0 / fps, fps, runtimeStats.mAppSourceCpuRenderTimeInMs);
+            } else {
+                ConsolePrintLn("    App:");
+                ConsolePrint("        %.2lf ms/frame (%.1lf fps", 1000.0 / fps, fps);
             }
 
-            _snprintf_s(str, _TRUNCATE, ", %.1lf%% of Compositor frame rate)\n", double(historySize - runtimeStats.mAppMissedFrames) / (historySize) * 100.0f);
-            *display += str;
+            ConsolePrintLn(", %.1lf%% of Compositor frame rate)", double(historySize - runtimeStats.mAppMissedFrames) / (historySize) * 100.0f);
 
-            _snprintf_s(str, _TRUNCATE, "\t\tMissed Present: %Iu total in last %.1lf seconds (%Iu total observed)\n",
+            ConsolePrintLn("        Missed Present: %Iu total in last %.1lf seconds (%Iu total observed)",
                 runtimeStats.mAppMissedFrames,
                 historyTime,
                 lsr.mLifetimeAppMissedFrames);
-            *display += str;
 
-            _snprintf_s(str, _TRUNCATE, "\t\tPost-Present to Compositor CPU: %.2lf ms\n",
+            ConsolePrintLn("        Post-Present to Compositor CPU: %.2lf ms",
                 runtimeStats.mAppSourceReleaseToLsrAcquireInMs);
-            *display += str;
         }
 
         {
@@ -328,60 +315,46 @@ void UpdateConsole(std::unordered_map<uint32_t, ProcessInfo> const& activeProces
             const double fps = lsr.ComputeFps();
             auto const& lsrProcess = activeProcesses.find(runtimeStats.mLsrProcessId)->second;
 
-            _snprintf_s(str, _TRUNCATE, "\tCompositor - %s[%d]:\n\t\t%.2lf ms/frame (%.1lf fps, %.1lf displayed fps, %.2lf ms CPU)\n",
-                lsrProcess.mModuleName.c_str(),
-                runtimeStats.mLsrProcessId,
+            ConsolePrintLn("    Compositor - %s[%d]:", lsrProcess.mModuleName.c_str(), runtimeStats.mLsrProcessId);
+            ConsolePrintLn("        %.2lf ms/frame (%.1lf fps, %.1lf displayed fps, %.2lf ms CPU)",
                 1000.0 / fps,
                 fps,
                 lsr.ComputeDisplayedFps(),
                 runtimeStats.mLsrCpuRenderTimeInMs);
-            *display += str;
 
-            _snprintf_s(str, _TRUNCATE, "\t\tMissed V-Sync: %Iu consecutive, %Iu total in last %.1lf seconds (%Iu total observed)\n",
+            ConsolePrintLn("        Missed V-Sync: %Iu consecutive, %Iu total in last %.1lf seconds (%Iu total observed)",
                 runtimeStats.mLsrConsecutiveMissedFrames,
                 runtimeStats.mLsrMissedFrames,
                 historyTime,
                 lsr.mLifetimeLsrMissedFrames);
-            *display += str;
 
-            _snprintf_s(str, _TRUNCATE, "\t\tReprojection: %.2lf ms gpu preemption (%.2lf ms max) | %.2lf ms gpu execution (%.2lf ms max)\n",
+            ConsolePrintLn("        Reprojection: %.2lf ms gpu preemption (%.2lf ms max) | %.2lf ms gpu execution (%.2lf ms max)",
                 runtimeStats.mGpuPreemptionInMs.GetAverage(),
                 runtimeStats.mGpuPreemptionInMs.GetMax(),
                 runtimeStats.mGpuExecutionInMs.GetAverage(),
                 runtimeStats.mGpuExecutionInMs.GetMax());
-            *display += str;
 
             if (runtimeStats.mCopyExecutionInMs.GetAverage() > 0.0) {
-                _snprintf_s(str, _TRUNCATE, "\t\tHybrid Copy: %.2lf ms gpu preemption (%.2lf ms max) | %.2lf ms gpu execution (%.2lf ms max)\n",
+                ConsolePrintLn("        Hybrid Copy: %.2lf ms gpu preemption (%.2lf ms max) | %.2lf ms gpu execution (%.2lf ms max)",
                     runtimeStats.mCopyPreemptionInMs.GetAverage(),
                     runtimeStats.mCopyPreemptionInMs.GetMax(),
                     runtimeStats.mCopyExecutionInMs.GetAverage(),
                     runtimeStats.mCopyExecutionInMs.GetMax());
-                *display += str;
             }
 
-            _snprintf_s(str, _TRUNCATE, "\t\tGpu-End to V-Sync: %.2lf ms\n",
-                runtimeStats.mGpuEndToVsyncInMs);
-            *display += str;
+            ConsolePrintLn("        Gpu-End to V-Sync: %.2lf ms", runtimeStats.mGpuEndToVsyncInMs);
         }
 
         {
             // Latency
-            _snprintf_s(str, _TRUNCATE, "\tPose Latency:\n\t\tApp Motion-to-Mid-Photon: %.2lf ms\n",
-                runtimeStats.mAppPoseLatencyInMs);
-            *display += str;
-
-            _snprintf_s(str, _TRUNCATE, "\t\tCompositor Motion-to-Mid-Photon: %.2lf ms (%.2lf ms to V-Sync)\n",
+            ConsolePrintLn("    Pose Latency:");
+            ConsolePrintLn("        App Motion-to-Mid-Photon: %.2lf ms", runtimeStats.mAppPoseLatencyInMs);
+            ConsolePrintLn("        Compositor Motion-to-Mid-Photon: %.2lf ms (%.2lf ms to V-Sync)",
                 runtimeStats.mLsrPoseLatencyInMs,
                 runtimeStats.mLsrInputLatchToVsyncInMs.GetAverage());
-            *display += str;
-
-            _snprintf_s(str, _TRUNCATE, "\t\tV-Sync to Mid-Photon: %.2lf ms\n",
-                runtimeStats.mVsyncToPhotonsMiddleInMs);
-            *display += str;
+            ConsolePrintLn("        V-Sync to Mid-Photon: %.2lf ms", runtimeStats.mVsyncToPhotonsMiddleInMs);
         }
 
-        _snprintf_s(str, _TRUNCATE, "\n");
-        *display += str;
+        ConsolePrintLn("");
     }
 }

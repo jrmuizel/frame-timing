@@ -116,8 +116,11 @@ bool ParseCommandLine(int argc, char** argv);
 CommandLineArgs const& GetCommandLineArgs();
 
 // Console.cpp:
-void SetConsoleText(const char *text);
-void UpdateConsole(uint32_t processId, ProcessInfo const& processInfo, std::string* display);
+bool InitializeConsole();
+void ConsolePrint(char const* format, ...);
+void ConsolePrintLn(char const* format, ...);
+void CommitConsole();
+void UpdateConsole(uint32_t processId, ProcessInfo const& processInfo);
 
 // ConsumerThread.cpp:
 void StartConsumerThread(TRACEHANDLE traceHandle);

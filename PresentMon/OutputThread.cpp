@@ -523,16 +523,15 @@ void Output()
         // don't need the critical section.
         auto realtimeRecording = gIsRecording;
         if (!args.mSimpleConsole) {
-            std::string display;
-            for (auto const& pair : gProcesses) {
-                UpdateConsole(pair.first, pair.second, &display);
+            for (auto& pair : gProcesses) {
+                UpdateConsole(pair.first, pair.second);
             }
-            UpdateConsole(gProcesses, lsrData, &display);
-            SetConsoleText(display.c_str());
+            UpdateConsole(gProcesses, lsrData);
 
             if (realtimeRecording) {
-                printf("** RECORDING **\n");
+                ConsolePrintLn("** RECORDING **");
             }
+            CommitConsole();
         }
 #if _DEBUG
         else if (realtimeRecording) {
@@ -551,10 +550,6 @@ void Output()
 
         // Sleep to reduce overhead.
         Sleep(100);
-    }
-
-    if (args.mSimpleConsole == false) {
-        SetConsoleText("");
     }
 
     // Shut down output.

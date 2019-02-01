@@ -105,4 +105,4 @@ private:
 };
 
 void UpdateLSRCSV(PresentMonData& pm, LateStageReprojectionData& lsr, ProcessInfo* proc, LateStageReprojectionEvent& p);
-void UpdateConsole(std::unordered_map<uint32_t, ProcessInfo> const& activeProcesses, LateStageReprojectionData& lsr, std::string* display);
+void UpdateConsole(std::unordered_map<uint32_t, ProcessInfo> const& activeProcesses, LateStageReprojectionData& lsr);

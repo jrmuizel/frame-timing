@@ -412,6 +412,17 @@ bool ParseCommandLine(int argc, char** argv)
         args->mVerbosity = Verbosity::Simple;
     }
 
+    if (!args->mSimpleConsole && !InitializeConsole()) {
+        if (args->mOutputFile) {
+            fprintf(stderr, "warning: could not initialize console display; continuing with -no_top.\n");
+            args->mSimpleConsole = true;
+        } else {
+            fprintf(stderr, "error: could not initialize console display; use -no_top or CSV output to work around this error.\n");
+            PrintHelp();
+            return false;
+        }
+    }
+
     return true;
 }
 
