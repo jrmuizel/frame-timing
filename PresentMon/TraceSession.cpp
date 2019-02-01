@@ -347,6 +347,11 @@ double QpcDeltaToSeconds(uint64_t qpcDelta)
     return (double) qpcDelta / gQpcFrequency;
 }
 
+uint64_t SecondsDeltaToQpc(double secondsDelta)
+{
+    return (uint64_t) (secondsDelta * gQpcFrequency);
+}
+
 double QpcToSeconds(uint64_t qpc)
 {
     return QpcDeltaToSeconds(qpc - gQpcTraceStart);

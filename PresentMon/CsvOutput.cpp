@@ -261,52 +261,73 @@ void CloseCSVs(PresentMonData& pm, std::unordered_map<uint32_t, ProcessInfo>* ac
     pm.mProcessOutputFiles.clear();
 }
 
-void UpdateCSV(PresentMonData& pm, ProcessInfo const& processInfo, SwapChainData const& chain, PresentEvent& p)
+void UpdateCSV(PresentMonData const& pm, ProcessInfo const& processInfo, SwapChainData const& chain, PresentEvent const& p)
 {
     auto const& args = GetCommandLineArgs();
 
-    auto file = args.mMultiCsv ? processInfo.mOutputFile : pm.mOutputFile;
-    if (file && (p.FinalState == PresentResult::Presented || !args.mExcludeDropped)) {
-        auto len = chain.mPresentHistory.size();
-        auto displayedLen = chain.mDisplayedPresentHistory.size();
-        if (len > 1) {
-            auto& curr = chain.mPresentHistory[len - 1];
-            auto& prev = chain.mPresentHistory[len - 2];
-            double deltaMilliseconds = 1000.0 * QpcDeltaToSeconds(curr.QpcTime - prev.QpcTime);
-            double deltaReady = curr.ReadyTime == 0 ? 0.0 : (1000.0 * QpcDeltaToSeconds(curr.ReadyTime - curr.QpcTime));
-            double deltaDisplayed = curr.FinalState == PresentResult::Presented ? (1000.0 * QpcDeltaToSeconds(curr.ScreenTime - curr.QpcTime)) : 0.0;
-            double timeTakenMilliseconds = 1000.0 * QpcDeltaToSeconds(curr.TimeTaken);
+    // Early return if not outputing to CSV.
+    auto fp = args.mMultiCsv ? processInfo.mOutputFile : pm.mOutputFile;
+    if (fp == nullptr) {
+        return;
+    }
 
-            double timeSincePreviousDisplayed = 0.0;
-            if (curr.FinalState == PresentResult::Presented && displayedLen > 1) {
-                assert(chain.mDisplayedPresentHistory[displayedLen - 1].QpcTime == curr.QpcTime);
-                auto& prevDisplayed = chain.mDisplayedPresentHistory[displayedLen - 2];
-                timeSincePreviousDisplayed = 1000.0 * QpcDeltaToSeconds(curr.ScreenTime - prevDisplayed.ScreenTime);
-            }
+    // Look up the last present event in the swapchain's history.  We need at
+    // least two presents to compute frame statistics.
+    if (chain.mPresentHistoryCount == 0) {
+        return;
+    }
 
-            double timeInSeconds = QpcToSeconds(p.QpcTime);
-            fprintf(file, "%s,%d,0x%016llX,%s,%d,%d",
-                    processInfo.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress, RuntimeToString(p.Runtime), curr.SyncInterval, curr.PresentFlags);
-            if (args.mVerbosity > Verbosity::Simple)
-            {
-                fprintf(file, ",%d,%s", curr.SupportsTearing, PresentModeToString(curr.PresentMode));
+    auto lastPresented = chain.mPresentHistory[(chain.mNextPresentIndex - 1) % SwapChainData::PRESENT_HISTORY_MAX_COUNT].get();
+
+    // Don't output dropped frames (if requested).
+    auto presented = p.FinalState == PresentResult::Presented;
+    if (args.mExcludeDropped && !presented) {
+        return;
+    }
+
+    // Compute frame statistics.
+    double timeInSeconds          = QpcToSeconds(p.QpcTime);
+    double msBetweenPresents      = 1000.0 * QpcDeltaToSeconds(p.QpcTime - lastPresented->QpcTime);
+    double msInPresentApi         = 1000.0 * QpcDeltaToSeconds(p.TimeTaken);
+    double msUntilRenderComplete  = 0.0;
+    double msUntilDisplayed       = 0.0;
+    double msBetweenDisplayChange = 0.0;
+    char const* presentMode       = "Unknown";
+
+    if (args.mVerbosity > Verbosity::Simple) {
+        if (p.ReadyTime > 0) {
+            msUntilRenderComplete = 1000.0 * QpcDeltaToSeconds(p.ReadyTime - p.QpcTime);
+        }
+        if (presented) {
+            msUntilDisplayed = 1000.0 * QpcDeltaToSeconds(p.ScreenTime - p.QpcTime);
+            presentMode = PresentModeToString(p.PresentMode);
+
+            if (chain.mLastDisplayedPresentIndex > 0) {
+                auto lastDisplayed = chain.mPresentHistory[chain.mLastDisplayedPresentIndex % SwapChainData::PRESENT_HISTORY_MAX_COUNT].get();
+                msBetweenDisplayChange = 1000.0 * QpcDeltaToSeconds(p.ScreenTime - lastDisplayed->ScreenTime);
             }
-            if (args.mVerbosity >= Verbosity::Verbose)
-            {
-                fprintf(file, ",%d,%d", curr.WasBatched, curr.DwmNotified);
-            }
-            fprintf(file, ",%s,%.6lf,%.3lf", FinalStateToDroppedString(curr.FinalState), timeInSeconds, deltaMilliseconds);
-            if (args.mVerbosity > Verbosity::Simple)
-            {
-                fprintf(file, ",%.3lf", timeSincePreviousDisplayed);
-            }
-            fprintf(file, ",%.3lf", timeTakenMilliseconds);
-            if (args.mVerbosity > Verbosity::Simple)
-            {
-                fprintf(file, ",%.3lf,%.3lf", deltaReady, deltaDisplayed);
-            }
-            fprintf(file, "\n");
+        } else {
+            presentMode = "None";
         }
     }
+
+    // Output in CSV format
+    fprintf(fp, "%s,%d,0x%016llX,%s,%d,%d", processInfo.mModuleName.c_str(), p.ProcessId, p.SwapChainAddress,
+        RuntimeToString(p.Runtime), p.SyncInterval, p.PresentFlags);
+    if (args.mVerbosity > Verbosity::Simple) {
+        fprintf(fp, ",%d,%s", p.SupportsTearing, presentMode);
+    }
+    if (args.mVerbosity >= Verbosity::Verbose) {
+        fprintf(fp, ",%d,%d", p.WasBatched, p.DwmNotified);
+    }
+    fprintf(fp, ",%s,%.6lf,%.3lf", FinalStateToDroppedString(p.FinalState), timeInSeconds, msBetweenPresents);
+    if (args.mVerbosity > Verbosity::Simple) {
+        fprintf(fp, ",%.3lf", msBetweenDisplayChange);
+    }
+    fprintf(fp, ",%.3lf", msInPresentApi);
+    if (args.mVerbosity > Verbosity::Simple) {
+        fprintf(fp, ",%.3lf,%.3lf", msUntilRenderComplete, msUntilDisplayed);
+    }
+    fprintf(fp, "\n");
 }
 

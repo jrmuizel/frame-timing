@@ -90,63 +90,75 @@ void UpdateConsole(uint32_t processId, ProcessInfo const& processInfo, std::stri
     // Don't display non-target or empty processes
     if (!processInfo.mTargetProcess ||
         processInfo.mModuleName.empty() ||
-        processInfo.mChainMap.empty()) {
+        processInfo.mSwapChain.empty()) {
         return;
     }
 
     char str[256] = {};
-    _snprintf_s(str, _TRUNCATE, "\n%s[%d]:\n", processInfo.mModuleName.c_str(), processId);
+    _snprintf_s(str, _TRUNCATE, "%s[%d]:\n", processInfo.mModuleName.c_str(), processId);
     *display += str;
 
-    for (auto& chain : processInfo.mChainMap)
-    {
-        double fps = chain.second.ComputeFps();
+    for (auto const& pair : processInfo.mSwapChain) {
+        auto address = pair.first;
+        auto const& chain = pair.second;
 
-        _snprintf_s(str, _TRUNCATE, "\t%016llX (%s): SyncInterval %d | Flags %d | %.2lf ms/frame (%.1lf fps, ",
-            chain.first,
-            RuntimeToString(chain.second.mRuntime),
-            chain.second.mLastSyncInterval,
-            chain.second.mLastFlags,
-            1000.0/fps,
-            fps);
-        *display += str;
-
-        if (args.mVerbosity > Verbosity::Simple) {
-            _snprintf_s(str, _TRUNCATE, "%.1lf displayed fps, ", chain.second.ComputeDisplayedFps());
-            *display += str;
+        // Only show swapchain data if there at least two presents in the
+        // history.
+        if (chain.mPresentHistoryCount < 2) {
+            continue;
         }
 
-        _snprintf_s(str, _TRUNCATE, "%.2lf ms CPU", chain.second.ComputeCpuFrameTime() * 1000.0);
+        auto const& present0 = *chain.mPresentHistory[(chain.mNextPresentIndex - chain.mPresentHistoryCount) % SwapChainData::PRESENT_HISTORY_MAX_COUNT];
+        auto const& presentN = *chain.mPresentHistory[(chain.mNextPresentIndex - 1) % SwapChainData::PRESENT_HISTORY_MAX_COUNT];
+        auto cpuAvg = QpcDeltaToSeconds(presentN.QpcTime - present0.QpcTime) / (chain.mPresentHistoryCount - 1);
+
+        _snprintf_s(str, _TRUNCATE, "\t%016llX (%s): SyncInterval=%d Flags=%d %.2lf ms/frame (%.1lf fps",
+            address,
+            RuntimeToString(presentN.Runtime),
+            presentN.SyncInterval,
+            presentN.PresentFlags,
+            1000.0 * cpuAvg,
+            1.0 / cpuAvg);
         *display += str;
 
+        size_t displayCount = 0;
+        uint64_t latencySum = 0;
+        uint64_t display0QpcTime = 0;
+        PresentEvent* displayN = nullptr;
         if (args.mVerbosity > Verbosity::Simple) {
-            _snprintf_s(str, _TRUNCATE, ", %.2lf ms latency) (%s",
-                1000.0 * chain.second.ComputeLatency(),
-                PresentModeToString(chain.second.mLastPresentMode));
-            *display += str;
-
-            if (chain.second.mLastPresentMode == PresentMode::Hardware_Composed_Independent_Flip) {
-                _snprintf_s(str, _TRUNCATE, ": Plane %d", chain.second.mLastPlane);
-                *display += str;
-            }
-
-            if ((chain.second.mLastPresentMode == PresentMode::Hardware_Composed_Independent_Flip ||
-                 chain.second.mLastPresentMode == PresentMode::Hardware_Independent_Flip) &&
-                args.mVerbosity >= Verbosity::Verbose &&
-                chain.second.mDwmNotified) {
-                _snprintf_s(str, _TRUNCATE, ", DWM notified");
-                *display += str;
-            }
-
-            if (args.mVerbosity >= Verbosity::Verbose &&
-                chain.second.mHasBeenBatched) {
-                _snprintf_s(str, _TRUNCATE, ", batched");
-                *display += str;
+            for (uint32_t i = 0; i < chain.mPresentHistoryCount; ++i) {
+                auto const& p = chain.mPresentHistory[(chain.mNextPresentIndex - chain.mPresentHistoryCount + i) % SwapChainData::PRESENT_HISTORY_MAX_COUNT];
+                if (p->FinalState == PresentResult::Presented) {
+                    if (displayCount == 0) {
+                        display0QpcTime = p->QpcTime;
+                    }
+                    displayN = p.get();
+                    latencySum += p->ScreenTime - p->QpcTime;
+                    displayCount += 1;
+                }
             }
         }
 
-        _snprintf_s(str, _TRUNCATE, ")\n");
-        *display += str;
+        if (displayCount >= 2) {
+            auto displayAvg = QpcDeltaToSeconds(displayN->QpcTime - display0QpcTime) / (displayCount - 1);
+            auto latencyAvg = QpcDeltaToSeconds(latencySum) / (displayCount - 1);
+
+            _snprintf_s(str, _TRUNCATE, ", %.1lf fps displayed, %.2lf ms latency",
+                1.0 / displayAvg,
+                1000.0 * latencyAvg);
+            *display += str;
+        }
+
+        *display += ')';
+
+        if (displayCount > 0) {
+            *display += ' ';
+            *display += PresentModeToString(displayN->PresentMode);
+        }
+
+        *display += '\n';
     }
+
+    *display += '\n';
 }
 

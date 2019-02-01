@@ -220,7 +220,6 @@
     <ClCompile Include="MainThread.cpp" />
     <ClCompile Include="OutputThread.cpp" />
     <ClCompile Include="Privilege.cpp" />
-    <ClCompile Include="SwapChainData.cpp" />
     <ClCompile Include="TraceSession.cpp" />
   </ItemGroup>
   <ItemGroup>

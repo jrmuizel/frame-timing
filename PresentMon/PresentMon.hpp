@@ -81,31 +81,21 @@ struct CommandLineArgs {
     bool mStopExistingSession;
 };
 
+// CSV output only requires last presented/displayed event to compute frame
+// information, but if outputing to the console we maintain a longer history of
+// presents to compute averages, limited to 120 events (2 seconds @ 60Hz) to
+// reduce memory/compute overhead.
 struct SwapChainData {
-    Runtime mRuntime = Runtime::Other;
-    uint32_t mLastSyncInterval = UINT32_MAX;
-    uint32_t mLastFlags = UINT32_MAX;
-    std::deque<PresentEvent> mPresentHistory;
-    std::deque<PresentEvent> mDisplayedPresentHistory;
-    PresentMode mLastPresentMode = PresentMode::Unknown;
-    uint32_t mLastPlane = 0;
-    bool mHasBeenBatched = false;
-    bool mDwmNotified = false;
-    
-    void PruneDeque(std::deque<PresentEvent> &presentHistory, uint32_t msTimeDiff, uint32_t maxHistLen);
-    void AddPresentToSwapChain(PresentEvent& p);
-    void UpdateSwapChainInfo(PresentEvent&p);
-    double ComputeDisplayedFps() const;
-    double ComputeFps() const;
-    double ComputeLatency() const;
-    double ComputeCpuFrameTime() const;
-private:
-    double ComputeFps(const std::deque<PresentEvent>& presentHistory) const;
+    enum { PRESENT_HISTORY_MAX_COUNT = 120 };
+    std::shared_ptr<PresentEvent> mPresentHistory[PRESENT_HISTORY_MAX_COUNT];
+    uint32_t mPresentHistoryCount;
+    uint32_t mNextPresentIndex;
+    uint32_t mLastDisplayedPresentIndex;
 };
 
 struct ProcessInfo {
     std::string mModuleName;
-    std::map<uint64_t, SwapChainData> mChainMap;
+    std::unordered_map<uint64_t, SwapChainData> mSwapChain;
     HANDLE mHandle;
     FILE *mOutputFile;          // Used if -multi_csv
     FILE *mLsrOutputFile;       // Used if -multi_csv
@@ -138,7 +128,7 @@ void IncrementRecordingCount();
 void CreateNonProcessCSVs(PresentMonData& pm);
 void CreateProcessCSVs(PresentMonData& pm, ProcessInfo* proc, std::string const& imageFileName);
 void CloseCSVs(PresentMonData& pm, std::unordered_map<uint32_t, ProcessInfo>* activeProcesses, uint32_t totalEventsLost, uint32_t totalBuffersLost);
-void UpdateCSV(PresentMonData& pm, ProcessInfo const& processInfo, SwapChainData const& chain, PresentEvent& p);
+void UpdateCSV(PresentMonData const& pm, ProcessInfo const& processInfo, SwapChainData const& chain, PresentEvent const& p);
 const char* FinalStateToDroppedString(PresentResult res);
 const char* PresentModeToString(PresentMode mode);
 const char* RuntimeToString(Runtime rt);
@@ -163,5 +153,6 @@ void DequeueAnalyzedInfo(
     std::vector<std::shared_ptr<PresentEvent>>* presents,
     std::vector<std::shared_ptr<LateStageReprojectionEvent>>* lsrs);
 double QpcDeltaToSeconds(uint64_t qpcDelta);
+uint64_t SecondsDeltaToQpc(double secondsDelta);
 double QpcToSeconds(uint64_t qpc);
 
