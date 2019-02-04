@@ -105,20 +105,15 @@ Beta options:
 
 ### CSV File Names
 
-The default CSV file name is `PresentMon-TIME.csv`, where `TIME` is the capture
-time in ISO 8601 format.
+By default, PresentMon creates a CSV file named `PresentMon-TIME.csv`, where
+`TIME` is the creation time in ISO 8601 format.  To specify your own output
+location, use the `-output_file PATH` command line argument.
 
-If the CSV file contains a single target process (`-process_id` or one
-`-process_name` or `-multi_csv`) then the CSV filename is
-`PresentMon-PROCESSNAME-TIME.csv`.
+If `-multi_csv` is used, then one CSV is created for each process captured with
+`-PROCESSNAME` appended to the file name.
 
-If an output file name is provided with `-output_file PATH.EXT` then that name
-will be used, but `-PROCESSNAME` is appended to `PATH` if `-multi_csv`, and
-`-INDEX` is appended if `-hotkey` where `INDEX` increases each time the hotkey
-is used.
-
-In all cases, `_WMR` is added to the file name if `-include_mixed_reality` is
-used.
+If `-hotkey` is used, then one CSV is created each time recording is started
+with `-INDEX` appended to the file name.
 
 ### Simple Columns (-simple command line argument)
 
@@ -158,6 +153,9 @@ All of the above columns above, plus:
 
 
 ## Windows Mixed Reality comma-separated value (CSV) file output
+
+If `-include_mixed_reality` is used, a second CSV file will be generated with
+`_WMR` appended to the filename containing the WMR data.
 
 ### Simple Columns (-simple command line argument)
 

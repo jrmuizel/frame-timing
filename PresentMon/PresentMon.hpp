@@ -93,20 +93,17 @@ struct SwapChainData {
     uint32_t mLastDisplayedPresentIndex;
 };
 
+struct OutputCsv {
+    FILE* mFile;
+    FILE* mWmrFile;
+};
+
 struct ProcessInfo {
     std::string mModuleName;
     std::unordered_map<uint64_t, SwapChainData> mSwapChain;
     HANDLE mHandle;
-    FILE *mOutputFile;          // Used if -multi_csv
-    FILE *mLsrOutputFile;       // Used if -multi_csv
+    OutputCsv mOutputCsv;
     bool mTargetProcess;
-};
-
-struct PresentMonData {
-    char mCaptureTimeStr[18] = "";
-    FILE *mOutputFile = nullptr;    // Used if not -multi_csv
-    FILE *mLsrOutputFile = nullptr; // Used if not -multi_csv
-    std::map<std::string, std::pair<FILE*, FILE*> > mProcessOutputFiles;
 };
 
 #include "LateStageReprojectionData.hpp"
@@ -128,10 +125,9 @@ void WaitForConsumerThreadToExit();
 
 // CsvOutput.cpp:
 void IncrementRecordingCount();
-void CreateNonProcessCSVs(PresentMonData& pm);
-void CreateProcessCSVs(PresentMonData& pm, ProcessInfo* proc, std::string const& imageFileName);
-void CloseCSVs(PresentMonData& pm, std::unordered_map<uint32_t, ProcessInfo>* activeProcesses, uint32_t totalEventsLost, uint32_t totalBuffersLost);
-void UpdateCSV(PresentMonData const& pm, ProcessInfo const& processInfo, SwapChainData const& chain, PresentEvent const& p);
+OutputCsv GetOutputCsv(ProcessInfo* processInfo);
+void CloseOutputCsv(ProcessInfo* processInfo);
+void UpdateCsv(ProcessInfo* processInfo, SwapChainData const& chain, PresentEvent const& p);
 const char* FinalStateToDroppedString(PresentResult res);
 const char* PresentModeToString(PresentMode mode);
 const char* RuntimeToString(Runtime rt);

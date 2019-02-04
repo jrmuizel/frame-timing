@@ -201,76 +201,124 @@ LateStageReprojectionRuntimeStats LateStageReprojectionData::ComputeRuntimeStats
     return stats;
 }
 
-void UpdateLSRCSV(PresentMonData& pm, LateStageReprojectionData& lsr, ProcessInfo* proc, LateStageReprojectionEvent& p)
+FILE* CreateLsrCsvFile(char const* path)
 {
     auto const& args = GetCommandLineArgs();
 
-    auto file = args.mMultiCsv ? proc->mLsrOutputFile : pm.mLsrOutputFile;
-    if (file && (p.FinalState == LateStageReprojectionResult::Presented || !args.mExcludeDropped)) {
-        auto len = lsr.mLSRHistory.size();
-        if (len > 1) {
-            auto& curr = lsr.mLSRHistory[len - 1];
-            auto& prev = lsr.mLSRHistory[len - 2];
-            const double deltaMilliseconds = 1000.0 * QpcDeltaToSeconds(curr.QpcTime - prev.QpcTime);
-            const double timeInSeconds = QpcToSeconds(p.QpcTime);
+    // Add _WMR to the file name
+    char drive[_MAX_DRIVE];
+    char dir[_MAX_DIR];
+    char name[_MAX_FNAME];
+    char ext[_MAX_EXT];
+    _splitpath_s(path, drive, dir, name, ext);
 
-            fprintf(file, "%s,%d,%d", proc->mModuleName.c_str(), curr.GetAppProcessId(), curr.ProcessId);
-            if (args.mVerbosity >= Verbosity::Verbose)
-            {
-                fprintf(file, ",%d", curr.GetAppFrameId());
-            }
-            fprintf(file, ",%.6lf", timeInSeconds);
-            if (args.mVerbosity > Verbosity::Simple)
-            {
-                double appPresentDeltaMilliseconds = 0.0;
-                double appPresentToLsrMilliseconds = 0.0;
-                if (curr.IsValidAppFrame())
-                {
-                    const uint64_t currAppPresentTime = curr.GetAppPresentTime();
-                    appPresentToLsrMilliseconds = 1000.0 * QpcDeltaToSeconds(curr.QpcTime - currAppPresentTime);
+    char outputPath[MAX_PATH];
+    _snprintf_s(outputPath, _TRUNCATE, "%s%s%s_WMR%s", drive, dir, name, ext);
 
-                    if (prev.IsValidAppFrame() && (curr.GetAppProcessId() == prev.GetAppProcessId()))
-                    {
-                        const uint64_t prevAppPresentTime = prev.GetAppPresentTime();
-                        appPresentDeltaMilliseconds = 1000.0 * QpcDeltaToSeconds(currAppPresentTime - prevAppPresentTime);
-                    }
-                }
-                fprintf(file, ",%.6lf,%.6lf", appPresentDeltaMilliseconds, appPresentToLsrMilliseconds);
-            }
-            fprintf(file, ",%.6lf,%d,%d", deltaMilliseconds, !curr.NewSourceLatched, curr.MissedVsyncCount);
-            if (args.mVerbosity >= Verbosity::Verbose)
-            {
-                fprintf(file, ",%.6lf,%.6lf", 1000 * QpcDeltaToSeconds(curr.Source.GetReleaseFromRenderingToAcquireForPresentationTime()), 1000.0 * QpcDeltaToSeconds(curr.GetAppCpuRenderFrameTime()));
-            }
-            fprintf(file, ",%.6lf", curr.AppPredictionLatencyMs);
-            if (args.mVerbosity >= Verbosity::Verbose)
-            {
-                fprintf(file, ",%.6lf,%.6lf", curr.AppMispredictionMs, curr.GetLsrCpuRenderFrameMs());
-            }
-            fprintf(file, ",%.6lf,%.6lf,%.6lf,%.6lf,%.6lf",
-                curr.LsrPredictionLatencyMs,
-                curr.GetLsrMotionToPhotonLatencyMs(),
-                curr.TimeUntilVsyncMs,
-                curr.GetLsrThreadWakeupStartLatchToGpuEndMs(),
-                curr.TotalWakeupErrorMs);
-            if (args.mVerbosity >= Verbosity::Verbose)
-            {
-                fprintf(file, ",%.6lf,%.6lf,%.6lf,%.6lf,%.6lf",
-                    curr.ThreadWakeupStartLatchToCpuRenderFrameStartInMs,
-                    curr.CpuRenderFrameStartToHeadPoseCallbackStartInMs,
-                    curr.HeadPoseCallbackStartToHeadPoseCallbackStopInMs,
-                    curr.HeadPoseCallbackStopToInputLatchInMs,
-                    curr.InputLatchToGpuSubmissionInMs);
-            }
-            fprintf(file, ",%.6lf,%.6lf,%.6lf,%.6lf,%.6lf",
-                curr.GpuSubmissionToGpuStartInMs,
-                curr.GpuStartToGpuStopInMs,
-                curr.GpuStopToCopyStartInMs,
-                curr.CopyStartToCopyStopInMs,
-                curr.CopyStopToVsyncInMs);
-            fprintf(file, "\n");
-        }
+    // Open output file
+    FILE* fp = nullptr;
+    if (fopen_s(&fp, outputPath, "w")) {
+        return nullptr;
     }
+
+    // Print CSV header
+    fprintf(fp, "Application,ProcessID,DwmProcessID");
+    if (args.mVerbosity >= Verbosity::Verbose) {
+        fprintf(fp, ",HolographicFrameID");
+    }
+    fprintf(fp, ",TimeInSeconds");
+    if (args.mVerbosity > Verbosity::Simple) {
+        fprintf(fp, ",MsBetweenAppPresents,MsAppPresentToLsr");
+    }
+    fprintf(fp, ",MsBetweenLsrs,AppMissed,LsrMissed");
+    if (args.mVerbosity >= Verbosity::Verbose) {
+        fprintf(fp, ",MsSourceReleaseFromRenderingToLsrAcquire,MsAppCpuRenderFrame");
+    }
+    fprintf(fp, ",MsAppPoseLatency");
+    if (args.mVerbosity >= Verbosity::Verbose) {
+        fprintf(fp, ",MsAppMisprediction,MsLsrCpuRenderFrame");
+    }
+    fprintf(fp, ",MsLsrPoseLatency,MsActualLsrPoseLatency,MsTimeUntilVsync,MsLsrThreadWakeupToGpuEnd,MsLsrThreadWakeupError");
+    if (args.mVerbosity >= Verbosity::Verbose) {
+        fprintf(fp, ",MsLsrThreadWakeupToCpuRenderFrameStart,MsCpuRenderFrameStartToHeadPoseCallbackStart,MsGetHeadPose,MsHeadPoseCallbackStopToInputLatch,MsInputLatchToGpuSubmission");
+    }
+    fprintf(fp, ",MsLsrPreemption,MsLsrExecution,MsCopyPreemption,MsCopyExecution,MsGpuEndToVsync");
+    fprintf(fp, "\n");
+
+    return fp;
+}
+
+void UpdateLsrCsv(LateStageReprojectionData& lsr, ProcessInfo* proc, LateStageReprojectionEvent& p)
+{
+    auto const& args = GetCommandLineArgs();
+
+    auto fp = GetOutputCsv(proc).mWmrFile;
+    if (fp == nullptr) {
+        return;
+    }
+
+    if (args.mExcludeDropped && p.FinalState != LateStageReprojectionResult::Presented) {
+        return;
+    }
+
+    auto len = lsr.mLSRHistory.size();
+    if (len < 2) {
+        return;
+    }
+
+    auto& curr = lsr.mLSRHistory[len - 1];
+    auto& prev = lsr.mLSRHistory[len - 2];
+    const double deltaMilliseconds = 1000.0 * QpcDeltaToSeconds(curr.QpcTime - prev.QpcTime);
+    const double timeInSeconds = QpcToSeconds(p.QpcTime);
+
+    fprintf(fp, "%s,%d,%d", proc->mModuleName.c_str(), curr.GetAppProcessId(), curr.ProcessId);
+    if (args.mVerbosity >= Verbosity::Verbose) {
+        fprintf(fp, ",%d", curr.GetAppFrameId());
+    }
+    fprintf(fp, ",%.6lf", timeInSeconds);
+    if (args.mVerbosity > Verbosity::Simple) {
+        double appPresentDeltaMilliseconds = 0.0;
+        double appPresentToLsrMilliseconds = 0.0;
+        if (curr.IsValidAppFrame()) {
+            const uint64_t currAppPresentTime = curr.GetAppPresentTime();
+            appPresentToLsrMilliseconds = 1000.0 * QpcDeltaToSeconds(curr.QpcTime - currAppPresentTime);
+
+            if (prev.IsValidAppFrame() && (curr.GetAppProcessId() == prev.GetAppProcessId())) {
+                const uint64_t prevAppPresentTime = prev.GetAppPresentTime();
+                appPresentDeltaMilliseconds = 1000.0 * QpcDeltaToSeconds(currAppPresentTime - prevAppPresentTime);
+            }
+        }
+        fprintf(fp, ",%.6lf,%.6lf", appPresentDeltaMilliseconds, appPresentToLsrMilliseconds);
+    }
+    fprintf(fp, ",%.6lf,%d,%d", deltaMilliseconds, !curr.NewSourceLatched, curr.MissedVsyncCount);
+    if (args.mVerbosity >= Verbosity::Verbose) {
+        fprintf(fp, ",%.6lf,%.6lf", 1000 * QpcDeltaToSeconds(curr.Source.GetReleaseFromRenderingToAcquireForPresentationTime()), 1000.0 * QpcDeltaToSeconds(curr.GetAppCpuRenderFrameTime()));
+    }
+    fprintf(fp, ",%.6lf", curr.AppPredictionLatencyMs);
+    if (args.mVerbosity >= Verbosity::Verbose) {
+        fprintf(fp, ",%.6lf,%.6lf", curr.AppMispredictionMs, curr.GetLsrCpuRenderFrameMs());
+    }
+    fprintf(fp, ",%.6lf,%.6lf,%.6lf,%.6lf,%.6lf",
+        curr.LsrPredictionLatencyMs,
+        curr.GetLsrMotionToPhotonLatencyMs(),
+        curr.TimeUntilVsyncMs,
+        curr.GetLsrThreadWakeupStartLatchToGpuEndMs(),
+        curr.TotalWakeupErrorMs);
+    if (args.mVerbosity >= Verbosity::Verbose) {
+        fprintf(fp, ",%.6lf,%.6lf,%.6lf,%.6lf,%.6lf",
+            curr.ThreadWakeupStartLatchToCpuRenderFrameStartInMs,
+            curr.CpuRenderFrameStartToHeadPoseCallbackStartInMs,
+            curr.HeadPoseCallbackStartToHeadPoseCallbackStopInMs,
+            curr.HeadPoseCallbackStopToInputLatchInMs,
+            curr.InputLatchToGpuSubmissionInMs);
+    }
+    fprintf(fp, ",%.6lf,%.6lf,%.6lf,%.6lf,%.6lf",
+        curr.GpuSubmissionToGpuStartInMs,
+        curr.GpuStartToGpuStopInMs,
+        curr.GpuStopToCopyStartInMs,
+        curr.CopyStartToCopyStopInMs,
+        curr.CopyStopToVsyncInMs);
+    fprintf(fp, "\n");
 }
 
 void UpdateConsole(std::unordered_map<uint32_t, ProcessInfo> const& activeProcesses, LateStageReprojectionData& lsr)

@@ -138,26 +138,22 @@ static bool IsTargetProcess(uint32_t processId, std::string const& processName)
     return false;
 }
 
-static void InitProcessInfo(PresentMonData& pm, ProcessInfo* processInfo, uint32_t processId, HANDLE handle, std::string const& processName)
+static void InitProcessInfo(ProcessInfo* processInfo, uint32_t processId, HANDLE handle, std::string const& processName)
 {
     auto target = IsTargetProcess(processId, processName);
 
-    processInfo->mHandle        = handle;
-    processInfo->mModuleName    = processName;
-    processInfo->mOutputFile    = nullptr;
-    processInfo->mLsrOutputFile = nullptr;
-    processInfo->mTargetProcess = target;
+    processInfo->mHandle             = handle;
+    processInfo->mModuleName         = processName;
+    processInfo->mOutputCsv.mFile    = nullptr;
+    processInfo->mOutputCsv.mWmrFile = nullptr;
+    processInfo->mTargetProcess      = target;
 
     if (target) {
-        // Create any CSV files that need process info to be created
-        CreateProcessCSVs(pm, processInfo, processName);
-
-        // Include process in -terminate_on_proc_exit count
         gTargetProcessCount += 1;
     }
 }
 
-static ProcessInfo* GetProcessInfo(PresentMonData& pm, uint32_t processId)
+static ProcessInfo* GetProcessInfo(uint32_t processId)
 {
     auto result = gProcesses.emplace(processId, ProcessInfo());
     auto processInfo = &result.first->second;
@@ -172,7 +168,7 @@ static ProcessInfo* GetProcessInfo(PresentMonData& pm, uint32_t processId)
         auto h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
         auto processName = QueryFullProcessImageNameA(h, 0, path, &numChars) ? PathFindFileNameA(path) : "<error>";
 
-        InitProcessInfo(pm, processInfo, processId, h, processName);
+        InitProcessInfo(processInfo, processId, h, processName);
     }
 
     return processInfo;
@@ -201,7 +197,7 @@ static void CheckForTerminatedRealtimeProcesses(std::vector<std::pair<uint32_t, 
     }
 }
 
-static void HandleTerminatedProcess(PresentMonData& pm, uint32_t processId)
+static void HandleTerminatedProcess(uint32_t processId)
 {
     auto const& args = GetCommandLineArgs();
 
@@ -212,10 +208,8 @@ static void HandleTerminatedProcess(PresentMonData& pm, uint32_t processId)
 
     auto processInfo = &iter->second;
     if (processInfo->mTargetProcess) {
-        // Save the output files in case the process is re-started.
-        if (args.mMultiCsv) {
-            pm.mProcessOutputFiles.emplace(processInfo->mModuleName, std::make_pair(processInfo->mOutputFile, processInfo->mLsrOutputFile));
-        }
+        // Close this process' CSV.
+        CloseOutputCsv(processInfo);
 
         // Quit if this is the last process tracked for -terminate_on_proc_exit.
         gTargetProcessCount -= 1;
@@ -227,7 +221,7 @@ static void HandleTerminatedProcess(PresentMonData& pm, uint32_t processId)
     gProcesses.erase(iter);
 }
 
-static void UpdateNTProcesses(PresentMonData& pmData, std::vector<NTProcessEvent> const& ntProcessEvents, std::vector<std::pair<uint32_t, uint64_t>>* terminatedProcesses)
+static void UpdateNTProcesses(std::vector<NTProcessEvent> const& ntProcessEvents, std::vector<std::pair<uint32_t, uint64_t>>* terminatedProcesses)
 {
     for (auto const& ntProcessEvent : ntProcessEvents) {
         // An empty ImageFileName indicates that the event is a process
@@ -245,12 +239,12 @@ static void UpdateNTProcesses(PresentMonData& pmData, std::vector<NTProcessEvent
         auto processInfo = &result.first->second;
         auto newProcess = result.second;
         if (newProcess) {
-            InitProcessInfo(pmData, processInfo, ntProcessEvent.ProcessId, NULL, ntProcessEvent.ImageFileName);
+            InitProcessInfo(processInfo, ntProcessEvent.ProcessId, NULL, ntProcessEvent.ImageFileName);
         }
     }
 }
 
-static void AddPresents(PresentMonData& pm, std::vector<std::shared_ptr<PresentEvent>> const& presentEvents, size_t* presentEventIndex,
+static void AddPresents(std::vector<std::shared_ptr<PresentEvent>> const& presentEvents, size_t* presentEventIndex,
                         bool recording, bool checkStopQpc, uint64_t stopQpc, bool* hitStopQpc)
 {
     auto i = *presentEventIndex;
@@ -264,7 +258,7 @@ static void AddPresents(PresentMonData& pm, std::vector<std::shared_ptr<PresentE
         }
 
         // Look up the swapchain this present belongs to.
-        auto processInfo = GetProcessInfo(pm, presentEvent->ProcessId);
+        auto processInfo = GetProcessInfo(presentEvent->ProcessId);
         if (!processInfo->mTargetProcess) {
             continue;
         }
@@ -279,7 +273,7 @@ static void AddPresents(PresentMonData& pm, std::vector<std::shared_ptr<PresentE
 
         // Output CSV row if recording (need to do this before updating chain).
         if (recording) {
-            UpdateCSV(pm, *processInfo, *chain, *presentEvent);
+            UpdateCsv(processInfo, *chain, *presentEvent);
         }
 
         // Add the present to the swapchain history.
@@ -300,7 +294,7 @@ static void AddPresents(PresentMonData& pm, std::vector<std::shared_ptr<PresentE
     *presentEventIndex = i;
 }
 
-static void AddPresents(PresentMonData& pm, LateStageReprojectionData* lsrData,
+static void AddPresents(LateStageReprojectionData* lsrData,
                         std::vector<std::shared_ptr<LateStageReprojectionEvent>> const& presentEvents, size_t* presentEventIndex,
                         bool recording, bool checkStopQpc, uint64_t stopQpc, bool* hitStopQpc)
 {
@@ -317,7 +311,7 @@ static void AddPresents(PresentMonData& pm, LateStageReprojectionData* lsrData,
         }
 
         const uint32_t appProcessId = presentEvent->GetAppProcessId();
-        auto processInfo = GetProcessInfo(pm, appProcessId);
+        auto processInfo = GetProcessInfo(appProcessId);
         if (!processInfo->mTargetProcess) {
             continue;
         }
@@ -329,7 +323,7 @@ static void AddPresents(PresentMonData& pm, LateStageReprojectionData* lsrData,
         lsrData->AddLateStageReprojection(*presentEvent);
 
         if (recording) {
-            UpdateLSRCSV(pm, *lsrData, processInfo, *presentEvent);
+            UpdateLsrCsv(*lsrData, processInfo, *presentEvent);
         }
 
         lsrData->UpdateLateStageReprojectionInfo();
@@ -376,7 +370,6 @@ static void PruneHistory(
 }
 
 static void ProcessEvents(
-    PresentMonData& pmData,
     LateStageReprojectionData* lsrData,
     std::vector<NTProcessEvent>* ntProcessEvents,
     std::vector<std::shared_ptr<PresentEvent>>* presentEvents,
@@ -407,7 +400,7 @@ static void ProcessEvents(
     // We don't have to worry about the recording toggles here because
     // NTProcess events are only captured when parsing ETL files and we don't
     // use recording toggle history for ETL files.
-    UpdateNTProcesses(pmData, *ntProcessEvents, terminatedProcesses);
+    UpdateNTProcesses(*ntProcessEvents, terminatedProcesses);
 
     // Next, iterate through the recording toggles (if any)...
     size_t presentEventIndex = 0;
@@ -434,20 +427,20 @@ static void ProcessEvents(
             }
 
             auto hitTerminatedProcess = false;
-            AddPresents(pmData, *presentEvents, &presentEventIndex, recording, true, terminatedProcessQpc, &hitTerminatedProcess);
-            AddPresents(pmData, lsrData, *lsrEvents, &lsrEventIndex, recording, true, terminatedProcessQpc, &hitTerminatedProcess);
+            AddPresents(*presentEvents, &presentEventIndex, recording, true, terminatedProcessQpc, &hitTerminatedProcess);
+            AddPresents(lsrData, *lsrEvents, &lsrEventIndex, recording, true, terminatedProcessQpc, &hitTerminatedProcess);
             if (!hitTerminatedProcess) {
                 goto done;
             }
-            HandleTerminatedProcess(pmData, terminatedProcessId);
+            HandleTerminatedProcess(terminatedProcessId);
         }
 
         // Process present events up until the next recording toggle.  If we
         // reached the toggle, handle it and continue.  Otherwise, we're done
         // handling all the presents and any outstanding toggles will have to
         // wait for next batch of events.
-        AddPresents(pmData, *presentEvents, &presentEventIndex, recording, checkRecordingToggle, nextRecordingToggleQpc, &hitNextRecordingToggle);
-        AddPresents(pmData, lsrData, *lsrEvents, &lsrEventIndex, recording, checkRecordingToggle, nextRecordingToggleQpc, &hitNextRecordingToggle);
+        AddPresents(*presentEvents, &presentEventIndex, recording, checkRecordingToggle, nextRecordingToggleQpc, &hitNextRecordingToggle);
+        AddPresents(lsrData, *lsrEvents, &lsrEventIndex, recording, checkRecordingToggle, nextRecordingToggleQpc, &hitNextRecordingToggle);
         if (!hitNextRecordingToggle) {
             break;
         }
@@ -455,6 +448,13 @@ static void ProcessEvents(
         // Toggle recording.
         recordingToggleIndex += 1;
         recording = !recording;
+        if (!recording) {
+            IncrementRecordingCount();
+            CloseOutputCsv(nullptr);
+            for (auto& pair : gProcesses) {
+                CloseOutputCsv(&pair.second);
+            }
+        }
     }
 
 done:
@@ -487,13 +487,7 @@ void Output()
     auto const& args = GetCommandLineArgs();
 
     // Structures to track processes and statistics from recorded events.
-    PresentMonData pmData;
     LateStageReprojectionData lsrData;
-
-    // Create any CSV files that don't need process info to be created
-    CreateNonProcessCSVs(pmData);
-
-    // Enter loop to consume collected events.
     std::vector<NTProcessEvent> ntProcessEvents;
     std::vector<std::shared_ptr<PresentEvent>> presentEvents;
     std::vector<std::shared_ptr<LateStageReprojectionEvent>> lsrEvents;
@@ -513,7 +507,7 @@ void Output()
 
         // Copy and process all the collected events, and update the various
         // tracking and statistics data structures.
-        ProcessEvents(pmData, &lsrData, &ntProcessEvents, &presentEvents, &lsrEvents, &recordingToggleHistory, &terminatedProcesses);
+        ProcessEvents(&lsrData, &ntProcessEvents, &presentEvents, &lsrEvents, &recordingToggleHistory, &terminatedProcesses);
 
         // Display information to console if requested.  If debug build and
         // simple console, print a heartbeat if recording.
@@ -523,7 +517,7 @@ void Output()
         // don't need the critical section.
         auto realtimeRecording = gIsRecording;
         if (!args.mSimpleConsole) {
-            for (auto& pair : gProcesses) {
+            for (auto const& pair : gProcesses) {
                 UpdateConsole(pair.first, pair.second);
             }
             UpdateConsole(gProcesses, lsrData);
@@ -552,20 +546,28 @@ void Output()
         Sleep(100);
     }
 
-    // Shut down output.
+    // Output warning if events were lost.
     uint32_t eventsLost = 0;
     uint32_t buffersLost = 0;
     CheckLostReports(&eventsLost, &buffersLost);
+    if (buffersLost > 0) {
+        fprintf(stderr, "warning: %u ETW buffers were lost.\n", buffersLost);
+    }
+    if (eventsLost > 0) {
+        fprintf(stderr, "warning: %u ETW events were lost.\n", eventsLost);
+    }
 
-    CloseCSVs(pmData, &gProcesses, eventsLost, buffersLost);
-
+    // Close all CSV and process handles
     for (auto& pair : gProcesses) {
         auto processInfo = &pair.second;
         if (processInfo->mHandle != NULL) {
             CloseHandle(processInfo->mHandle);
         }
+        CloseOutputCsv(processInfo);
     }
     gProcesses.clear();
+    CloseOutputCsv(nullptr); // Special case to close single global CSV if not
+                             // using per-process CSVs.
 }
 
 void StartOutputThread()
