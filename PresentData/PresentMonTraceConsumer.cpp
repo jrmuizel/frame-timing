@@ -959,7 +959,6 @@ void PMTraceConsumer::CompletePresent(std::shared_ptr<PresentEvent> p)
             presentIter = presentDeque.begin();
         }
     }
-
 }
 
 decltype(PMTraceConsumer::mPresentByThreadId.begin()) PMTraceConsumer::FindOrCreatePresent(EVENT_HEADER const& hdr)

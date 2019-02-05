@@ -117,7 +117,7 @@ T EventMetadataContainer::GetEventData(EVENT_RECORD* pEventRecord, wchar_t const
 {
     T value = {};
     auto ok = GetEventData(pEventRecord, name, &value);
-    (void)ok;
+    (void) ok;
     return value;
 }
 
@@ -130,7 +130,7 @@ T EventMetadataContainer::GetEventDataFromArray(EVENT_RECORD* pEventRecord, wcha
     if (pData != nullptr && Size <= sizeof(T))
     {
         memcpy(&value, pData, Size);
-        return true;
+        return value;
     }
     return GetEventDataFromArrayFromTdh<T>(pEventRecord, name, index);
 }

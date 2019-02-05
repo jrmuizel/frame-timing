@@ -225,6 +225,7 @@ static void GetPropertySize(TRACE_EVENT_INFO const& traceEventInfo, EVENT_RECORD
 
     uint32_t size = propInfo.length;
 
+    // TODO: Not sure this is needed, propInfo.length seems to be correct?
     if (propInfo.nonStructType.InType == TDH_INTYPE_SIZET ||
         propInfo.nonStructType.InType == TDH_INTYPE_POINTER)
     {
