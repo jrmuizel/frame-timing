@@ -24,226 +24,266 @@ SOFTWARE.
 
 #include "PresentMon.hpp"
 
-namespace {
-
-CommandLineArgs gCommandLineArgs;
-
-bool ParseModifier(char* arg, UINT* inoutModifier)
+struct KeyNameCode
 {
-    struct {
-        char const* arg;
-        UINT modifier;
-    } options[] = {
-        { "alt",     MOD_ALT     },
-        { "control", MOD_CONTROL },
-        { "ctrl",    MOD_CONTROL },
-        { "shift",   MOD_SHIFT   },
-        { "sh",      MOD_SHIFT   },
-        { "windows", MOD_WIN     },
-        { "win",     MOD_WIN     },
-    };
+    char const* mName;
+    UINT mCode;
+};
 
-    for (size_t i = 0, N = _countof(options); i < N; ++i) {
-        if (_stricmp(arg, options[i].arg) == 0) {
-            *inoutModifier |= options[i].modifier;
+static KeyNameCode const HOTKEY_MODS[] = {
+    { "ALT",     MOD_ALT     },
+    { "CONTROL", MOD_CONTROL },
+    { "CTRL",    MOD_CONTROL },
+    { "SHIFT",   MOD_SHIFT   },
+    { "WINDOWS", MOD_WIN     },
+    { "WIN",     MOD_WIN     },
+};
+
+static KeyNameCode const HOTKEY_KEYS[] = {
+    { "BACKSPACE", VK_BACK },
+    { "TAB", VK_TAB },
+    { "CLEAR", VK_CLEAR },
+    { "ENTER", VK_RETURN },
+    { "PAUSE", VK_PAUSE },
+    { "CAPSLOCK", VK_CAPITAL },
+    { "ESC", VK_ESCAPE },
+    { "SPACE", VK_SPACE },
+    { "PAGEUP", VK_PRIOR },
+    { "PAGEDOWN", VK_NEXT },
+    { "END", VK_END },
+    { "HOME", VK_HOME },
+    { "LEFT", VK_LEFT },
+    { "UP", VK_UP },
+    { "RIGHT", VK_RIGHT },
+    { "DOWN", VK_DOWN },
+    { "PRINTSCREEN", VK_SNAPSHOT },
+    { "INS", VK_INSERT },
+    { "DEL", VK_DELETE },
+    { "HELP", VK_HELP },
+    { "NUMLOCK", VK_NUMLOCK },
+    { "SCROLLLOCK", VK_SCROLL },
+    { "NUM0", VK_NUMPAD0 },
+    { "NUM1", VK_NUMPAD1 },
+    { "NUM2", VK_NUMPAD2 },
+    { "NUM3", VK_NUMPAD3 },
+    { "NUM4", VK_NUMPAD4 },
+    { "NUM5", VK_NUMPAD5 },
+    { "NUM6", VK_NUMPAD6 },
+    { "NUM7", VK_NUMPAD7 },
+    { "NUM8", VK_NUMPAD8 },
+    { "NUM9", VK_NUMPAD9 },
+    { "MULTIPLY", VK_MULTIPLY },
+    { "ADD", VK_ADD },
+    { "SEPARATOR", VK_SEPARATOR },
+    { "SUBTRACT", VK_SUBTRACT },
+    { "DECIMAL", VK_DECIMAL },
+    { "DIVIDE", VK_DIVIDE },
+    { "0", 0x30 },
+    { "1", 0x31 },
+    { "2", 0x32 },
+    { "3", 0x33 },
+    { "4", 0x34 },
+    { "5", 0x35 },
+    { "6", 0x36 },
+    { "7", 0x37 },
+    { "8", 0x38 },
+    { "9", 0x39 },
+    { "A", 0x42 },
+    { "B", 0x43 },
+    { "C", 0x44 },
+    { "D", 0x45 },
+    { "E", 0x46 },
+    { "F", 0x47 },
+    { "G", 0x48 },
+    { "H", 0x49 },
+    { "I", 0x4A },
+    { "J", 0x4B },
+    { "K", 0x4C },
+    { "L", 0x4D },
+    { "M", 0x4E },
+    { "N", 0x4F },
+    { "O", 0x50 },
+    { "P", 0x51 },
+    { "Q", 0x52 },
+    { "R", 0x53 },
+    { "S", 0x54 },
+    { "T", 0x55 },
+    { "U", 0x56 },
+    { "V", 0x57 },
+    { "W", 0x58 },
+    { "X", 0x59 },
+    { "Y", 0x5A },
+    { "F1", VK_F1 },
+    { "F2", VK_F2 },
+    { "F3", VK_F3 },
+    { "F4", VK_F4 },
+    { "F5", VK_F5 },
+    { "F6", VK_F6 },
+    { "F7", VK_F7 },
+    { "F8", VK_F8 },
+    { "F9", VK_F9 },
+    { "F10", VK_F10 },
+    { "F11", VK_F11 },
+    { "F12", VK_F12 },
+    { "F13", VK_F13 },
+    { "F14", VK_F14 },
+    { "F15", VK_F15 },
+    { "F16", VK_F16 },
+    { "F17", VK_F17 },
+    { "F18", VK_F18 },
+    { "F19", VK_F19 },
+    { "F20", VK_F20 },
+    { "F21", VK_F21 },
+    { "F22", VK_F22 },
+    { "F23", VK_F23 },
+    { "F24", VK_F24 },
+};
+
+static CommandLineArgs gCommandLineArgs;
+
+static bool ParseKeyName(KeyNameCode const* valid, size_t validCount, char* name, char const* errorMessage, UINT* outKeyCode)
+{
+    for (size_t i = 0; i < validCount; ++i) {
+        if (_stricmp(name, valid[i].mName) == 0) {
+            *outKeyCode = valid[i].mCode;
             return true;
         }
     }
 
-    return false;
-}
+    int col = fprintf(stderr, "error: %s '%s'. Valid options (case insensitive):", errorMessage, name);
 
-bool ParseKeyCode(char* arg, UINT* outKeyCode)
-{
-#define CHECK_KEY(_Arg, _Code) \
-    if (_stricmp(arg, _Arg) == 0) { *outKeyCode = _Code; return true; }
-    CHECK_KEY("BACKSPACE", VK_BACK)
-    CHECK_KEY("TAB", VK_TAB)
-    CHECK_KEY("CLEAR", VK_CLEAR)
-    CHECK_KEY("ENTER", VK_RETURN)
-    CHECK_KEY("PAUSE", VK_PAUSE)
-    CHECK_KEY("CAPSLOCK", VK_CAPITAL)
-    CHECK_KEY("ESC", VK_ESCAPE)
-    CHECK_KEY("SPACE", VK_SPACE)
-    CHECK_KEY("PAGEUP", VK_PRIOR)
-    CHECK_KEY("PAGEDOWN", VK_NEXT)
-    CHECK_KEY("END", VK_END)
-    CHECK_KEY("HOME", VK_HOME)
-    CHECK_KEY("LEFT", VK_LEFT)
-    CHECK_KEY("UP", VK_UP)
-    CHECK_KEY("RIGHT", VK_RIGHT)
-    CHECK_KEY("DOWN", VK_DOWN)
-    CHECK_KEY("PRINTSCREEN", VK_SNAPSHOT)
-    CHECK_KEY("INS", VK_INSERT)
-    CHECK_KEY("DEL", VK_DELETE)
-    CHECK_KEY("HELP", VK_HELP)
-    CHECK_KEY("0", 0x30)
-    CHECK_KEY("1", 0x31)
-    CHECK_KEY("2", 0x32)
-    CHECK_KEY("3", 0x33)
-    CHECK_KEY("4", 0x34)
-    CHECK_KEY("5", 0x35)
-    CHECK_KEY("6", 0x36)
-    CHECK_KEY("7", 0x37)
-    CHECK_KEY("8", 0x38)
-    CHECK_KEY("9", 0x39)
-    CHECK_KEY("A", 0x42)
-    CHECK_KEY("B", 0x43)
-    CHECK_KEY("C", 0x44)
-    CHECK_KEY("D", 0x45)
-    CHECK_KEY("E", 0x46)
-    CHECK_KEY("F", 0x47)
-    CHECK_KEY("G", 0x48)
-    CHECK_KEY("H", 0x49)
-    CHECK_KEY("I", 0x4A)
-    CHECK_KEY("J", 0x4B)
-    CHECK_KEY("K", 0x4C)
-    CHECK_KEY("L", 0x4D)
-    CHECK_KEY("M", 0x4E)
-    CHECK_KEY("N", 0x4F)
-    CHECK_KEY("O", 0x50)
-    CHECK_KEY("P", 0x51)
-    CHECK_KEY("Q", 0x52)
-    CHECK_KEY("R", 0x53)
-    CHECK_KEY("S", 0x54)
-    CHECK_KEY("T", 0x55)
-    CHECK_KEY("U", 0x56)
-    CHECK_KEY("V", 0x57)
-    CHECK_KEY("W", 0x58)
-    CHECK_KEY("X", 0x59)
-    CHECK_KEY("Y", 0x5A)
-    CHECK_KEY("Num0", VK_NUMPAD0)
-    CHECK_KEY("Num1", VK_NUMPAD1)
-    CHECK_KEY("Num2", VK_NUMPAD2)
-    CHECK_KEY("Num3", VK_NUMPAD3)
-    CHECK_KEY("Num4", VK_NUMPAD4)
-    CHECK_KEY("Num5", VK_NUMPAD5)
-    CHECK_KEY("Num6", VK_NUMPAD6)
-    CHECK_KEY("Num7", VK_NUMPAD7)
-    CHECK_KEY("Num8", VK_NUMPAD8)
-    CHECK_KEY("Num9", VK_NUMPAD9)
-    CHECK_KEY("Multiply", VK_MULTIPLY)
-    CHECK_KEY("Add", VK_ADD)
-    CHECK_KEY("Separator", VK_SEPARATOR)
-    CHECK_KEY("Subtract", VK_SUBTRACT)
-    CHECK_KEY("Decimal", VK_DECIMAL)
-    CHECK_KEY("Divide", VK_DIVIDE)
-    CHECK_KEY("F1", VK_F1)
-    CHECK_KEY("F2", VK_F2)
-    CHECK_KEY("F3", VK_F3)
-    CHECK_KEY("F4", VK_F4)
-    CHECK_KEY("F5", VK_F5)
-    CHECK_KEY("F6", VK_F6)
-    CHECK_KEY("F7", VK_F7)
-    CHECK_KEY("F8", VK_F8)
-    CHECK_KEY("F9", VK_F9)
-    CHECK_KEY("F10", VK_F10)
-    CHECK_KEY("F11", VK_F11)
-    CHECK_KEY("F12", VK_F12)
-    CHECK_KEY("F13", VK_F13)
-    CHECK_KEY("F14", VK_F14)
-    CHECK_KEY("F15", VK_F15)
-    CHECK_KEY("F16", VK_F16)
-    CHECK_KEY("F17", VK_F17)
-    CHECK_KEY("F18", VK_F18)
-    CHECK_KEY("F19", VK_F19)
-    CHECK_KEY("F20", VK_F20)
-    CHECK_KEY("F21", VK_F21)
-    CHECK_KEY("F22", VK_F22)
-    CHECK_KEY("F23", VK_F23)
-    CHECK_KEY("F24", VK_F24)
-    CHECK_KEY("NUMLOCK", VK_NUMLOCK)
-    CHECK_KEY("SCROLLLOCK", VK_SCROLL)
+    for (size_t i = 0; i < validCount; ++i) {
+        auto len = strlen(valid[i].mName);
+        if (col + len + 1 > 80) {
+            col = fprintf(stderr, "\n   ") - 1;
+        }
+        col += fprintf(stderr, " %s", valid[i].mName);
+    }
+    fprintf(stderr, "\n");
 
     return false;
 }
 
-void AssignHotkey(int* inoutArgIdx, int argc, char** argv, CommandLineArgs* args)
+static bool AssignHotkey(int i, int argc, char** argv, CommandLineArgs* args)
 {
-    auto argIdx = *inoutArgIdx;
-
-    args->mHotkeySupport = true;
-    if (++argIdx == argc) {
-        return;
+    if (i == argc) {
+        fprintf(stderr, "error: -hotkey missing key argument.\n");
+        return false;
     }
 
 #pragma warning(suppress: 4996)
-    auto token = strtok(argv[argIdx], "+");
+    auto token = strtok(argv[i], "+");
     for (;;) {
         auto prev = token;
 #pragma warning(suppress: 4996)
         token = strtok(nullptr, "+");
         if (token == nullptr) {
-            if (!ParseKeyCode(prev, &args->mHotkeyVirtualKeyCode)) {
-                return;
+            if (!ParseKeyName(HOTKEY_KEYS, _countof(HOTKEY_KEYS), prev, "invalid -hotkey key", &args->mHotkeyVirtualKeyCode)) {
+                return false;
             }
             break;
         }
 
-        if (!ParseModifier(prev, &args->mHotkeyModifiers)) {
-            return;
+        if (!ParseKeyName(HOTKEY_MODS, _countof(HOTKEY_MODS), prev, "invalid -hotkey modifier", &args->mHotkeyModifiers)) {
+            return false;
         }
     }
 
-    *inoutArgIdx = argIdx;
+    args->mHotkeySupport = true;
+    return true;
 }
 
-UINT atou(char const* a)
+static UINT atou(char const* a)
 {
     int i = atoi(a);
     return i <= 0 ? 0 : (UINT) i;
 }
 
-void PrintHelp()
+static void PrintHelp()
 {
     // NOTE: remember to update README.md when modifying usage
-    fprintf(stderr,
-        "PresentMon %s\n"
-        "\n"
-        "Capture target options:\n"
-        "    -captureall                Record all processes (default).\n"
-        "    -process_name [exe name]   Record only the named process. If multiple processes with\n"
-        "                               the same image name are running, it is undefined which one\n"
-        "                               will be recorded. This argument can be repeated to capture\n"
-        "                               more than one process at the same time.\n"
-        "    -process_id [integer]      Record only the process specified by ID.\n"
-        "    -etl_file [path]           Consume events from an ETL file instead of running processes.\n"
-        "\n"
-        "Output options:\n"
-        "    -no_csv                    Do not create any output file.\n"
-        "    -output_file [path]        Write CSV output to specified path. See README for defaults.\n"
-        "    -multi_csv                 Create a separate CSV file for each captured process.\n"
-        "\n"
-        "Control and filtering options:\n"
-        "    -exclude [exe name]        Don't record specific process specified by name; this argument can be\n"
-        "                               repeated to exclude multiple processes.\n"
-        "    -scroll_toggle             Only record events while scroll lock is enabled.\n"
-        "    -scroll_indicator          Set scroll lock while recording events.\n"
-        "    -hotkey [key]              Use specified key to start and stop recording, writing to a\n"
-        "                               unique file each time (default is F11).\n"
-        "    -delay [seconds]           Wait for specified time before starting to record. When using\n"
-        "                               -hotkey, delay occurs each time recording is started.\n"
-        "    -timed [seconds]           Stop recording after the specified amount of time.  PresentMon will exit\n"
-        "                               timer expires.\n"
-        "    -exclude_dropped           Exclude dropped presents from the csv output.\n"
-        "    -terminate_on_proc_exit    Terminate PresentMon when all instances of the specified process exit.\n"
-        "    -terminate_after_timed     Terminate PresentMon after the timed trace, specified using -timed, completes.\n"
-        "    -simple                    Disable advanced tracking (try this if you encounter crashes).\n"
-        "    -verbose                   Adds additional data to output not relevant to normal usage.\n"
-        "    -dont_restart_as_admin     Don't try to elevate privilege.\n"
-        "    -no_top                    Don't display active swap chains in the console window.\n"
-        "    -session_name [name]       Use the specified name to start a new realtime ETW session, instead\n"
-        "                               of the default \"PresentMon\". This can be used to start multiple\n"
-        "                               realtime capture process at the same time (using distinct names).\n"
-        "                               A realtime PresentMon capture cannot start if there are any\n"
-        "                               existing sessions with the same name.\n"
-        "    -stop_existing_session     If a trace session with the same name is already running, stop\n"
-        "                               the existing session (to allow this one to proceed).\n"
-        "    -include_mixed_reality     [Beta] Include Windows Mixed Reality data. If enabled, writes csv output\n"
-        "                               to a separate file (with \"_WMR\" suffix).\n"
-        , PRESENT_MON_VERSION);
-}
+    char* s[] = {
+        "Capture target options", nullptr,
+        "-captureall",              "Record all processes (default).",
+        "-process_name [exe name]", "Record only processes with the provided name."
+                                    " This argument can be repeated to capture multiple processes.",
+        "-exclude [exe name]",      "Don't record specific process specified by name."
+                                    " This argument can be repeated to exclude multiple processes.",
+        "-process_id [integer]",    "Record only the process specified by ID.",
+        "-etl_file [path]",         "Consume events from an ETL file instead of running processes.",
 
+        "Output options (see README for file naming defaults)", nullptr,
+        "-output_file [path]",      "Write CSV output to specified path.",
+        "-multi_csv",               "Create a separate CSV file for each captured process.",
+        "-no_csv",                  "Do not create any output file.",
+        "-no_top",                  "Don't display active swap chains in the console window.",
+
+        "Recording options", nullptr,
+        "-hotkey [key]",            "Use specified key to start and stop recording, writing to a"
+                                    " unique CSV file each time. 'key' is of the form MODIFIER+KEY,"
+                                    " e.g., alt+shift+f11. (See README for subsequent file naming).",
+        "-delay [seconds]",         "Wait for specified time before starting to record."
+                                    " If using -hotkey, delay occurs each time recording is started.",
+        "-timed [seconds]",         "Stop recording after the specified amount of time.",
+        "-exclude_dropped",         "Exclude dropped presents from the csv output.",
+        "-scroll_toggle",           "Only record events while scroll lock is enabled.",
+        "-scroll_indicator",        "Enable scroll lock while recording.",
+        "-simple",                  "Disable GPU/display tracking.",
+        "-verbose",                 "Adds additional data to output not relevant to normal usage.",
+
+        "Execution options", nullptr,
+        "-session_name [name]",     "Use the specified name to start a new realtime ETW session, instead"
+                                    " of the default \"PresentMon\". This can be used to start multiple"
+                                    " realtime capture process at the same time (using distinct names)."
+                                    " A realtime PresentMon capture cannot start if there are any"
+                                    " existing sessions with the same name.",
+        "-stop_existing_session",   "If a trace session with the same name is already running, stop"
+                                    " the existing session (to allow this one to proceed).",
+        "-dont_restart_as_admin",   "Don't try to elevate privilege.",
+        "-terminate_on_proc_exit",  "Terminate PresentMon when all the target processes have exited.",
+        "-terminate_after_timed",   "When using -timed, terminate PresentMon after the timed capture completes.",
+
+        "Beta options", nullptr,
+        "-include_mixed_reality",   "Capture Windows Mixed Reality data to a CSV file with \"_WMR\" suffix.",
+    };
+
+    // NOTE: remember to update README.md when modifying usage
+    fprintf(stderr, "PresentMon %s\n", PRESENT_MON_VERSION);
+
+    int argWidth = 0;
+    for (int i = 0; i < _countof(s); i += 2) {
+        auto arg = s[i];
+        auto desc = s[i + 1];
+        if (desc != nullptr) {
+            argWidth = max(argWidth, (int) strlen(arg));
+        }
+    }
+
+    int descWidth = 80 - argWidth - 4;
+
+    for (int i = 0; i < _countof(s); i += 2) {
+        auto arg = s[i];
+        auto desc = s[i + 1];
+        if (desc == nullptr) {
+            fprintf(stderr, "\n%s:\n", arg);
+        } else {
+            fprintf(stderr, "  %-*s  ", argWidth, arg);
+            for (auto len = (int) strlen(desc); len > 0; ) {
+                if (len <= descWidth) {
+                    fprintf(stderr, "%s\n", desc);
+                    break;
+                }
+
+                auto w = descWidth;
+                while (desc[w] != ' ') {
+                    --w;
+                }
+                fprintf(stderr, "%.*s\n%-*s", w, desc, argWidth + 4, "");
+                desc += w + 1;
+                len -= w + 1;
+            }
+        }
+    }
 }
 
 CommandLineArgs const& GetCommandLineArgs()
@@ -264,7 +304,7 @@ bool ParseCommandLine(int argc, char** argv)
     args->mDelay = 0;
     args->mTimer = 0;
     args->mHotkeyModifiers = MOD_NOREPEAT;
-    args->mHotkeyVirtualKeyCode = VK_F11;
+    args->mHotkeyVirtualKeyCode = 0;
     args->mOutputFile = true;
     args->mScrollLockToggle = false;
     args->mScrollLockIndicator = false;
@@ -297,7 +337,7 @@ bool ParseCommandLine(int argc, char** argv)
             fprintf(stderr, "error: %s expecting argument.\n", Arg); \
         }
 
-        // Capture target options
+        // Capture target options:
         if (strcmp(argv[i], "-captureall") == 0) {
             if (!args->mTargetProcessNames.empty()) {
                 fprintf(stderr, "warning: -captureall elides all previous -process_name command line arguments.\n");
@@ -307,36 +347,38 @@ bool ParseCommandLine(int argc, char** argv)
         }
 
         else ARG2("-process_name",           args->mTargetProcessNames.emplace_back(argv[i]))
+        else ARG2("-exclude",                args->mExcludeProcessNames.emplace_back(argv[i]))
         else ARG2("-process_id",             args->mTargetPid                  = atou(argv[i]))
         else ARG2("-etl_file",               args->mEtlFileName                = argv[i])
 
-        // Output options
-        else ARG1("-no_csv",                 args->mOutputFile                 = false)
+        // Output options:
         else ARG2("-output_file",            args->mOutputFileName             = argv[i])
         else ARG1("-multi_csv",              args->mMultiCsv                   = true)
+        else ARG1("-no_csv",                 args->mOutputFile                 = false)
+        else ARG1("-no_top",                 args->mSimpleConsole              = true)
 
-        // Control and filtering options
-        else ARG2("-exclude",                args->mExcludeProcessNames.emplace_back(argv[i]))
-        else ARG1("-hotkey",                 AssignHotkey(&i, argc, argv, args))
-        else ARG1("-scroll_toggle",          args->mScrollLockToggle           = true)
-        else ARG1("-scroll_indicator",       args->mScrollLockIndicator        = true)
+        // Recording options:
+        else if (strcmp(argv[i], "-hotkey") == 0) { if (AssignHotkey(++i, argc, argv, args)) continue; }
         else ARG2("-delay",                  args->mDelay                      = atou(argv[i]))
         else ARG2("-timed",                  args->mTimer                      = atou(argv[i]))
         else ARG1("-exclude_dropped",        args->mExcludeDropped             = true)
-        else ARG1("-terminate_on_proc_exit", args->mTerminateOnProcExit        = true)
-        else ARG1("-terminate_after_timed",  args->mTerminateAfterTimer        = true)
+        else ARG1("-scroll_toggle",          args->mScrollLockToggle           = true)
+        else ARG1("-scroll_indicator",       args->mScrollLockIndicator        = true)
         else ARG1("-simple",                 simple                            = true)
         else ARG1("-verbose",                verbose                           = true)
-        else ARG1("-dont_restart_as_admin",  args->mTryToElevate               = false)
-        else ARG1("-no_top",                 args->mSimpleConsole              = true)
+
+        // Execution options:
         else ARG2("-session_name",           args->mSessionName                = argv[i])
         else ARG1("-stop_existing_session",  args->mStopExistingSession        = true)
+        else ARG1("-dont_restart_as_admin",  args->mTryToElevate               = false)
+        else ARG1("-terminate_on_proc_exit", args->mTerminateOnProcExit        = true)
+        else ARG1("-terminate_after_timed",  args->mTerminateAfterTimer        = true)
+
+        // Beta options:
         else ARG1("-include_mixed_reality",  args->mIncludeWindowsMixedReality = true)
 
         // Provided argument wasn't recognized
-        else fprintf(stderr, "error: %s '%s'.\n",
-            i > 0 && strcmp(argv[i - 1], "-hotkey") == 0 ? "failed to parse hotkey" : "unrecognized argument",
-            argv[i]);
+        else fprintf(stderr, "error: unrecognized argument '%s'.\n", argv[i]);
 
         PrintHelp();
         return false;

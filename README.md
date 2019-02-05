@@ -42,48 +42,64 @@ changes.
 
 ## Command line options
 
-```html
+#### Capture target options
+
+```
 Capture target options:
-    -captureall                Record all processes (default).
-    -process_name [exe name]   Record only the named process. If multiple processes with
-                               the same image name are running, it is undefined which one
-                               will be recorded. This argument can be repeated to capture
-                               more than one process at the same time.
-    -process_id [integer]      Record only the process specified by ID.
-    -etl_file [path]           Consume events from an ETL file instead of running processes.
+  -captureall               Record all processes (default).
+  -process_name [exe name]  Record only processes with the provided name. This
+                            argument can be repeated to capture multiple
+                            processes.
+  -exclude [exe name]       Don't record specific process specified by name.
+                            This argument can be repeated to exclude multiple
+                            processes.
+  -process_id [integer]     Record only the process specified by ID.
+  -etl_file [path]          Consume events from an ETL file instead of running
+                            processes.
 
-Output options:
-    -no_csv                    Do not create any output file.
-    -output_file [path]        Write CSV output to specified path. See below for defaults.
-    -multi_csv                 Create a separate CSV file for each captured process.
+Output options (see README for file naming defaults):
+  -output_file [path]       Write CSV output to specified path.
+  -multi_csv                Create a separate CSV file for each captured
+                            process.
+  -no_csv                   Do not create any output file.
+  -no_top                   Don't display active swap chains in the console
+                            window.
 
-Control and filtering options:
-    -exclude [exe name]        Don't record specific process specified by name; this argument can be
-                               repeated to exclude multiple processes.
-    -scroll_toggle             Only record events while scroll lock is enabled.
-    -scroll_indicator          Set scroll lock while recording events.
-    -hotkey [key]              Use specified key to start and stop recording, writing to a
-                               unique file each time (default is F11).
-    -delay [seconds]           Wait for specified time before starting to record. When using
-                               -hotkey, delay occurs each time recording is started.
-    -timed [seconds]           Stop recording after the specified amount of time.  PresentMon will exit
-                               timer expires.
-    -exclude_dropped           Exclude dropped presents from the csv output.
-    -terminate_on_proc_exit    Terminate PresentMon when all instances of the specified process exit.
-    -terminate_after_timed     Terminate PresentMon after the timed trace, specified using -timed, completes.
-    -simple                    Disable advanced tracking (try this if you encounter crashes).
-    -verbose                   Adds additional data to output not relevant to normal usage.
-    -dont_restart_as_admin     Don't try to elevate privilege.
-    -no_top                    Don't display active swap chains in the console window.
-    -session_name [name]       Use the specified name to start a new realtime ETW session, instead
-                               of the default "PresentMon". This can be used to start multiple
-                               realtime capture process at the same time (using distinct names).
-                               A realtime PresentMon capture cannot start if there are any
-                               existing sessions with the same name.
-    -stop_existing_session     If a trace session with the same name is already running, stop
-                               the existing session (to allow this one to proceed).
-    -include_mixed_reality     [Beta] Include Windows Mixed Reality data. If enabled, writes csv output
-                               to a separate file (with "_WMR" suffix).
+Recording options:
+  -hotkey [key]             Use specified key to start and stop recording,
+                            writing to a unique CSV file each time. 'key' is of
+                            the form MODIFIER+KEY, e.g., alt+shift+f11. (See
+                            README for subsequent file naming).
+  -delay [seconds]          Wait for specified time before starting to record.
+                            If using -hotkey, delay occurs each time recording
+                            is started.
+  -timed [seconds]          Stop recording after the specified amount of time.
+  -exclude_dropped          Exclude dropped presents from the csv output.
+  -scroll_toggle            Only record events while scroll lock is enabled.
+  -scroll_indicator         Enable scroll lock while recording.
+  -simple                   Disable GPU/display tracking.
+  -verbose                  Adds additional data to output not relevant to
+                            normal usage.
+
+Execution options:
+  -session_name [name]      Use the specified name to start a new realtime ETW
+                            session, instead of the default "PresentMon". This
+                            can be used to start multiple realtime capture
+                            process at the same time (using distinct names). A
+                            realtime PresentMon capture cannot start if there
+                            are any existing sessions with the same name.
+  -stop_existing_session    If a trace session with the same name is already
+                            running, stop the existing session (to allow this
+                            one to proceed).
+  -dont_restart_as_admin    Don't try to elevate privilege.
+  -terminate_on_proc_exit   Terminate PresentMon when all the target processes
+                            have exited.
+  -terminate_after_timed    When using -timed, terminate PresentMon after the
+                            timed capture completes.
+
+Beta options:
+  -include_mixed_reality    Capture Windows Mixed Reality data to a CSV file
+                            with "_WMR" suffix.
 ```
 
 ## Comma-separated value (CSV) file output
