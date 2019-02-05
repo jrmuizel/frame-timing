@@ -226,7 +226,6 @@ static void PrintHelp()
                                     " If using -hotkey, delay occurs each time recording is started.",
         "-timed [seconds]",         "Stop recording after the specified amount of time.",
         "-exclude_dropped",         "Exclude dropped presents from the csv output.",
-        "-scroll_toggle",           "Only record events while scroll lock is enabled.",
         "-scroll_indicator",        "Enable scroll lock while recording.",
         "-simple",                  "Disable GPU/display tracking.",
         "-verbose",                 "Adds additional data to output not relevant to normal usage.",
@@ -306,7 +305,6 @@ bool ParseCommandLine(int argc, char** argv)
     args->mHotkeyModifiers = MOD_NOREPEAT;
     args->mHotkeyVirtualKeyCode = 0;
     args->mOutputFile = true;
-    args->mScrollLockToggle = false;
     args->mScrollLockIndicator = false;
     args->mExcludeDropped = false;
     args->mVerbosity = Verbosity::Normal;
@@ -362,7 +360,6 @@ bool ParseCommandLine(int argc, char** argv)
         else ARG2("-delay",                  args->mDelay                      = atou(argv[i]))
         else ARG2("-timed",                  args->mTimer                      = atou(argv[i]))
         else ARG1("-exclude_dropped",        args->mExcludeDropped             = true)
-        else ARG1("-scroll_toggle",          args->mScrollLockToggle           = true)
         else ARG1("-scroll_indicator",       args->mScrollLockIndicator        = true)
         else ARG1("-simple",                 simple                            = true)
         else ARG1("-verbose",                verbose                           = true)
@@ -390,8 +387,10 @@ bool ParseCommandLine(int argc, char** argv)
     }
 
     if (args->mHotkeySupport) {
-        if ((args->mHotkeyModifiers & MOD_CONTROL) != 0 && args->mHotkeyVirtualKeyCode == 0x44 /*C*/) {
-            fprintf(stderr, "error: 'CTRL+C' cannot be used as a -hotkey, it is reserved for terminating the trace.\n");
+        if ((args->mHotkeyModifiers & MOD_CONTROL) != 0 && (
+            args->mHotkeyVirtualKeyCode == 0x44 /*C*/ ||
+            args->mHotkeyVirtualKeyCode == VK_SCROLL)) {
+            fprintf(stderr, "error: CTRL+C or CTRL+SCROLL cannot be used as a -hotkey, they are reserved for terminating the trace.\n");
             PrintHelp();
             return false;
         }

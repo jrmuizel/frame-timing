@@ -75,7 +75,6 @@ Recording options:
                             is started.
   -timed [seconds]          Stop recording after the specified amount of time.
   -exclude_dropped          Exclude dropped presents from the csv output.
-  -scroll_toggle            Only record events while scroll lock is enabled.
   -scroll_indicator         Enable scroll lock while recording.
   -simple                   Disable GPU/display tracking.
   -verbose                  Adds additional data to output not relevant to

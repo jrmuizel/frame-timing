@@ -32,11 +32,24 @@ enum {
 
 static HWND gWnd = NULL;
 static bool gIsRecording = false;
+static uint32_t gHotkeyIgnoreCount = 0;
 
 static bool EnableScrollLock(bool enable)
 {
+    auto const& args = GetCommandLineArgs();
+
     auto enabled = (GetKeyState(VK_SCROLL) & 1) == 1;
     if (enabled != enable) {
+        // If the hotkey is SCROLLLOCK, SendInput() will cause the hotkey to
+        // trigger (entering an infinite recording toggle loop) so note that
+        // the message handler should ignore one of them.
+        if (args.mHotkeySupport &&
+            args.mHotkeyVirtualKeyCode == VK_SCROLL &&
+            args.mHotkeyModifiers == MOD_NOREPEAT) {
+            gHotkeyIgnoreCount += 1;
+        }
+
+        // Send SCROLLLOCK press message.
         auto extraInfo = GetMessageExtraInfo();
         INPUT input[2] = {};
 
@@ -145,6 +158,11 @@ static LRESULT CALLBACK HandleWindowMessage(HWND hWnd, UINT uMsg, WPARAM wParam,
         break;
 
     case WM_HOTKEY:
+        if (gHotkeyIgnoreCount > 0) {
+            gHotkeyIgnoreCount -= 1;
+            break;
+        }
+
         if (IsRecording()) {
             StopRecording();
         } else if (args.mDelay == 0) {

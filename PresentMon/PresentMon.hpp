@@ -67,7 +67,6 @@ struct CommandLineArgs {
     UINT mHotkeyVirtualKeyCode;
     Verbosity mVerbosity;
     bool mOutputFile;
-    bool mScrollLockToggle;
     bool mScrollLockIndicator;
     bool mExcludeDropped;
     bool mSimpleConsole;
