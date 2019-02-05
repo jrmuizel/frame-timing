@@ -193,9 +193,6 @@ int main(int argc, char** argv)
 
     int ret = 0;
 
-    // Set console title to command line arguments
-    SetConsoleTitle(argc, argv);
-
     // If the user wants to use the scroll lock key as an indicator of when
     // present mon is recording events, make sure it is disabled to start.
     auto const& args = GetCommandLineArgs();

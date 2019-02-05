@@ -68,9 +68,7 @@ struct CommandLineArgs {
     bool mStopExistingSession;
 };
 
-void SetConsoleTitle(int argc, char** argv);
 bool EnableScrollLock(bool enable);
-
 
 struct SwapChainData {
     Runtime mRuntime = Runtime::Other;

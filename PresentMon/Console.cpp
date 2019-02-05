@@ -22,43 +22,6 @@ SOFTWARE.
 
 #include "PresentMon.hpp"
 
-static bool CombineArguments(
-    int argc,
-    char** argv,
-    char* out,
-    size_t outSize)
-{
-    size_t idx = 0;
-    for (int i = 1; i < argc && idx < outSize; ++i) {
-        if (idx >= outSize) {
-            return false; // was truncated
-        }
-
-        if (argv[i][0] != '\"' && strchr(argv[i], ' ')) {
-            idx += snprintf(out + idx, outSize - idx, " \"%s\"", argv[i]);
-        } else {
-            idx += snprintf(out + idx, outSize - idx, " %s", argv[i]);
-        }
-    }
-
-    return true;
-}
-
-void SetConsoleTitle(
-    int argc,
-    char** argv)
-{
-    char args[MAX_PATH] = "PresentMon";
-    size_t idx = strlen(args);
-    if (!CombineArguments(argc, argv, args + idx, MAX_PATH - idx)) {
-        args[MAX_PATH - 4] = '.';
-        args[MAX_PATH - 3] = '.';
-        args[MAX_PATH - 2] = '.';
-    }
-
-    SetConsoleTitleA(args);
-}
-
 void SetConsoleText(const char *text)
 {
     HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
