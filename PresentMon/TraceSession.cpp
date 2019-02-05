@@ -34,6 +34,7 @@ static PMTraceConsumer* gPMConsumer = nullptr;
 static MRTraceConsumer* gMRConsumer = nullptr;
 static uint64_t gQpcTraceStart = 0;
 static uint64_t gQpcFrequency = 0;
+static ULONG gContinueProcessingBuffers = TRUE;
 
 static bool EnableProviders()
 {
@@ -128,15 +129,10 @@ static void CALLBACK EventRecordCallback(EVENT_RECORD* pEventRecord)
 static ULONG CALLBACK BufferCallback(EVENT_TRACE_LOGFILEA* pLogFile)
 {
     (void) pLogFile;
-
-    if (EtwThreadsShouldQuit()) {
-        return FALSE; // break out of ProcessTrace()
-    }
-
-    return TRUE; // continue processing events
+    return gContinueProcessingBuffers; // TRUE = continue processing events, FALSE = return out of ProcessTrace()
 }
 
-bool StartTraceSession(TRACEHANDLE* traceHandle)
+bool StartTraceSession()
 {
     auto const& args = GetCommandLineArgs();
     auto simple = args.mVerbosity == Verbosity::Simple;
@@ -245,7 +241,7 @@ bool StartTraceSession(TRACEHANDLE* traceHandle)
 
     // Enable desired providers
     if (!EnableProviders()) {
-        FinalizeTraceSession();
+        StopTraceSession();
         return false;
     }
 
@@ -263,19 +259,23 @@ bool StartTraceSession(TRACEHANDLE* traceHandle)
         default:                      fprintf(stderr, " (error=%u)", lastError); break;
         }
         fprintf(stderr, ".\n");
-        FinalizeTraceSession();
+        StopTraceSession();
         return false;
     }
 
     // -------------------------------------------------------------------------
-    // Store/return trace properties
+    // Store trace properties
     gQpcFrequency = traceProps.LogfileHeader.PerfFreq.QuadPart;
-    *traceHandle = gTraceHandle;
 
     // Use current time as start for realtime traces (instead of the first event time)
     if (!args.mEtlFileName) {
         QueryPerformanceCounter((LARGE_INTEGER*) &gQpcTraceStart);
     }
+
+    // -------------------------------------------------------------------------
+    // Start the consumer and output threads
+    StartConsumerThread(gTraceHandle);
+    StartOutputThread();
 
     return true;
 }
@@ -284,6 +284,16 @@ void StopTraceSession()
 {
     ULONG status = 0;
 
+    // If collecting realtime events, CloseTrace() will cause ProcessTrace() to
+    // stop filling buffers and it will return after it finishes processing
+    // events already in it's buffers.
+    //
+    // If collecting from a log file, ProcessTrace() will continue to process
+    // the entire file though, which is why we cancel the processing from the
+    // BufferCallback in this case.
+    gContinueProcessingBuffers = FALSE;
+
+    // Shutdown the trace and session.
     status = CloseTrace(gTraceHandle);
     gTraceHandle = INVALID_PROCESSTRACE_HANDLE;
 
@@ -294,12 +304,13 @@ void StopTraceSession()
     sessionProps.LoggerNameOffset = offsetof(TraceProperties, mSessionName);
     status = ControlTraceW(gSessionHandle, nullptr, &sessionProps, EVENT_TRACE_CONTROL_STOP);
     gSessionHandle = 0;
-}
 
-void FinalizeTraceSession()
-{
-    StopTraceSession();
+    // Wait for the consumer and output threads to end (which are using the
+    // consumers).
+    WaitForConsumerThreadToExit();
+    StopOutputThread();
 
+    // Destruct the consumers
     delete gMRConsumer;
     delete gPMConsumer;
     gMRConsumer = nullptr;

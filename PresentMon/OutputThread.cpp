@@ -20,10 +20,80 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+#include "PresentMon.hpp"
+
 #include <algorithm>
 #include <shlwapi.h>
+#include <thread>
 
-#include "PresentMon.hpp"
+static std::thread gThread;
+static bool gQuit = false;
+
+// When we collect realtime ETW events, we don't receive the events in real
+// time but rather sometime after they occur.  Since the user might be toggling
+// recording based on realtime cues (e.g., watching the target application) we
+// maintain a history of realtime record toggle events from the user.  When we
+// consider recording an event, we can look back and see what the recording
+// state was at the time the event actually occurred.
+//
+// gRecordingToggleHistory is a vector of QueryPerformanceCounter() values at
+// times when the recording state changed, and gIsRecording is the recording
+// state at the current time.
+//
+// CRITICAL_SECTION used as this is expected to have low contention (e.g., *no*
+// contention when capturing from ETL).
+
+static CRITICAL_SECTION gRecordingToggleCS;
+static std::vector<uint64_t> gRecordingToggleHistory;
+static bool gIsRecording = false;
+
+void SetOutputRecordingState(bool record)
+{
+    auto const& args = GetCommandLineArgs();
+
+    if (gIsRecording == record) {
+        return;
+    }
+
+    // When capturing from an ETL file, just use the current recording state.
+    // It's not clear how best to map realtime to ETL QPC time, and there
+    // aren't any realtime cues in this case.
+    if (args.mEtlFileName != nullptr) {
+        EnterCriticalSection(&gRecordingToggleCS);
+        gIsRecording = record;
+        LeaveCriticalSection(&gRecordingToggleCS);
+        return;
+    }
+
+    uint64_t qpc = 0;
+    QueryPerformanceCounter((LARGE_INTEGER*) &qpc);
+
+    EnterCriticalSection(&gRecordingToggleCS);
+    gRecordingToggleHistory.emplace_back(qpc);
+    gIsRecording = record;
+    LeaveCriticalSection(&gRecordingToggleCS);
+}
+
+static bool CopyRecordingToggleHistory(std::vector<uint64_t>* recordingToggleHistory)
+{
+    EnterCriticalSection(&gRecordingToggleCS);
+    recordingToggleHistory->assign(gRecordingToggleHistory.begin(), gRecordingToggleHistory.end());
+    auto isRecording = gIsRecording;
+    LeaveCriticalSection(&gRecordingToggleCS);
+
+    auto recording = recordingToggleHistory->size() + (isRecording ? 1 : 0);
+    return (recording & 1) == 1;
+}
+
+// Remove recording toggle events that we've processed.
+static void UpdateRecordingToggles(size_t nextIndex)
+{
+    if (nextIndex > 0) {
+        EnterCriticalSection(&gRecordingToggleCS);
+        gRecordingToggleHistory.erase(gRecordingToggleHistory.begin(), gRecordingToggleHistory.begin() + nextIndex);
+        LeaveCriticalSection(&gRecordingToggleCS);
+    }
+}
 
 template <typename Map, typename F>
 static void map_erase_if(Map& m, F pred)
@@ -82,8 +152,7 @@ static void TerminateProcess(PresentMonData& pm, ProcessInfo const& proc)
     if (args.mTerminateOnProcExit) {
         pm.mTerminationProcessCount -= 1;
         if (pm.mTerminationProcessCount == 0) {
-            PostStopRecording();
-            PostQuitProcess();
+            ExitMainThread();
         }
     }
 }
@@ -167,6 +236,15 @@ static ProcessInfo* StartProcessIfNew(PresentMonData& pm, uint32_t processId, ui
     return StartNewProcess(pm, proc, processId, imageFileName, now);
 }
 
+static void UpdateNTProcesses(PresentMonData& pmData, uint64_t updateTime, std::vector<NTProcessEvent> const& ntProcessEvents)
+{
+    for (auto ntProcessEvent : ntProcessEvents) {
+        if (!ntProcessEvent.ImageFileName.empty()) { // Empty ImageFileName indicates the process terminated
+            StartProcess(pmData, ntProcessEvent.ProcessId, ntProcessEvent.ImageFileName, updateTime);
+        }
+    }
+}
+
 static bool UpdateProcessInfo_Realtime(PresentMonData& pm, ProcessInfo& info, uint64_t now, uint32_t thisPid)
 {
     // Check periodically if the process has exited
@@ -209,208 +287,243 @@ static bool UpdateProcessInfo_Realtime(PresentMonData& pm, ProcessInfo& info, ui
     return true;
 }
 
-void AddPresent(PresentMonData& pm, PresentEvent& p, uint64_t now)
+static void AddPresents(PresentMonData& pm, uint64_t updateTime, std::vector<std::shared_ptr<PresentEvent>> const& presentEvents, size_t* presentEventIndex,
+                        bool recording, bool checkStopQpc, uint64_t stopQpc, bool* hitStopQpc)
 {
-    auto proc = StartProcessIfNew(pm, p.ProcessId, now);
-    if (proc == nullptr) {
-        return; // process is not a target
+    auto i = *presentEventIndex;
+    for (auto n = presentEvents.size(); i < n; ++i) {
+        auto presentEvent = presentEvents[i];
+
+        // Stop processing events if we hit the next stop time.
+        if (checkStopQpc && presentEvent->QpcTime >= stopQpc) {
+            *hitStopQpc = true;
+            break;
+        }
+
+        auto proc = StartProcessIfNew(pm, presentEvent->ProcessId, updateTime);
+        if (proc == nullptr) {
+            continue; // process is not a target
+        }
+
+        auto& chain = proc->mChainMap[presentEvent->SwapChainAddress];
+        chain.AddPresentToSwapChain(*presentEvent);
+
+        if (recording) {
+            UpdateCSV(pm, proc, chain, *presentEvent);
+        }
+
+        chain.UpdateSwapChainInfo(*presentEvent, updateTime);
     }
 
-    auto& chain = proc->mChainMap[p.SwapChainAddress];
-    chain.AddPresentToSwapChain(p);
-
-    UpdateCSV(pm, proc, chain, p);
-
-    chain.UpdateSwapChainInfo(p, now);
+    *presentEventIndex = i;
 }
 
-void AddLateStageReprojection(PresentMonData& pm, LateStageReprojectionData& lsr, LateStageReprojectionEvent& p, uint64_t now)
+static void AddPresents(PresentMonData& pm, uint64_t updateTime, LateStageReprojectionData* lsrData,
+                        std::vector<std::shared_ptr<LateStageReprojectionEvent>> const& presentEvents, size_t* presentEventIndex,
+                        bool recording, bool checkStopQpc, uint64_t stopQpc, bool* hitStopQpc)
 {
     auto const& args = GetCommandLineArgs();
 
-    const uint32_t appProcessId = p.GetAppProcessId();
-    auto proc = StartProcessIfNew(pm, appProcessId, now);
-    if (proc == nullptr) {
-        return; // process is not a target
+    auto i = *presentEventIndex;
+    for (auto n = presentEvents.size(); i < n; ++i) {
+        auto presentEvent = presentEvents[i];
+
+        // Stop processing events if we hit the next stop time.
+        if (checkStopQpc && presentEvent->QpcTime >= stopQpc) {
+            *hitStopQpc = true;
+            break;
+        }
+
+        const uint32_t appProcessId = presentEvent->GetAppProcessId();
+        auto proc = StartProcessIfNew(pm, appProcessId, updateTime);
+        if (proc == nullptr) {
+            continue; // process is not a target
+        }
+
+        if ((args.mVerbosity > Verbosity::Simple) && (appProcessId == 0)) {
+            continue; // Incomplete event data
+        }
+
+        lsrData->AddLateStageReprojection(*presentEvent);
+
+        if (recording) {
+            UpdateLSRCSV(pm, *lsrData, proc, *presentEvent);
+        }
+
+        lsrData->UpdateLateStageReprojectionInfo(updateTime);
     }
 
-    if ((args.mVerbosity > Verbosity::Simple) && (appProcessId == 0)) {
-        return; // Incomplete event data
-    }
-
-    lsr.AddLateStageReprojection(p);
-
-    UpdateLSRCSV(pm, lsr, proc, p);
-
-    lsr.UpdateLateStageReprojectionInfo(now);
+    *presentEventIndex = i;
 }
 
-void PresentMon_Update(PresentMonData& pm, LateStageReprojectionData& lsr, std::vector<std::shared_ptr<PresentEvent>>& presents, std::vector<std::shared_ptr<LateStageReprojectionEvent>>& lsrs, uint64_t now)
+static void ProcessEvents(
+    PresentMonData& pmData,
+    uint64_t updateTime,
+    LateStageReprojectionData* lsrData,
+    std::vector<NTProcessEvent>* ntProcessEvents,
+    std::vector<std::shared_ptr<PresentEvent>>* presentEvents,
+    std::vector<std::shared_ptr<LateStageReprojectionEvent>>* lsrEvents,
+    std::vector<uint64_t>* recordingToggleHistory)
 {
     auto const& args = GetCommandLineArgs();
 
-    // store the new presents into processes
-    for (auto& p : presents)
-    {
-        AddPresent(pm, *p, now);
+    // Copy any analyzed information from ConsumerThread.
+    DequeueAnalyzedInfo(ntProcessEvents, presentEvents, lsrEvents);
+
+    // Copy the record range history form the MainThread.
+    auto recording = CopyRecordingToggleHistory(recordingToggleHistory);
+
+    // Process NTProcess events. We don't have to worry about the recording
+    // toggles here because NTProcess events are only captured when parsing ETL
+    // files, and we don't use recording toggle history for ETL files.
+    UpdateNTProcesses(pmData, updateTime, *ntProcessEvents);
+
+    // Next, iterate through the recording toggles (if any)...
+    size_t presentEventIndex = 0;
+    size_t lsrEventIndex = 0;
+    size_t recordingToggleIndex = 0;
+    for (;;) {
+        auto checkRecordingToggle   = recordingToggleIndex < recordingToggleHistory->size();
+        auto nextRecordingToggleQpc = checkRecordingToggle ? (*recordingToggleHistory)[recordingToggleIndex] : 0ull;
+        auto hitNextRecordingToggle = false;
+
+        // Process present events up until the next recording toggle.  If
+        // we reached the toggle, handle it and continue.  Otherwise, we're
+        // done handling all the events (and any outstanding toggles will
+        // have to wait for next batch of events).
+        AddPresents(pmData, updateTime, *presentEvents, &presentEventIndex, recording, checkRecordingToggle, nextRecordingToggleQpc, &hitNextRecordingToggle);
+        AddPresents(pmData, updateTime, lsrData, *lsrEvents, &lsrEventIndex, recording, checkRecordingToggle, nextRecordingToggleQpc, &hitNextRecordingToggle);
+        if (!hitNextRecordingToggle) {
+            break;
+        }
+
+        // Toggle recording.
+        recordingToggleIndex += 1;
+        recording = !recording;
     }
 
-    // store the new lsrs
-    for (auto& p : lsrs)
-    {
-        AddLateStageReprojection(pm, lsr, *p, now);
-    }
-
-    // Update realtime process info
+    // Update realtime process info.
     if (!args.mEtlFileName) {
         std::vector<std::map<uint32_t, ProcessInfo>::iterator> remove;
-        for (auto ii = pm.mProcessMap.begin(), ie = pm.mProcessMap.end(); ii != ie; ++ii) {
-            if (!UpdateProcessInfo_Realtime(pm, ii->second, now, ii->first)) {
+        for (auto ii = pmData.mProcessMap.begin(), ie = pmData.mProcessMap.end(); ii != ie; ++ii) {
+            if (!UpdateProcessInfo_Realtime(pmData, ii->second, updateTime, ii->first)) {
                 remove.emplace_back(ii);
             }
         }
         for (auto ii : remove) {
-            StopProcess(pm, ii);
+            StopProcess(pmData, ii);
         }
     }
 
-    // Display information to console
+    // Display information to console if requested.  If debug build and simple
+    // console, print a heartbeat if recording.
+    //
+    // gIsRecording is the real timeline recording state.  Because we're just
+    // reading it without correlation to gRecordingToggleHistory, we don't need
+    // the critical section.
+    auto realtimeRecording = gIsRecording;
     if (!args.mSimpleConsole) {
         std::string display;
-        UpdateConsole(pm, now, &display);
-        UpdateConsole(pm, lsr, now, &display);
+        UpdateConsole(pmData, updateTime, &display);
+        UpdateConsole(pmData, *lsrData, updateTime, &display);
         SetConsoleText(display.c_str());
+
+        if (realtimeRecording) {
+            printf("** RECORDING **\n");
+        }
     }
+#if _DEBUG
+    else if (realtimeRecording) {
+        printf(".");
+    }
+#endif
+
+    // Update tracking information.
+    for (auto ntProcessEvent : *ntProcessEvents) {
+        if (ntProcessEvent.ImageFileName.empty()) { // Empty ImageFileName indicates the process terminated
+            StopProcess(pmData, ntProcessEvent.ProcessId);
+        }
+    }
+
+    // Clear events processed.
+    ntProcessEvents->clear();
+    presentEvents->clear();
+    lsrEvents->clear();
+
+    // Finished processing all events.  Erase the recording toggles that were
+    // handled.
+    UpdateRecordingToggles(recordingToggleIndex);
 }
 
-void PresentMon_Shutdown(PresentMonData& pm, uint32_t totalEventsLost, uint32_t totalBuffersLost)
+void Output()
 {
     auto const& args = GetCommandLineArgs();
 
-    CloseCSVs(pm, totalEventsLost, totalBuffersLost);
+    // Structures to track processes and statistics from recorded events.
+    PresentMonData pmData;
+    LateStageReprojectionData lsrData;
 
-    pm.mProcessMap.clear();
+    // Create any CSV files that don't need process info to be created
+    CreateNonProcessCSVs(pmData);
+
+    // Enter loop to consume collected events.
+    std::vector<NTProcessEvent> ntProcessEvents;
+    std::vector<std::shared_ptr<PresentEvent>> presentEvents;
+    std::vector<std::shared_ptr<LateStageReprojectionEvent>> lsrEvents;
+    std::vector<uint64_t> recordingToggleHistory;
+    ntProcessEvents.reserve(128);
+    presentEvents.reserve(4096);
+    lsrEvents.reserve(4096);
+    recordingToggleHistory.reserve(16);
+    for (;;) {
+        // Read gQuit here, but then check it after processing queued events.
+        // This ensures that we call DequeueAnalyzedInfo() at least once after
+        // events have stopped being collected so that all events are included.
+        auto quit = gQuit;
+
+        // Copy and process all the collected events, and update the various
+        // tracking and statistics data structures.
+        uint64_t updateTime = GetTickCount64();
+        ProcessEvents(pmData, updateTime, &lsrData, &ntProcessEvents, &presentEvents, &lsrEvents, &recordingToggleHistory);
+
+        // Any CSV data would have been written out at this point, so if we're
+        // quiting we don't need to update the rest.
+        if (quit) {
+            break;
+        }
+
+        // Sleep to reduce overhead.
+        Sleep(100);
+    }
+
+    // Shut down output.
+    uint32_t eventsLost = 0;
+    uint32_t buffersLost = 0;
+    CheckLostReports(&eventsLost, &buffersLost);
+
+    CloseCSVs(pmData, eventsLost, buffersLost);
+
+    pmData.mProcessMap.clear();
 
     if (args.mSimpleConsole == false) {
         SetConsoleText("");
     }
 }
 
-void EtwConsumingThread()
+void StartOutputThread()
 {
-    auto const& args = GetCommandLineArgs();
+    InitializeCriticalSection(&gRecordingToggleCS);
 
-    Sleep(args.mDelay * 1000);
-    if (EtwThreadsShouldQuit()) {
-        return;
-    }
+    gThread = std::thread(Output);
+}
 
-    TRACEHANDLE traceHandle = INVALID_PROCESSTRACE_HANDLE;
-    if (!StartTraceSession(&traceHandle)) {
-        PostStopRecording();
-        PostQuitProcess();
-        return;
-    }
+void StopOutputThread()
+{
+    if (gThread.joinable()) {
+        gQuit = true;
+        gThread.join();
 
-    if (args.mSimpleConsole) {
-        printf("Started recording.\n");
-    }
-    if (args.mScrollLockIndicator) {
-        EnableScrollLock(true);
-    }
-
-    {
-        // Launch the ETW producer thread
-        StartConsumerThread(traceHandle);
-
-        // Consume / Update based on the ETW output
-        {
-            PresentMonData pmData;
-            LateStageReprojectionData lsrData;
-
-            // Create any CSV files that don't need process info to be created
-            CreateNonProcessCSVs(pmData);
-
-            auto timerRunning = args.mTimer > 0;
-            auto timerEnd = GetTickCount64() + args.mTimer * 1000;
-
-            std::vector<std::shared_ptr<PresentEvent>> presents;
-            std::vector<std::shared_ptr<LateStageReprojectionEvent>> lsrs;
-            std::vector<NTProcessEvent> ntProcessEvents;
-
-            uint32_t totalEventsLost = 0;
-            uint32_t totalBuffersLost = 0;
-            for (;;) {
-#if _DEBUG
-                if (args.mSimpleConsole) {
-                    printf(".");
-                }
-#endif
-
-                presents.clear();
-                lsrs.clear();
-                ntProcessEvents.clear();
-
-                uint64_t now = GetTickCount64();
-
-                // Dequeue any captured events
-                DequeueAnalyzedInfo(&ntProcessEvents, &presents, &lsrs);
-
-                // Process captured NTProcess events; if ImageFileName is
-                // empty then the process stopped, otherwise it started.
-                for (auto ntProcessEvent : ntProcessEvents) {
-                    if (!ntProcessEvent.ImageFileName.empty()) {
-                        StartProcess(pmData, ntProcessEvent.ProcessId, ntProcessEvent.ImageFileName, now);
-                    }
-                }
-
-                if (args.mScrollLockToggle && (GetKeyState(VK_SCROLL) & 1) == 0) {
-                    presents.clear();
-                    lsrs.clear();
-                }
-
-                auto doneProcessingEvents = EtwThreadsShouldQuit();
-                PresentMon_Update(pmData, lsrData, presents, lsrs, now);
-
-                for (auto ntProcessEvent : ntProcessEvents) {
-                    if (ntProcessEvent.ImageFileName.empty()) {
-                        StopProcess(pmData, ntProcessEvent.ProcessId);
-                    }
-                }
-
-                if (timerRunning) {
-                    if (GetTickCount64() >= timerEnd) {
-                        PostStopRecording();
-                        if (args.mTerminateAfterTimer) {
-                            PostQuitProcess();
-                        }
-                        timerRunning = false;
-                    }
-                }
-
-                if (doneProcessingEvents) {
-                    break;
-                }
-
-                Sleep(100);
-            }
-
-            uint32_t eventsLost = 0;
-            uint32_t buffersLost = 0;
-            CheckLostReports(&eventsLost, &buffersLost);
-            PresentMon_Shutdown(pmData, totalEventsLost, totalBuffersLost);
-        }
-
-        StopTraceSession();
-        WaitForConsumerThreadToExit();
-        FinalizeTraceSession();
-    }
-
-    if (args.mScrollLockIndicator) {
-        EnableScrollLock(false);
-    }
-    if (args.mSimpleConsole) {
-        printf("Stopping recording.\n");
+        DeleteCriticalSection(&gRecordingToggleCS);
     }
 }
 

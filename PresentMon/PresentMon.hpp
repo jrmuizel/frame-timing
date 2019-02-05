@@ -22,18 +22,30 @@ SOFTWARE.
 
 #pragma once
 
-#include <deque>
-#include <map>
-#include <mutex>
-#include <string>
-#include <unordered_map>
-#include <vector>
+/*
+ETW Architecture:
 
-#include <stdint.h>
-#include <stdio.h>
-#include <windows.h>
-#include <evntcons.h> // must be after windows.h
+    Controller -----> Trace Session <----- Providers (e.g., DXGI, D3D9, DXGK, DWM, Win32K)
+                           |
+                           \-------------> Consumers (e.g., ../PresentData/PresentMonTraceConsumer)
 
+PresentMon Architecture:
+
+    MainThread: starts and stops the trace session and coordinates user
+    interaction.
+
+    ConsumerThread: is controlled by the trace session, and collects and
+    analyzes ETW events.
+
+    OutputThread: is controlled by the trace session, and outputs analyzed
+    events to the CSV and/or console.
+
+The trace session and ETW analysis is always running, but whether or not
+collected data is written to the CSV file(s) is controlled by a recording state
+which is controlled from MainThread based on user input or timer.
+*/
+
+#include "../PresentData/MixedRealityTraceConsumer.hpp"
 #include "../PresentData/PresentMonTraceConsumer.hpp"
 
 enum class Verbosity {
@@ -67,8 +79,6 @@ struct CommandLineArgs {
     bool mMultiCsv;
     bool mStopExistingSession;
 };
-
-bool EnableScrollLock(bool enable);
 
 struct SwapChainData {
     Runtime mRuntime = Runtime::Other;
@@ -114,12 +124,6 @@ struct PresentMonData {
 
 #include "LateStageReprojectionData.hpp"
 
-void EtwConsumingThread();
-
-bool EtwThreadsShouldQuit();
-void PostStopRecording();
-void PostQuitProcess();
-
 // CommandLine.cpp:
 bool ParseCommandLine(int argc, char** argv);
 CommandLineArgs const& GetCommandLineArgs();
@@ -138,19 +142,24 @@ void CreateNonProcessCSVs(PresentMonData& pm);
 void CreateProcessCSVs(PresentMonData& pm, ProcessInfo* proc, std::string const& imageFileName);
 void CloseCSVs(PresentMonData& pm, uint32_t totalEventsLost, uint32_t totalBuffersLost);
 void UpdateCSV(PresentMonData& pm, ProcessInfo* proc, SwapChainData const& chain, PresentEvent& p);
-
-// CsvOutput.cpp:
 const char* FinalStateToDroppedString(PresentResult res);
 const char* PresentModeToString(PresentMode mode);
 const char* RuntimeToString(Runtime rt);
+
+// MainThread.cpp:
+void ExitMainThread();
+
+// OutputThread.cpp:
+void StartOutputThread();
+void StopOutputThread();
+void SetOutputRecordingState(bool record);
 
 // Privilege.cpp:
 bool ElevatePrivilege(int argc, char** argv);
 
 // TraceSession.cpp:
-bool StartTraceSession(TRACEHANDLE* traceHandle);
+bool StartTraceSession();
 void StopTraceSession();
-void FinalizeTraceSession();
 void CheckLostReports(uint32_t* eventsLost, uint32_t* buffersLost);
 void DequeueAnalyzedInfo(
     std::vector<NTProcessEvent>* ntProcessEvents,

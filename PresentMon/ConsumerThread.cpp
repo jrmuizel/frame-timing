@@ -31,7 +31,7 @@ static void Consume(TRACEHANDLE traceHandle)
     // You must call OpenTrace() prior to calling this function
     //
     // ProcessTrace() blocks the calling thread until it
-    //     1) delivers all events, or
+    //     1) delivers all events in a trace log file, or
     //     2) the BufferCallback function returns FALSE, or
     //     3) you call CloseTrace(), or
     //     4) the controller stops the trace session.
@@ -48,12 +48,12 @@ static void Consume(TRACEHANDLE traceHandle)
     auto status = ProcessTrace(&traceHandle, 1, NULL, NULL);
     (void) status;
 
-    // If ProcessTrace() finished on it's own signal MainThread to shut
-    // everything down.
-    if (!EtwThreadsShouldQuit()) {
-        PostStopRecording();
-        PostQuitProcess();
-    }
+    // Signal MainThread to exit.  This is only needed if we are processing an
+    // ETL file and ProcessTrace() returned because the ETL is done, but there
+    // is no harm in calling ExitMainThread() if MainThread is already exiting
+    // (and caused ProcessTrace() to exit via 2, 3, or 4 above) because the
+    // message queue isn't beeing listened too anymore in that case.
+    ExitMainThread();
 }
 
 void StartConsumerThread(TRACEHANDLE traceHandle)
@@ -63,6 +63,7 @@ void StartConsumerThread(TRACEHANDLE traceHandle)
 
 void WaitForConsumerThreadToExit()
 {
-    assert(gThread.joinable());
-    gThread.join();
+    if (gThread.joinable()) {
+        gThread.join();
+    }
 }

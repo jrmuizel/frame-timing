@@ -385,21 +385,11 @@ bool ParseCommandLine(int argc, char** argv)
     }
 
     // Validate command line arguments
-    if (args->mEtlFileName && args->mHotkeySupport) {
-        fprintf(stderr, "warning: -etl_file and -hotkey arguments are not compatible; ignoring -hotkey.\n");
-        args->mHotkeySupport = false;
-    }
-
     if (args->mMultiCsv && !args->mOutputFile) {
         args->mMultiCsv = false; // -multi_csv and -no_csv provided, don't need a warning on this one
     }
 
     if (args->mHotkeySupport) {
-        if (args->mTerminateOnProcExit) {
-            fprintf(stderr, "warning: PresentMon won't terminate if capture is not enabled by the hotkey at\n");
-            fprintf(stderr, "         the time the target process exits.\n");
-        }
-
         if ((args->mHotkeyModifiers & MOD_CONTROL) != 0 && args->mHotkeyVirtualKeyCode == 0x44 /*C*/) {
             fprintf(stderr, "error: 'CTRL+C' cannot be used as a -hotkey, it is reserved for terminating the trace.\n");
             PrintHelp();

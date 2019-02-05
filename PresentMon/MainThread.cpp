@@ -20,119 +20,20 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include <assert.h>
-#include <thread>
-
 #include "PresentMon.hpp"
-
-namespace {
 
 enum {
     HOTKEY_ID = 0x80,
 
-    WM_STOP_ETW_THREADS = WM_USER + 0,
+    // Timer ID's must be non-zero
+    DELAY_TIMER_ID = 1,
+    TIMED_TIMER_ID = 2,
 };
 
-HWND g_hWnd = 0;
-bool g_originalScrollLockEnabled = false;
+static HWND gWnd = NULL;
+static bool gIsRecording = false;
 
-std::thread g_EtwConsumingThread;
-bool g_StopEtwThreads = true;
-
-bool EtwThreadsRunning()
-{
-    return g_EtwConsumingThread.joinable();
-}
-
-void StartEtwThreads()
-{
-    assert(!EtwThreadsRunning());
-    assert(EtwThreadsShouldQuit());
-    g_StopEtwThreads = false;
-    g_EtwConsumingThread = std::thread(EtwConsumingThread);
-}
-
-void StopEtwThreads()
-{
-    assert(EtwThreadsRunning());
-    assert(g_StopEtwThreads == false);
-    g_StopEtwThreads = true;
-    g_EtwConsumingThread.join();
-    IncrementRecordingCount();
-}
-
-BOOL WINAPI ConsoleCtrlHandler(
-    _In_ DWORD dwCtrlType
-    )
-{
-    (void) dwCtrlType;
-
-    // PostStopRecording() won't work if user closed the window
-    if (EtwThreadsRunning()) {
-        assert(g_StopEtwThreads == false);
-        g_StopEtwThreads = true;
-        g_EtwConsumingThread.join();
-    }
-
-    PostQuitProcess();
-
-    return TRUE; // The signal was handled
-}
-
-LRESULT CALLBACK WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
-{
-    switch (uMsg) {
-    case WM_HOTKEY:
-        if (wParam == HOTKEY_ID) {
-            if (EtwThreadsRunning()) {
-                StopEtwThreads();
-            } else {
-                StartEtwThreads();
-            }
-        }
-        break;
-
-    case WM_STOP_ETW_THREADS:
-        if (EtwThreadsRunning()) {
-            StopEtwThreads();
-        }
-        break;
-    }
-
-    return DefWindowProc(hWnd, uMsg, wParam, lParam);
-}
-
-HWND CreateMessageQueue()
-{
-    WNDCLASSEXW Class = { sizeof(Class) };
-    Class.lpfnWndProc = WindowProc;
-    Class.lpszClassName = L"PresentMon";
-    if (!RegisterClassExW(&Class)) {
-        fprintf(stderr, "error: failed to register hotkey class.\n");
-        return 0;
-    }
-
-    HWND hWnd = CreateWindowExW(0, Class.lpszClassName, L"PresentMonWnd", 0, 0, 0, 0, 0, HWND_MESSAGE, 0, 0, nullptr);
-    if (!hWnd) {
-        fprintf(stderr, "error: failed to create hotkey window.\n");
-        return 0;
-    }
-
-    auto const& args = GetCommandLineArgs();
-    if (args.mHotkeySupport) {
-        if (!RegisterHotKey(hWnd, HOTKEY_ID, args.mHotkeyModifiers, args.mHotkeyVirtualKeyCode)) {
-            fprintf(stderr, "error: failed to register hotkey.\n");
-            DestroyWindow(hWnd);
-            return 0;
-        }
-    }
-
-    return hWnd;
-}
-
-}
-
-bool EnableScrollLock(bool enable)
+static bool EnableScrollLock(bool enable)
 {
     auto enabled = (GetKeyState(VK_SCROLL) & 1) == 1;
     if (enabled != enable) {
@@ -157,98 +58,198 @@ bool EnableScrollLock(bool enable)
     return enabled;
 }
 
-bool EtwThreadsShouldQuit()
+static bool IsRecording()
 {
-    return g_StopEtwThreads;
+    return gIsRecording;
 }
 
-void PostToggleRecording()
+static void StartRecording()
 {
     auto const& args = GetCommandLineArgs();
 
-    PostMessage(g_hWnd, WM_HOTKEY, HOTKEY_ID, args.mHotkeyModifiers & ~MOD_NOREPEAT);
+    assert(IsRecording() == false);
+    gIsRecording = true;
+
+    // Notify user we're recording
+    if (args.mSimpleConsole) {
+        printf("Started recording.\n");
+    }
+    if (args.mScrollLockIndicator) {
+        EnableScrollLock(true);
+    }
+
+    // Tell OutputThread to record
+    SetOutputRecordingState(true);
+
+    // Start -timed timer
+    if (args.mTimer > 0) {
+        SetTimer(gWnd, TIMED_TIMER_ID, args.mTimer * 1000, (TIMERPROC) nullptr);
+    }
 }
 
-void PostStopRecording()
+static void StopRecording()
 {
-    PostMessage(g_hWnd, WM_STOP_ETW_THREADS, 0, 0);
+    auto const& args = GetCommandLineArgs();
+
+    assert(IsRecording() == true);
+    gIsRecording = false;
+
+    // Stop time -timed timer if there is one
+    KillTimer(gWnd, TIMED_TIMER_ID);
+
+    // Tell OutputThread to stop recording
+    SetOutputRecordingState(false);
+
+    // Notify the user we're no longer recording
+    if (args.mScrollLockIndicator) {
+        EnableScrollLock(false);
+    }
+    if (args.mSimpleConsole) {
+        printf("Stopped recording.\n");
+    }
 }
 
-void PostQuitProcess()
+// Handle Ctrl events (CTRL_C_EVENT, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT,
+// CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT) by redirecting the termination into
+// a WM_QUIT message so that the shutdown code is still executed.
+static BOOL CALLBACK HandleCtrlEvent(DWORD ctrlType)
 {
-    PostMessage(g_hWnd, WM_QUIT, 0, 0);
+    (void) ctrlType;
+    if (IsRecording()) {
+        StopRecording();
+    }
+    ExitMainThread();
+    return TRUE; // The signal was handled, don't call any other handlers
+}
+
+// Handle window messages to toggle recording on/off
+static LRESULT CALLBACK HandleWindowMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    auto const& args = GetCommandLineArgs();
+
+    switch (uMsg) {
+    case WM_TIMER:
+        switch (wParam) {
+        case DELAY_TIMER_ID:
+            StartRecording();
+            KillTimer(hWnd, DELAY_TIMER_ID);
+            return 0;
+
+        case TIMED_TIMER_ID:
+            StopRecording();
+            if (args.mTerminateAfterTimer) {
+                ExitMainThread();
+            }
+            return 0;
+        }
+        break;
+
+    case WM_HOTKEY:
+        if (IsRecording()) {
+            StopRecording();
+        } else if (args.mDelay == 0) {
+            StartRecording();
+        } else {
+            SetTimer(hWnd, DELAY_TIMER_ID, args.mDelay * 1000, (TIMERPROC) nullptr);
+        }
+        return 0;
+    }
+
+    return DefWindowProc(hWnd, uMsg, wParam, lParam);
+}
+
+void ExitMainThread()
+{
+    PostMessage(gWnd, WM_QUIT, 0, 0);
 }
 
 int main(int argc, char** argv)
 {
-    // Parse command line arguments
+    // Parse command line arguments.
     if (!ParseCommandLine(argc, argv)) {
         return 1;
     }
 
-    // Attempt to elevate process privilege as necessary
+    auto const& args = GetCommandLineArgs();
+
+    // Attempt to elevate process privilege as necessary.
     if (!ElevatePrivilege(argc, argv)) {
-        return 0;
+        return 0;   // A new process was started, end this without reporting error.
+                    // TODO: Stay alive and pipe stderr / exit code
     }
 
-    int ret = 0;
+    // Create a message queue to handle the input messages.
+    WNDCLASSEXW wndClass = { sizeof(wndClass) };
+    wndClass.lpfnWndProc = HandleWindowMessage;
+    wndClass.lpszClassName = L"PresentMon";
+    if (!RegisterClassExW(&wndClass)) {
+        fprintf(stderr, "error: failed to register hotkey class.\n");
+        return 2;
+    }
+
+    gWnd = CreateWindowExW(0, wndClass.lpszClassName, L"PresentMonWnd", 0, 0, 0, 0, 0, HWND_MESSAGE, 0, 0, nullptr);
+    if (!gWnd) {
+        fprintf(stderr, "error: failed to create hotkey window.\n");
+        UnregisterClass(wndClass.lpszClassName, NULL);
+        return 3;
+    }
+
+    // Register the hotkey.
+    if (args.mHotkeySupport && !RegisterHotKey(gWnd, HOTKEY_ID, args.mHotkeyModifiers, args.mHotkeyVirtualKeyCode)) {
+        fprintf(stderr, "error: failed to register hotkey.\n");
+        DestroyWindow(gWnd);
+        UnregisterClass(wndClass.lpszClassName, NULL);
+        return 4;
+    }
+
+    // Set CTRL handler (note: must set gWnd before setting the handler).
+    SetConsoleCtrlHandler(HandleCtrlEvent, TRUE);
+
+    // Start the ETW trace session (including consumer and output threads).
+    if (!StartTraceSession()) {
+        SetConsoleCtrlHandler(HandleCtrlEvent, FALSE);
+        DestroyWindow(gWnd);
+        UnregisterClass(wndClass.lpszClassName, NULL);
+        return 5;
+    }
 
     // If the user wants to use the scroll lock key as an indicator of when
-    // present mon is recording events, make sure it is disabled to start.
-    auto const& args = GetCommandLineArgs();
-    if (args.mScrollLockIndicator) {
-        g_originalScrollLockEnabled = EnableScrollLock(false);
-    }
-
-    // Create a message queue to handle WM_HOTKEY, WM_STOP_ETW_THREADS, and
-    // WM_QUIT messages.
-    HWND hWnd = CreateMessageQueue();
-    if (hWnd == 0) {
-        ret = 2;
-        goto clean_up;
-    }
-
-    // Set CTRL handler to capture when the user tries to close the process by
-    // closing the console window or CTRL-C or similar.  The handler will
-    // ignore this and instead post WM_QUIT to our message queue.
-    //
-    // We must set g_hWnd before setting the handler.
-    g_hWnd = hWnd;
-    SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
+    // PresentMon is recording events, save the original state and set scroll
+    // lock to the recording state.
+    auto originalScrollLockEnabled = args.mScrollLockIndicator
+        ? EnableScrollLock(IsRecording())
+        : false;
 
     // If the user didn't specify -hotkey, simulate a hotkey press to start the
     // recording right away.
     if (!args.mHotkeySupport) {
-        PostToggleRecording();
+        PostMessage(gWnd, WM_HOTKEY, HOTKEY_ID, args.mHotkeyModifiers & ~MOD_NOREPEAT);
     }
 
-    // Enter the main thread message loop.  This thread will block waiting for
-    // any messages, which will control the hotkey-toggling and process
-    // shutdown.
+    // Enter the MainThread message loop.  This thread will block waiting for
+    // any window messages, dispatching the appropriate function to
+    // HandleWindowMessage(), and then blocking again until the WM_QUIT message
+    // arrives or the window is destroyed.
     for (MSG message = {};;) {
-        BOOL r = GetMessageW(&message, hWnd, 0, 0);
-        if (r == 0) { // Received WM_QUIT message
+        BOOL r = GetMessageW(&message, gWnd, 0, 0);
+        if (r == 0) { // Received WM_QUIT message.
             break;
         }
-        if (r == -1) { // Indicates error in message loop, e.g. hWnd is no
+        if (r == -1) { // Indicates error in message loop, e.g. gWnd is no
                        // longer valid. This can happen if PresentMon is killed.
-            if (EtwThreadsRunning()) {
-                StopEtwThreads();
-            }
             break;
         }
         TranslateMessage(&message);
         DispatchMessageW(&message);
     }
 
-    // Everything should be shutdown by now.
-    assert(!EtwThreadsRunning());
-
-clean_up:
-    // Restore original scroll lock state
+    // Shut everything down.
     if (args.mScrollLockIndicator) {
-        EnableScrollLock(g_originalScrollLockEnabled);
+        EnableScrollLock(originalScrollLockEnabled);
     }
-
-    return ret;
+    StopTraceSession();
+    SetConsoleCtrlHandler(HandleCtrlEvent, FALSE);
+    DestroyWindow(gWnd);
+    UnregisterClass(wndClass.lpszClassName, NULL);
+    return 0;
 }
