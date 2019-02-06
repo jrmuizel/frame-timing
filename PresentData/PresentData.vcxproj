@@ -103,21 +103,12 @@
       <SDLCheck>true</SDLCheck>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <TreatWarningAsError>true</TreatWarningAsError>
-      <AdditionalIncludeDirectories>$(WindowsSdkDir_10)Windows Performance Toolkit;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <TreatLinkerWarningAsErrors>true</TreatLinkerWarningAsErrors>
     </Link>
-    <PreBuildEvent>
-      <Command>
-            @if not exist "$(WindowsSdkDir_10)Windows Performance Toolkit\KernelTraceControl.h" @(
-                echo Could not find required components "$(WindowsSdkDir_10)Windows Performance Toolkit\KernelTraceControl.h"
-                echo Install the Windows Performance Toolkit from Microsoft to build PresentMon.
-                exit /b 1
-            )
-        </Command>
-    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -127,21 +118,12 @@
       <SDLCheck>true</SDLCheck>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <TreatWarningAsError>true</TreatWarningAsError>
-      <AdditionalIncludeDirectories>$(WindowsSdkDir_10)Windows Performance Toolkit;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <TreatLinkerWarningAsErrors>true</TreatLinkerWarningAsErrors>
     </Link>
-    <PreBuildEvent>
-      <Command>
-            @if not exist "$(WindowsSdkDir_10)Windows Performance Toolkit\KernelTraceControl.h" @(
-                echo Could not find required components "$(WindowsSdkDir_10)Windows Performance Toolkit\KernelTraceControl.h"
-                echo Install the Windows Performance Toolkit from Microsoft to build PresentMon.
-                exit /b 1
-            )
-        </Command>
-    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -153,7 +135,7 @@
       <SDLCheck>true</SDLCheck>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <TreatWarningAsError>true</TreatWarningAsError>
-      <AdditionalIncludeDirectories>$(WindowsSdkDir_10)Windows Performance Toolkit;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -161,15 +143,6 @@
       <OptimizeReferences>true</OptimizeReferences>
       <TreatLinkerWarningAsErrors>true</TreatLinkerWarningAsErrors>
     </Link>
-    <PreBuildEvent>
-      <Command>
-            @if not exist "$(WindowsSdkDir_10)Windows Performance Toolkit\KernelTraceControl.h" @(
-                echo Could not find required components "$(WindowsSdkDir_10)Windows Performance Toolkit\KernelTraceControl.h"
-                echo Install the Windows Performance Toolkit from Microsoft to build PresentMon.
-                exit /b 1
-            )
-        </Command>
-    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -181,7 +154,7 @@
       <SDLCheck>true</SDLCheck>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <TreatWarningAsError>true</TreatWarningAsError>
-      <AdditionalIncludeDirectories>$(WindowsSdkDir_10)Windows Performance Toolkit;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -189,22 +162,19 @@
       <OptimizeReferences>true</OptimizeReferences>
       <TreatLinkerWarningAsErrors>true</TreatLinkerWarningAsErrors>
     </Link>
-    <PreBuildEvent>
-      <Command>
-            @if not exist "$(WindowsSdkDir_10)Windows Performance Toolkit\KernelTraceControl.h" @(
-                echo Could not find required components "$(WindowsSdkDir_10)Windows Performance Toolkit\KernelTraceControl.h"
-                echo Install the Windows Performance Toolkit from Microsoft to build PresentMon.
-                exit /b 1
-            )
-        </Command>
-    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="Debug.hpp" />
+    <ClInclude Include="D3d9EventStructs.hpp" />
+    <ClInclude Include="DwmEventStructs.hpp" />
+    <ClInclude Include="DxgiEventStructs.hpp" />
     <ClInclude Include="DxgkrnlEventStructs.hpp" />
+    <ClInclude Include="EventMetadataEventStructs.hpp" />
     <ClInclude Include="MixedRealityTraceConsumer.hpp" />
+    <ClInclude Include="NTProcessEventEventStructs.hpp" />
     <ClInclude Include="PresentMonTraceConsumer.hpp" />
     <ClInclude Include="TraceConsumer.hpp" />
+    <ClInclude Include="Win32kEventStructs.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Debug.cpp" />

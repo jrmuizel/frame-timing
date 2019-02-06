@@ -32,45 +32,8 @@ SOFTWARE.
 #include <windows.h>
 #include <evntcons.h> // must include after windows.h
 
-#include <initguid.h>
-#include <KernelTraceControl.h>
-
 #include "Debug.hpp"
 #include "TraceConsumer.hpp"
-
-struct __declspec(uuid("{CA11C036-0102-4A2D-A6AD-F03CFED5D3C9}")) DXGI_PROVIDER_GUID_HOLDER;
-struct __declspec(uuid("{802ec45a-1e99-4b83-9920-87c98277ba9d}")) DXGKRNL_PROVIDER_GUID_HOLDER;
-struct __declspec(uuid("{8c416c79-d49b-4f01-a467-e56d3aa8234c}")) WIN32K_PROVIDER_GUID_HOLDER;
-struct __declspec(uuid("{9e9bba3c-2e38-40cb-99f4-9e8281425164}")) DWM_PROVIDER_GUID_HOLDER;
-struct __declspec(uuid("{783ACA0A-790E-4d7f-8451-AA850511C6B9}")) D3D9_PROVIDER_GUID_HOLDER;
-struct __declspec(uuid("{3d6fa8d0-fe05-11d0-9dda-00c04fd7ba7c}")) NT_PROCESS_EVENT_GUID_HOLDER;
-static const auto DXGI_PROVIDER_GUID = __uuidof(DXGI_PROVIDER_GUID_HOLDER);
-static const auto DXGKRNL_PROVIDER_GUID = __uuidof(DXGKRNL_PROVIDER_GUID_HOLDER);
-static const auto WIN32K_PROVIDER_GUID = __uuidof(WIN32K_PROVIDER_GUID_HOLDER);
-static const auto DWM_PROVIDER_GUID = __uuidof(DWM_PROVIDER_GUID_HOLDER);
-static const auto D3D9_PROVIDER_GUID = __uuidof(D3D9_PROVIDER_GUID_HOLDER);
-static const auto NT_PROCESS_EVENT_GUID = __uuidof(NT_PROCESS_EVENT_GUID_HOLDER);
-
-// These are only for Win7 support
-namespace Win7
-{
-    struct __declspec(uuid("{65cd4c8a-0848-4583-92a0-31c0fbaf00c0}")) DXGKRNL_PROVIDER_GUID_HOLDER;
-    struct __declspec(uuid("{069f67f2-c380-4a65-8a61-071cd4a87275}")) DXGKBLT_GUID_HOLDER;
-    struct __declspec(uuid("{22412531-670b-4cd3-81d1-e709c154ae3d}")) DXGKFLIP_GUID_HOLDER;
-    struct __declspec(uuid("{c19f763a-c0c1-479d-9f74-22abfc3a5f0a}")) DXGKPRESENTHISTORY_GUID_HOLDER;
-    struct __declspec(uuid("{295e0d8e-51ec-43b8-9cc6-9f79331d27d6}")) DXGKQUEUEPACKET_GUID_HOLDER;
-    struct __declspec(uuid("{5ccf1378-6b2c-4c0f-bd56-8eeb9e4c5c77}")) DXGKVSYNCDPC_GUID_HOLDER;
-    struct __declspec(uuid("{547820fe-5666-4b41-93dc-6cfd5dea28cc}")) DXGKMMIOFLIP_GUID_HOLDER;
-    struct __declspec(uuid("{8c9dd1ad-e6e5-4b07-b455-684a9d879900}")) DWM_PROVIDER_GUID_HOLDER;
-    static const auto DXGKRNL_PROVIDER_GUID = __uuidof(DXGKRNL_PROVIDER_GUID_HOLDER);
-    static const auto DXGKBLT_GUID = __uuidof(DXGKBLT_GUID_HOLDER);
-    static const auto DXGKFLIP_GUID = __uuidof(DXGKFLIP_GUID_HOLDER);
-    static const auto DXGKPRESENTHISTORY_GUID = __uuidof(DXGKPRESENTHISTORY_GUID_HOLDER);
-    static const auto DXGKQUEUEPACKET_GUID = __uuidof(DXGKQUEUEPACKET_GUID_HOLDER);
-    static const auto DXGKVSYNCDPC_GUID = __uuidof(DXGKVSYNCDPC_GUID_HOLDER);
-    static const auto DXGKMMIOFLIP_GUID = __uuidof(DXGKMMIOFLIP_GUID_HOLDER);
-    static const auto DWM_PROVIDER_GUID = __uuidof(DWM_PROVIDER_GUID_HOLDER);
-};
 
 // Forward-declare structs that will be used by both modern and legacy dxgkrnl events.
 struct DxgkBltEventArgs;

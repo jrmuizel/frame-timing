@@ -2,10 +2,16 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <ClInclude Include="Debug.hpp" />
+    <ClInclude Include="D3d9EventStructs.hpp" />
+    <ClInclude Include="DwmEventStructs.hpp" />
+    <ClInclude Include="DxgiEventStructs.hpp" />
     <ClInclude Include="DxgkrnlEventStructs.hpp" />
+    <ClInclude Include="EventMetadataEventStructs.hpp" />
     <ClInclude Include="MixedRealityTraceConsumer.hpp" />
+    <ClInclude Include="NTProcessEventEventStructs.hpp" />
     <ClInclude Include="PresentMonTraceConsumer.hpp" />
     <ClInclude Include="TraceConsumer.hpp" />
+    <ClInclude Include="Win32kEventStructs.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Debug.cpp" />

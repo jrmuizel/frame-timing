@@ -26,7 +26,273 @@ SOFTWARE.
 #include <dxgi.h>
 
 #include "PresentMonTraceConsumer.hpp"
+
+#include "D3d9EventStructs.hpp"
+#include "DwmEventStructs.hpp"
+#include "DxgiEventStructs.hpp"
 #include "DxgkrnlEventStructs.hpp"
+#include "EventMetadataEventStructs.hpp"
+#include "Win32kEventStructs.hpp"
+
+// First, structures that can be produced either by processing legacy events
+// or modern manifest-based events.
+
+struct DxgkEventBase
+{
+    EVENT_HEADER const* pEventHeader;
+};
+
+struct DxgkBltEventArgs : DxgkEventBase
+{
+    uint64_t Hwnd;
+    bool Present;
+};
+
+struct DxgkFlipEventArgs : DxgkEventBase
+{
+    int32_t FlipInterval;
+    bool MMIO;
+};
+
+// A QueueSubmit can be many types, but these are interesting for present.
+enum class DxgKrnl_QueueSubmit_Type {
+    MMIOFlip = 3,
+    Software = 7,
+};
+struct DxgkQueueSubmitEventArgs : DxgkEventBase
+{
+    DxgKrnl_QueueSubmit_Type PacketType;
+    uint32_t SubmitSequence;
+    uint64_t Context;
+    bool Present;
+    bool SupportsDxgkPresentEvent;
+};
+
+struct DxgkQueueCompleteEventArgs : DxgkEventBase
+{
+    uint32_t SubmitSequence;
+};
+
+enum DxgKrnl_MMIOFlip_Flags {
+    FlipImmediate = 0x2,
+    FlipOnNextVSync = 0x4
+};
+struct DxgkMMIOFlipEventArgs : DxgkEventBase
+{
+    uint32_t FlipSubmitSequence;
+    DxgKrnl_MMIOFlip_Flags Flags;
+};
+
+struct DxgkSyncDPCEventArgs : DxgkEventBase
+{
+    uint32_t FlipSubmitSequence;
+};
+
+struct DxgkSubmitPresentHistoryEventArgs : DxgkEventBase
+{
+    uint64_t Token;
+    uint64_t TokenData;
+    PresentMode KnownPresentMode;
+};
+
+struct DxgkPropagatePresentHistoryEventArgs : DxgkEventBase
+{
+    uint64_t Token;
+};
+
+struct DxgkRetirePresentHistoryEventArgs : DxgkEventBase
+{
+    uint64_t Token;
+    PresentMode KnownPresentMode;
+};
+
+// These are the structures used to process the legacy events.
+
+//
+// Ensure that all ETW structure won't be aligned. This is necessary to
+// guarantee that a user mode application trying to get to this data
+// can get the same structure layout using a different compiler.
+//
+#pragma pack(push)
+#pragma pack(1)
+
+//
+// Dxgkrnl Blt Event
+//
+
+typedef struct _DXGKETW_PRESENTFLAGS
+{
+    struct
+    {
+        UINT    Blt : 1;    // 0x00000001
+        UINT    ColorFill : 1;    // 0x00000002
+        UINT    Flip : 1;    // 0x00000004
+        UINT    FlipWithNoWait : 1;    // 0x00000008
+        UINT    SrcColorKey : 1;    // 0x00000010
+        UINT    DstColorKey : 1;    // 0x00000020
+        UINT    LinearToSrgb : 1;    // 0x00000040
+        UINT    Rotate : 1;    // 0x00000080
+        UINT    Reserved : 24;    // 0xFFFFFF00
+    } Bits;
+} DXGKETW_PRESENTFLAGS;
+
+typedef struct _DXGKETW_BLTEVENT {
+    ULONGLONG                  hwnd;
+    ULONGLONG                  pDmaBuffer;
+    ULONGLONG                  PresentHistoryToken;
+    ULONGLONG                  hSourceAllocation;
+    ULONGLONG                  hDestAllocation;
+    BOOL                       bSubmit;
+    BOOL                       bRedirectedPresent;
+    DXGKETW_PRESENTFLAGS       Flags;
+    RECT                       SourceRect;
+    RECT                       DestRect;
+    UINT                       SubRectCount; // followed by variable number of ETWGUID_DXGKBLTRECT events
+} DXGKETW_BLTEVENT;
+
+//
+// Dxgkrnl Flip Event
+//
+
+typedef struct _DXGKETW_FLIPEVENT {
+    ULONGLONG                  pDmaBuffer;
+    ULONG                      VidPnSourceId;
+    ULONGLONG                  FlipToAllocation;
+    UINT                       FlipInterval; // D3DDDI_FLIPINTERVAL_TYPE
+    BOOLEAN                    FlipWithNoWait;
+    BOOLEAN                    MMIOFlip;
+} DXGKETW_FLIPEVENT;
+
+//
+// Dxgkrnl Present History Event.
+//
+
+typedef enum _D3DKMT_PRESENT_MODEL
+{
+    D3DKMT_PM_UNINITIALIZED = 0,
+    D3DKMT_PM_REDIRECTED_GDI = 1,
+    D3DKMT_PM_REDIRECTED_FLIP = 2,
+    D3DKMT_PM_REDIRECTED_BLT = 3,
+    D3DKMT_PM_REDIRECTED_VISTABLT = 4,
+    D3DKMT_PM_SCREENCAPTUREFENCE = 5,
+    D3DKMT_PM_REDIRECTED_GDI_SYSMEM = 6,
+    D3DKMT_PM_REDIRECTED_COMPOSITION = 7,
+} D3DKMT_PRESENT_MODEL;
+
+typedef struct _DXGKETW_PRESENTHISTORYEVENT {
+    ULONGLONG             hAdapter;
+    ULONGLONG             Token;
+    D3DKMT_PRESENT_MODEL  Model;     // available only for _STOP event type.
+    UINT                  TokenSize; // available only for _STOP event type.
+} DXGKETW_PRESENTHISTORYEVENT;
+
+//
+// Dxgkrnl Scheduler Submit QueuePacket Event
+//
+
+typedef enum _DXGKETW_QUEUE_PACKET_TYPE {
+    DXGKETW_RENDER_COMMAND_BUFFER = 0,
+    DXGKETW_DEFERRED_COMMAND_BUFFER = 1,
+    DXGKETW_SYSTEM_COMMAND_BUFFER = 2,
+    DXGKETW_MMIOFLIP_COMMAND_BUFFER = 3,
+    DXGKETW_WAIT_COMMAND_BUFFER = 4,
+    DXGKETW_SIGNAL_COMMAND_BUFFER = 5,
+    DXGKETW_DEVICE_COMMAND_BUFFER = 6,
+    DXGKETW_SOFTWARE_COMMAND_BUFFER = 7,
+    DXGKETW_PAGING_COMMAND_BUFFER = 8,
+} DXGKETW_QUEUE_PACKET_TYPE;
+
+typedef struct _DXGKETW_QUEUESUBMITEVENT {
+    ULONGLONG                  hContext;
+    DXGKETW_QUEUE_PACKET_TYPE  PacketType;
+    ULONG                      SubmitSequence;
+    ULONGLONG                  DmaBufferSize;
+    UINT                       AllocationListSize;
+    UINT                       PatchLocationListSize;
+    BOOL                       bPresent;
+    ULONGLONG                  hDmaBuffer;
+} DXGKETW_QUEUESUBMITEVENT;
+
+//
+// Dxgkrnl Scheduler Complete QueuePacket Event
+//
+
+typedef struct _DXGKETW_QUEUECOMPLETEEVENT {
+    ULONGLONG                  hContext;
+    ULONG                      PacketType;
+    ULONG                      SubmitSequence;
+    union {
+        BOOL                   bPreempted;
+        BOOL                   bTimeouted; // PacketType is WaitCommandBuffer.
+    };
+} DXGKETW_QUEUECOMPLETEEVENT;
+
+//
+// Dxgkrnl VSync Dpc event
+//
+
+typedef enum _DXGKETW_FLIPMODE_TYPE
+{
+    DXGKETW_FLIPMODE_NO_DEVICE = 0,
+    DXGKETW_FLIPMODE_IMMEDIATE = 1,
+    DXGKETW_FLIPMODE_VSYNC_HW_FLIP_QUEUE = 2,
+    DXGKETW_FLIPMODE_VSYNC_SW_FLIP_QUEUE = 3,
+    DXGKETW_FLIPMODE_VSYNC_BUILT_IN_WAIT = 4,
+    DXGKETW_FLIPMODE_IMMEDIATE_SW_FLIP_QUEUE = 5,
+} DXGKETW_FLIPMODE_TYPE;
+
+typedef LARGE_INTEGER PHYSICAL_ADDRESS;
+
+typedef struct _DXGKETW_SCHEDULER_VSYNC_DPC {
+    ULONGLONG                 pDxgAdapter;
+    UINT                      VidPnTargetId;
+    PHYSICAL_ADDRESS          ScannedPhysicalAddress;
+    UINT                      VidPnSourceId;
+    UINT                      FrameNumber;
+    LONGLONG                  FrameQPCTime;
+    ULONGLONG                 hFlipDevice;
+    DXGKETW_FLIPMODE_TYPE     FlipType;
+    union
+    {
+        ULARGE_INTEGER        FlipFenceId;
+        PHYSICAL_ADDRESS      FlipToAddress;
+    };
+} DXGKETW_SCHEDULER_VSYNC_DPC;
+
+//
+// Dxgkrnl Scheduler mmio flip event
+//
+
+// there is 2 version of structure due to pointer size difference
+// between x86 (32bits) and x64/ia64 (64bits).
+//
+
+typedef struct _DXGKETW_SCHEDULER_MMIO_FLIP_32 {
+    ULONGLONG        pDxgAdapter;
+    UINT             VidPnSourceId;
+    ULONG            FlipSubmitSequence; // ContextUserSubmissionId
+    UINT             FlipToDriverAllocation;
+    PHYSICAL_ADDRESS FlipToPhysicalAddress;
+    UINT             FlipToSegmentId;
+    UINT             FlipPresentId;
+    UINT             FlipPhysicalAdapterMask;
+    ULONG            Flags;
+} DXGKETW_SCHEDULER_MMIO_FLIP_32;
+
+typedef struct _DXGKETW_SCHEDULER_MMIO_FLIP_64 {
+    ULONGLONG        pDxgAdapter;
+    UINT             VidPnSourceId;
+    ULONG            FlipSubmitSequence; // ContextUserSubmissionId
+    ULONGLONG        FlipToDriverAllocation;
+    PHYSICAL_ADDRESS FlipToPhysicalAddress;
+    UINT             FlipToSegmentId;
+    UINT             FlipPresentId;
+    UINT             FlipPhysicalAdapterMask;
+    ULONG            Flags;
+} DXGKETW_SCHEDULER_MMIO_FLIP_64;
+
+#pragma pack(pop)
+
 
 PresentEvent::PresentEvent(EVENT_HEADER const& hdr, ::Runtime runtime)
     : QpcTime(*(uint64_t*) &hdr.TimeStamp)
@@ -97,18 +363,10 @@ void HandleDXGIEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 {
     DebugEvent(pEventRecord);
 
-    enum {
-        DXGIPresent_Start = 42,
-        DXGIPresent_Stop,
-        DXGIPresentMPO_Start = 55,
-        DXGIPresentMPO_Stop = 56,
-    };
-
     auto const& hdr = pEventRecord->EventHeader;
-    switch (hdr.EventDescriptor.Id)
-    {
-    case DXGIPresent_Start:
-    case DXGIPresentMPO_Start:
+    switch (hdr.EventDescriptor.Id) {
+    case Microsoft_Windows_DXGI::Present_Start::Id:
+    case Microsoft_Windows_DXGI::PresentMultiplaneOverlay_Start::Id:
     {
         PresentEvent event(hdr, Runtime::DXGI);
         pmConsumer->mMetadata.GetEventData(pEventRecord, L"pIDXGISwapChain", &event.SwapChainAddress);
@@ -118,11 +376,17 @@ void HandleDXGIEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         pmConsumer->CreatePresent(event);
         break;
     }
-    case DXGIPresent_Stop:
-    case DXGIPresentMPO_Stop:
+    case Microsoft_Windows_DXGI::Present_Stop::Id:
+    case Microsoft_Windows_DXGI::PresentMultiplaneOverlay_Stop::Id:
     {
         auto result = pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"Result");
-        bool AllowBatching = SUCCEEDED(result) && result != DXGI_STATUS_OCCLUDED && result != DXGI_STATUS_MODE_CHANGE_IN_PROGRESS && result != DXGI_STATUS_NO_DESKTOP_ACCESS;
+
+        bool AllowBatching =
+            SUCCEEDED(result) &&
+            result != DXGI_STATUS_OCCLUDED &&
+            result != DXGI_STATUS_MODE_CHANGE_IN_PROGRESS &&
+            result != DXGI_STATUS_NO_DESKTOP_ACCESS;
+
         pmConsumer->RuntimePresentStop(hdr, AllowBatching);
         break;
     }
@@ -235,11 +499,10 @@ void PMTraceConsumer::HandleDxgkQueueComplete(DxgkQueueCompleteEventArgs& args)
 
     auto pEvent = eventIter->second;
 
-    uint64_t EventTime = *(uint64_t*)&args.pEventHeader->TimeStamp;
-
     if (pEvent->PresentMode == PresentMode::Hardware_Legacy_Copy_To_Front_Buffer ||
         (pEvent->PresentMode == PresentMode::Hardware_Legacy_Flip && !pEvent->MMIO)) {
-        pEvent->ScreenTime = pEvent->ReadyTime = EventTime;
+        pEvent->ReadyTime = args.pEventHeader->TimeStamp.QuadPart;
+        pEvent->ScreenTime = args.pEventHeader->TimeStamp.QuadPart;
         pEvent->FinalState = PresentResult::Presented;
 
         // Sometimes, the queue packets associated with a present will complete before the DxgKrnl present event is fired
@@ -263,8 +526,7 @@ void PMTraceConsumer::HandleDxgkMMIOFlip(DxgkMMIOFlipEventArgs& args)
         return;
     }
 
-    uint64_t EventTime = *(uint64_t*)&args.pEventHeader->TimeStamp;
-    eventIter->second->ReadyTime = EventTime;
+    eventIter->second->ReadyTime = args.pEventHeader->TimeStamp.QuadPart;
 
     if (eventIter->second->PresentMode == PresentMode::Composed_Flip) {
         eventIter->second->SetPresentMode(PresentMode::Hardware_Independent_Flip);
@@ -272,7 +534,7 @@ void PMTraceConsumer::HandleDxgkMMIOFlip(DxgkMMIOFlipEventArgs& args)
 
     if (args.Flags & DxgKrnl_MMIOFlip_Flags::FlipImmediate) {
         eventIter->second->FinalState = PresentResult::Presented;
-        eventIter->second->ScreenTime = EventTime;
+        eventIter->second->ScreenTime = args.pEventHeader->TimeStamp.QuadPart;
         eventIter->second->SupportsTearing = true;
         if (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Flip) {
             CompletePresent(eventIter->second);
@@ -289,8 +551,7 @@ void PMTraceConsumer::HandleDxgkSyncDPC(DxgkSyncDPCEventArgs& args)
         return;
     }
 
-    uint64_t EventTime = *(uint64_t*)&args.pEventHeader->TimeStamp;
-    eventIter->second->ScreenTime = EventTime;
+    eventIter->second->ScreenTime = args.pEventHeader->TimeStamp.QuadPart;
     eventIter->second->FinalState = PresentResult::Presented;
     if (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Flip) {
         CompletePresent(eventIter->second);
@@ -310,36 +571,32 @@ void PMTraceConsumer::HandleDxgkSubmitPresentHistoryEventArgs(DxgkSubmitPresentH
         eventIter = FindOrCreatePresent(*args.pEventHeader);
     }
 
-    eventIter->second->ReadyTime = eventIter->second->ScreenTime = 0;
+    eventIter->second->ReadyTime = 0;
+    eventIter->second->ScreenTime = 0;
     eventIter->second->SupportsTearing = false;
     eventIter->second->FinalState = PresentResult::Unknown;
     eventIter->second->SetTokenPtr(args.Token);
 
-    if (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Copy_To_Front_Buffer)
-    {
+    if (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Copy_To_Front_Buffer) {
         eventIter->second->SetPresentMode(PresentMode::Composed_Copy_GPU_GDI);
         assert(args.KnownPresentMode == PresentMode::Unknown ||
                args.KnownPresentMode == PresentMode::Composed_Copy_GPU_GDI);
-    }
-    else if (eventIter->second->PresentMode == PresentMode::Unknown)
-    {
+
+    } else if (eventIter->second->PresentMode == PresentMode::Unknown) {
         if (args.KnownPresentMode == PresentMode::Composed_Composition_Atlas) {
             eventIter->second->SetPresentMode(PresentMode::Composed_Composition_Atlas);
-        }
-        else {
+        } else {
             // When there's no Win32K events, we'll assume PHTs that aren't after a blt, and aren't composition tokens
             // are flip tokens and that they're displayed. There are no Win32K events on Win7, and they might not be
             // present in some traces - don't let presents get stuck/dropped just because we can't track them perfectly.
             assert(!eventIter->second->SeenWin32KEvents);
             eventIter->second->SetPresentMode(PresentMode::Composed_Flip);
         }
-    }
-    else if (eventIter->second->PresentMode == PresentMode::Composed_Copy_CPU_GDI) {
+    } else if (eventIter->second->PresentMode == PresentMode::Composed_Copy_CPU_GDI) {
         if (args.TokenData == 0) {
             // This is the best we can do, we won't be able to tell how many frames are actually displayed.
             mPresentsWaitingForDWM.emplace_back(eventIter->second);
-        }
-        else {
+        } else {
             mPresentsByLegacyBlitToken[args.TokenData] = eventIter->second;
         }
     }
@@ -354,10 +611,9 @@ void PMTraceConsumer::HandleDxgkPropagatePresentHistoryEventArgs(DxgkPropagatePr
         return;
     }
 
-    uint64_t EventTime = *(uint64_t*)&args.pEventHeader->TimeStamp;
-    auto& ReadyTime = eventIter->second->ReadyTime;
-    ReadyTime = (ReadyTime == 0 ?
-        EventTime : std::min(ReadyTime, EventTime));
+    eventIter->second->ReadyTime = eventIter->second->ReadyTime == 0
+        ? args.pEventHeader->TimeStamp.QuadPart
+        : std::min(eventIter->second->ReadyTime, (uint64_t) args.pEventHeader->TimeStamp.QuadPart);
 
     if (eventIter->second->PresentMode == PresentMode::Composed_Composition_Atlas ||
         (eventIter->second->PresentMode == PresentMode::Composed_Flip && !eventIter->second->SeenWin32KEvents)) {
@@ -373,65 +629,28 @@ void PMTraceConsumer::HandleDxgkPropagatePresentHistoryEventArgs(DxgkPropagatePr
     mDxgKrnlPresentHistoryTokens.erase(eventIter);
 }
 
-static PresentMode D3DKMT_TokenModel_ToPresentMode(D3DKMT_PRESENT_MODEL Model)
-{
-    switch (Model)
-    {
-    case D3DKMT_PM_REDIRECTED_BLT:
-        return PresentMode::Composed_Copy_GPU_GDI;
-    case D3DKMT_PM_REDIRECTED_VISTABLT:
-        return PresentMode::Composed_Copy_CPU_GDI;
-    case D3DKMT_PM_REDIRECTED_FLIP:
-        return PresentMode::Composed_Flip;
-    case D3DKMT_PM_REDIRECTED_COMPOSITION:
-        return PresentMode::Composed_Composition_Atlas;
-    }
-    return PresentMode::Unknown;
-}
-
 void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 {
     DebugEvent(pEventRecord);
 
-    enum {
-        DxgKrnl_Flip = 168,
-        DxgKrnl_FlipMPO = 252,
-        DxgKrnl_QueueSubmit = 178,
-        DxgKrnl_QueueComplete = 180,
-        DxgKrnl_MMIOFlip = 116,
-        DxgKrnl_MMIOFlipMPO = 259,
-        DxgKrnl_HSyncDPC = 382,
-        DxgKrnl_VSyncDPC = 17,
-        DxgKrnl_Present = 184,
-        DxgKrnl_PresentHistoryDetailed = 215,
-        DxgKrnl_SubmitPresentHistory = 171,
-        DxgKrnl_PresentHistory = 172,
-        DxgKrnl_Blit = 166,
-    };
-
     auto const& hdr = pEventRecord->EventHeader;
-
-    uint64_t EventTime = *(uint64_t*)&hdr.TimeStamp;
-
-    switch (hdr.EventDescriptor.Id)
-    {
-    case DxgKrnl_Flip:
-    case DxgKrnl_FlipMPO:
+    switch (hdr.EventDescriptor.Id) {
+    case Microsoft_Windows_DxgKrnl::Flip_Info::Id:
+    case Microsoft_Windows_DxgKrnl::FlipMultiPlaneOverlay_Info::Id:
     {
         DxgkFlipEventArgs Args = {};
         Args.pEventHeader = &hdr;
         Args.FlipInterval = -1;
-        if (hdr.EventDescriptor.Id == DxgKrnl_Flip) {
+        if (hdr.EventDescriptor.Id == (USHORT) Microsoft_Windows_DxgKrnl::Flip_Info::Id) {
             Args.FlipInterval = pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"FlipInterval");
             Args.MMIO = pmConsumer->mMetadata.GetEventData<BOOL>(pEventRecord, L"MMIOFlip") != 0;
-        }
-        else {
+        } else {
             Args.MMIO = true; // All MPO flips are MMIO
         }
         pmConsumer->HandleDxgkFlip(Args);
         break;
     }
-    case DxgKrnl_QueueSubmit:
+    case Microsoft_Windows_DxgKrnl::QueuePacket_Start::Id:
     {
         DxgkQueueSubmitEventArgs Args = {};
         Args.pEventHeader = &hdr;
@@ -443,7 +662,7 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         pmConsumer->HandleDxgkQueueSubmit(Args);
         break;
     }
-    case DxgKrnl_QueueComplete:
+    case Microsoft_Windows_DxgKrnl::QueuePacket_Stop::Id:
     {
         DxgkQueueCompleteEventArgs Args = {};
         Args.pEventHeader = &hdr;
@@ -451,7 +670,7 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         pmConsumer->HandleDxgkQueueComplete(Args);
         break;
     }
-    case DxgKrnl_MMIOFlip:
+    case Microsoft_Windows_DxgKrnl::MMIOFlip_Info::Id:
     {
         DxgkMMIOFlipEventArgs Args = {};
         Args.pEventHeader = &hdr;
@@ -460,7 +679,7 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         pmConsumer->HandleDxgkMMIOFlip(Args);
         break;
     }
-    case DxgKrnl_MMIOFlipMPO:
+    case Microsoft_Windows_DxgKrnl::MMIOFlipMultiPlaneOverlay_Info::Id:
     {
         // See above for more info about this packet.
         // Note: Event does not exist on Win7
@@ -474,7 +693,7 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 
         // Avoid double-marking a single present packet coming from the MPO API
         if (eventIter->second->ReadyTime == 0) {
-            eventIter->second->ReadyTime = EventTime;
+            eventIter->second->ReadyTime = hdr.TimeStamp.QuadPart;
         }
 
         if (eventIter->second->PresentMode == PresentMode::Hardware_Independent_Flip ||
@@ -482,32 +701,30 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
             eventIter->second->SetPresentMode(PresentMode::Hardware_Composed_Independent_Flip);
         }
 
-        if (hdr.EventDescriptor.Version >= 2)
-        {
-            enum class DxgKrnl_MMIOFlipMPO_FlipEntryStatus {
+        if (hdr.EventDescriptor.Version >= 2) {
+            enum {
                 FlipWaitVSync = 5,
                 FlipWaitComplete = 11,
                 FlipWaitHSync = 15,
                 // There are others, but they're more complicated to deal with.
             };
 
-            auto FlipEntryStatusAfterFlip = pmConsumer->mMetadata.GetEventData<DxgKrnl_MMIOFlipMPO_FlipEntryStatus>(pEventRecord, L"FlipEntryStatusAfterFlip");
-            if (FlipEntryStatusAfterFlip != DxgKrnl_MMIOFlipMPO_FlipEntryStatus::FlipWaitVSync &&
-                FlipEntryStatusAfterFlip != DxgKrnl_MMIOFlipMPO_FlipEntryStatus::FlipWaitHSync) {
+            auto FlipEntryStatusAfterFlip = pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"FlipEntryStatusAfterFlip");
+            if (FlipEntryStatusAfterFlip != FlipWaitVSync &&
+                FlipEntryStatusAfterFlip != FlipWaitHSync) {
                 eventIter->second->FinalState = PresentResult::Presented;
                 eventIter->second->SupportsTearing = true;
-                if (FlipEntryStatusAfterFlip == DxgKrnl_MMIOFlipMPO_FlipEntryStatus::FlipWaitComplete) {
-                    eventIter->second->ScreenTime = EventTime;
+                if (FlipEntryStatusAfterFlip == FlipWaitComplete) {
+                    eventIter->second->ScreenTime = hdr.TimeStamp.QuadPart;
                 }
                 if (eventIter->second->PresentMode == PresentMode::Hardware_Legacy_Flip) {
                     pmConsumer->CompletePresent(eventIter->second);
                 }
             }
         }
-
         break;
     }
-    case DxgKrnl_HSyncDPC:
+    case Microsoft_Windows_DxgKrnl::HSyncDPCMultiPlane_Info::Id:
     {
         // Used for Hardware Independent Flip, and Hardware Composed Flip to signal flipping to the screen 
         // on Windows 10 build numbers 17134 and up where the associated display is connected to 
@@ -515,8 +732,7 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         // MMIOFlipMPO [EntryStatus:FlipWaitHSync] ->HSync DPC
 
         auto FlipCount = pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"FlipEntryCount");
-        for (uint32_t i = 0; i < FlipCount; i++)
-        {
+        for (uint32_t i = 0; i < FlipCount; i++) {
             auto FlipId = pmConsumer->mMetadata.GetEventDataFromArray<uint64_t>(pEventRecord, L"FlipSubmitSequence", i);
             DxgkSyncDPCEventArgs Args = {};
             Args.pEventHeader = &hdr;
@@ -525,7 +741,7 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         }
         break;
     }
-    case DxgKrnl_VSyncDPC:
+    case Microsoft_Windows_DxgKrnl::VSyncDPC_Info::Id:
     {
         auto FlipFenceId = pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"FlipFenceId");
 
@@ -535,7 +751,7 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         pmConsumer->HandleDxgkSyncDPC(Args);
         break;
     }
-    case DxgKrnl_Present:
+    case Microsoft_Windows_DxgKrnl::Present_Info::Id:
     {
         // This event is emitted at the end of the kernel present, before returning.
         // The presence of this event is used with blt presents to indicate that no
@@ -559,28 +775,34 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 
         if (eventIter->second->ThreadId != hdr.ThreadId) {
             if (eventIter->second->TimeTaken == 0) {
-                eventIter->second->TimeTaken = EventTime - eventIter->second->QpcTime;
+                eventIter->second->TimeTaken = hdr.TimeStamp.QuadPart - eventIter->second->QpcTime;
             }
             eventIter->second->WasBatched = true;
             pmConsumer->mPresentByThreadId.erase(eventIter);
         }
         break;
     }
-    case DxgKrnl_PresentHistoryDetailed:
-    case DxgKrnl_SubmitPresentHistory:
+    case Microsoft_Windows_DxgKrnl::PresentHistoryDetailed_Start::Id:
+    case Microsoft_Windows_DxgKrnl::PresentHistory_Start::Id:
     {
         DxgkSubmitPresentHistoryEventArgs Args = {};
         Args.pEventHeader = &hdr;
         Args.Token = pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"Token");
         Args.TokenData = pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"TokenData");
         auto KMTPresentModel = pmConsumer->mMetadata.GetEventData<D3DKMT_PRESENT_MODEL>(pEventRecord, L"Model");
-        Args.KnownPresentMode = D3DKMT_TokenModel_ToPresentMode(KMTPresentModel);
+        switch (KMTPresentModel) {
+        case D3DKMT_PM_REDIRECTED_BLT:          Args.KnownPresentMode = PresentMode::Composed_Copy_GPU_GDI; break;
+        case D3DKMT_PM_REDIRECTED_VISTABLT:     Args.KnownPresentMode = PresentMode::Composed_Copy_CPU_GDI; break;
+        case D3DKMT_PM_REDIRECTED_FLIP:         Args.KnownPresentMode = PresentMode::Composed_Flip; break;
+        case D3DKMT_PM_REDIRECTED_COMPOSITION:  Args.KnownPresentMode = PresentMode::Composed_Composition_Atlas; break;
+        default:                                Args.KnownPresentMode = PresentMode::Unknown; break;
+        }
         if (KMTPresentModel != D3DKMT_PM_REDIRECTED_GDI) {
             pmConsumer->HandleDxgkSubmitPresentHistoryEventArgs(Args);
         }
         break;
     }
-    case DxgKrnl_PresentHistory:
+    case Microsoft_Windows_DxgKrnl::PresentHistory_Info::Id:
     {
         DxgkPropagatePresentHistoryEventArgs Args = {};
         Args.pEventHeader = &hdr;
@@ -588,7 +810,7 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         pmConsumer->HandleDxgkPropagatePresentHistoryEventArgs(Args);
         break;
     }
-    case DxgKrnl_Blit:
+    case Microsoft_Windows_DxgKrnl::Blit_Info::Id:
     {
         DxgkBltEventArgs Args = {};
         Args.pEventHeader = &hdr;
@@ -600,8 +822,8 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
     }
 }
 
-namespace Win7
-{
+namespace Win7 {
+
 void HandleDxgkBlt(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 {
     DebugEvent(pEventRecord);
@@ -637,9 +859,7 @@ void HandleDxgkPresentHistory(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmCon
         Args.KnownPresentMode = PresentMode::Unknown;
         Args.Token = pPresentHistoryEvent->Token;
         pmConsumer->HandleDxgkSubmitPresentHistoryEventArgs(Args);
-    }
-    else if (pEventRecord->EventHeader.EventDescriptor.Opcode == EVENT_TRACE_TYPE_INFO)
-    {
+    } else if (pEventRecord->EventHeader.EventDescriptor.Opcode == EVENT_TRACE_TYPE_INFO) {
         DxgkPropagatePresentHistoryEventArgs Args = {};
         Args.pEventHeader = &pEventRecord->EventHeader;
         Args.Token = pPresentHistoryEvent->Token;
@@ -651,13 +871,11 @@ void HandleDxgkQueuePacket(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsum
 {
     DebugEvent(pEventRecord);
 
-    if (pEventRecord->EventHeader.EventDescriptor.Opcode == EVENT_TRACE_TYPE_START)
-    {
+    if (pEventRecord->EventHeader.EventDescriptor.Opcode == EVENT_TRACE_TYPE_START) {
         DxgkQueueSubmitEventArgs Args = {};
         Args.pEventHeader = &pEventRecord->EventHeader;
         auto pSubmitEvent = reinterpret_cast<DXGKETW_QUEUESUBMITEVENT*>(pEventRecord->UserData);
-        switch (pSubmitEvent->PacketType)
-        {
+        switch (pSubmitEvent->PacketType) {
         case DXGKETW_MMIOFLIP_COMMAND_BUFFER:
             Args.PacketType = DxgKrnl_QueueSubmit_Type::MMIOFlip;
             break;
@@ -671,9 +889,7 @@ void HandleDxgkQueuePacket(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsum
         Args.SubmitSequence = pSubmitEvent->SubmitSequence;
         Args.Context = pSubmitEvent->hContext;
         pmConsumer->HandleDxgkQueueSubmit(Args);
-    }
-    else if (pEventRecord->EventHeader.EventDescriptor.Opcode == EVENT_TRACE_TYPE_STOP)
-    {
+    } else if (pEventRecord->EventHeader.EventDescriptor.Opcode == EVENT_TRACE_TYPE_STOP) {
         DxgkQueueCompleteEventArgs Args = {};
         Args.pEventHeader = &pEventRecord->EventHeader;
         auto pCompleteEvent = reinterpret_cast<DXGKETW_QUEUECOMPLETEEVENT*>(pEventRecord->UserData);
@@ -713,24 +929,16 @@ void HandleDxgkMMIOFlip(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
     }
     pmConsumer->HandleDxgkMMIOFlip(Args);
 }
-}
+
+} // namespace Win7
 
 void HandleWin32kEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 {
     DebugEvent(pEventRecord);
 
-    enum {
-        Win32K_TokenCompositionSurfaceObject = 201,
-        Win32K_TokenStateChanged = 301,
-    };
-
     auto const& hdr = pEventRecord->EventHeader;
-
-    uint64_t EventTime = *(uint64_t*)&hdr.TimeStamp;
-
-    switch (hdr.EventDescriptor.Id)
-    {
-    case Win32K_TokenCompositionSurfaceObject:
+    switch (hdr.EventDescriptor.Id) {
+    case Microsoft_Windows_Win32k::TokenCompositionSurfaceObject_Info::Id:
     {
         auto eventIter = pmConsumer->FindOrCreatePresent(hdr);
 
@@ -749,7 +957,7 @@ void HandleWin32kEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         pmConsumer->mWin32KPresentHistoryTokens[key] = eventIter->second;
         break;
     }
-    case Win32K_TokenStateChanged:
+    case Microsoft_Windows_Win32k::TokenStateChanged_Info::Id:
     {
         PMTraceConsumer::Win32KPresentHistoryTokenKey key(pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"CompositionSurfaceLuid"),
             pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"PresentCount"),
@@ -759,26 +967,17 @@ void HandleWin32kEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
             return;
         }
 
-        enum class TokenState {
-            InFrame = 3,
-            Confirmed = 4,
-            Retired = 5,
-            Discarded = 6,
-        };
-
         auto &event = *eventIter->second;
-        auto state = pmConsumer->mMetadata.GetEventData<TokenState>(pEventRecord, L"NewState");
-        switch (state)
+
+        auto state = (Microsoft_Windows_Win32k::TokenState) pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"NewState");
+        switch (state) {
+        case Microsoft_Windows_Win32k::TokenState::InFrame: // Composition is starting
         {
-        case TokenState::InFrame:
-        {
-            // InFrame = composition is starting
             if (event.Hwnd) {
                 auto hWndIter = pmConsumer->mLastWindowPresent.find(event.Hwnd);
                 if (hWndIter == pmConsumer->mLastWindowPresent.end()) {
                     pmConsumer->mLastWindowPresent.emplace(event.Hwnd, eventIter->second);
-                }
-                else if (hWndIter->second != eventIter->second) {
+                } else if (hWndIter->second != eventIter->second) {
                     hWndIter->second->FinalState = PresentResult::Discarded;
                     hWndIter->second = eventIter->second;
                 }
@@ -788,20 +987,18 @@ void HandleWin32kEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
             if (iFlip && event.PresentMode == PresentMode::Composed_Flip) {
                 event.SetPresentMode(PresentMode::Hardware_Independent_Flip);
             }
-
             break;
         }
-        case TokenState::Confirmed:
-        {
-            // Confirmed = present has been submitted
-            // If we haven't already decided we're going to discard a token, now's a good time to indicate it'll make it to screen
+
+        case Microsoft_Windows_Win32k::TokenState::Confirmed: // Present has been submitted
+            // If we haven't already decided we're going to discard a token,
+            // now's a good time to indicate it'll make it to screen
             if (event.FinalState == PresentResult::Unknown) {
                 if (event.PresentFlags & DXGI_PRESENT_DO_NOT_SEQUENCE) {
                     // DO_NOT_SEQUENCE presents may get marked as confirmed,
                     // if a frame was composed when this token was completed
                     event.FinalState = PresentResult::Discarded;
-                }
-                else {
+                } else {
                     event.FinalState = PresentResult::Presented;
                 }
             }
@@ -809,16 +1006,13 @@ void HandleWin32kEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
                 pmConsumer->mLastWindowPresent.erase(event.Hwnd);
             }
             break;
-        }
-        case TokenState::Retired:
-        {
-            // Retired = present has been completed, token's buffer is now displayed
-            event.ScreenTime = EventTime;
+
+        case Microsoft_Windows_Win32k::TokenState::Retired: // Present has been completed, token's buffer is now displayed
+            event.ScreenTime = hdr.TimeStamp.QuadPart;
             break;
-        }
-        case TokenState::Discarded:
+
+        case Microsoft_Windows_Win32k::TokenState::Discarded: // Present has been discarded
         {
-            // Discarded = destroyed - discard if we never got any indication that it was going to screen
             auto sharedPtr = eventIter->second;
             pmConsumer->mWin32KPresentHistoryTokens.erase(eventIter);
 
@@ -839,22 +1033,10 @@ void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 {
     DebugEvent(pEventRecord);
 
-    enum {
-        DWM_GetPresentHistory = 64,
-        DWM_Schedule_Present_Start = 15,
-        DWM_FlipChain_Pending = 69,
-        DWM_FlipChain_Complete = 70,
-        DWM_FlipChain_Dirty = 101,
-        DWM_Schedule_SurfaceUpdate = 196,
-    };
-
-    auto& hdr = pEventRecord->EventHeader;
-    switch (hdr.EventDescriptor.Id)
-    {
-    case DWM_GetPresentHistory:
-    {
-        for (auto& hWndPair : pmConsumer->mLastWindowPresent)
-        {
+    auto const& hdr = pEventRecord->EventHeader;
+    switch (hdr.EventDescriptor.Id) {
+    case Microsoft_Windows_Dwm_Core::MILEVENT_MEDIA_UCE_PROCESSPRESENTHISTORY_GetPresentHistory_Info::Id:
+        for (auto& hWndPair : pmConsumer->mLastWindowPresent) {
             auto& present = hWndPair.second;
             // Pickup the most recent present from a given window
             if (present->PresentMode != PresentMode::Composed_Copy_GPU_GDI &&
@@ -866,37 +1048,38 @@ void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         }
         pmConsumer->mLastWindowPresent.clear();
         break;
-    }
-    case DWM_Schedule_Present_Start:
-    {
+
+    case Microsoft_Windows_Dwm_Core::SCHEDULE_PRESENT_Start::Id:
         pmConsumer->DwmPresentThreadId = hdr.ThreadId;
         break;
-    }
-    case DWM_FlipChain_Pending:
-    case DWM_FlipChain_Complete:
-    case DWM_FlipChain_Dirty:
+
+    case Microsoft_Windows_Dwm_Core::FlipChain_Pending::Id:
+    case Microsoft_Windows_Dwm_Core::FlipChain_Complete::Id:
+    case Microsoft_Windows_Dwm_Core::FlipChain_Dirty::Id:
     {
-        if (InlineIsEqualGUID(hdr.ProviderId, Win7::DWM_PROVIDER_GUID)) {
+        if (InlineIsEqualGUID(hdr.ProviderId, Microsoft_Windows_Dwm_Core::Win7::GUID)) {
             return;
         }
-        // As it turns out, the 64-bit token data from the PHT submission is actually two 32-bit data chunks,		
-        // corresponding to a "flip chain" id and present id		
-        uint32_t flipChainId = (uint32_t)pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"ulFlipChain");
-        uint32_t serialNumber = (uint32_t)pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"ulSerialNumber");
-        uint64_t token = ((uint64_t)flipChainId << 32ull) | serialNumber;
+
+        auto flipChainId  = pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"ulFlipChain");
+        auto serialNumber = pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"ulSerialNumber");
+
+        // The 64-bit token data from the PHT submission is actually two 32-bit
+        // data chunks, corresponding to a "flip chain" id and present id
+        auto token = ((uint64_t) flipChainId << 32ull) | serialNumber;
         auto flipIter = pmConsumer->mDxgKrnlPresentHistoryTokens.find(token);
         if (flipIter == pmConsumer->mDxgKrnlPresentHistoryTokens.end()) {
             return;
         }
 
         // Watch for multiple legacy blits completing against the same window		
-        auto hWnd = pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"hwnd");
-        pmConsumer->mLastWindowPresent[hWnd] = flipIter->second;
+        auto hwnd = pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"hwnd");
+        pmConsumer->mLastWindowPresent[hwnd] = flipIter->second;
         flipIter->second->SetDwmNotified(true);
         pmConsumer->mPresentsByLegacyBlitToken.erase(flipIter);
         break;
     }
-    case DWM_Schedule_SurfaceUpdate:
+    case Microsoft_Windows_Dwm_Core::SCHEDULE_SURFACEUPDATE_Info::Id:
     {
         PMTraceConsumer::Win32KPresentHistoryTokenKey key(pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"luidSurface"),
                                                           pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"PresentCount"),
@@ -914,15 +1097,9 @@ void HandleD3D9Event(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 {
     DebugEvent(pEventRecord);
 
-    enum {
-        D3D9PresentStart = 1,
-        D3D9PresentStop,
-    };
-
     auto const& hdr = pEventRecord->EventHeader;
-    switch (hdr.EventDescriptor.Id)
-    {
-    case D3D9PresentStart:
+    switch (hdr.EventDescriptor.Id) {
+    case Microsoft_Windows_D3D9::Present_Start::Id:
     {
         PresentEvent event(hdr, Runtime::D3D9);
         pmConsumer->mMetadata.GetEventData(pEventRecord, L"pSwapchain", &event.SwapChainAddress);
@@ -938,10 +1115,14 @@ void HandleD3D9Event(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         pmConsumer->CreatePresent(event);
         break;
     }
-    case D3D9PresentStop:
+    case Microsoft_Windows_D3D9::Present_Stop::Id:
     {
         auto result = pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"Result");
-        bool AllowBatching = SUCCEEDED(result) && result != S_PRESENT_OCCLUDED;
+
+        bool AllowBatching =
+            SUCCEEDED(result) &&
+            result != S_PRESENT_OCCLUDED;
+
         pmConsumer->RuntimePresentStop(hdr, AllowBatching);
         break;
     }
@@ -1084,8 +1265,7 @@ void PMTraceConsumer::RuntimePresentStop(EVENT_HEADER const& hdr, bool AllowPres
 void HandleNTProcessEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 {
     NTProcessEvent event;
-
-    event.QpcTime = *(uint64_t*) &pEventRecord->EventHeader.TimeStamp;
+    event.QpcTime = pEventRecord->EventHeader.TimeStamp.QuadPart;
 
     switch (pEventRecord->EventHeader.EventDescriptor.Opcode) {
     case EVENT_TRACE_TYPE_START:
@@ -1108,13 +1288,10 @@ void HandleNTProcessEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsume
 
 void HandleMetadataEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 {
-    if (pEventRecord->EventHeader.EventDescriptor.Opcode == EVENT_METADATA_LOG_TYPE_TRACE_EVENT_INFO)
-    {
-        TRACE_EVENT_INFO const* const pTraceEventInfo = reinterpret_cast<TRACE_EVENT_INFO const*>(pEventRecord->UserData);
-
+    if (pEventRecord->EventHeader.EventDescriptor.Opcode == Microsoft_Windows_EventMetadata::EventInfo::Opcode) {
+        auto pTraceEventInfo = reinterpret_cast<TRACE_EVENT_INFO const*>(pEventRecord->UserData);
         if (pTraceEventInfo->DecodingSource == DecodingSourceTlg ||
-            pTraceEventInfo->EventDescriptor.Channel == 0xB)
-        {
+            pTraceEventInfo->EventDescriptor.Channel == 0xB) {
             // Unlikely to have tracelogging metadata, but don't store it.
             return;
         }
