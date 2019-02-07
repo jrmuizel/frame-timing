@@ -190,11 +190,13 @@ int main(int argc, char** argv)
 
     auto const& args = GetCommandLineArgs();
 
-    // Attempt to elevate process privilege as necessary.
-    if (!ElevatePrivilege(argc, argv)) {
-        return 0;   // A new process was started, end this without reporting error.
-                    // TODO: Stay alive and pipe stderr / exit code
-    }
+    // Attempt to elevate process privilege if necessary.
+    //
+    // If a new process needs to be started, this will wait for the elevated
+    // process to complete in order to report stderr and exit code, and then
+    // abort from within ElevatePrivilege() (i.e., the rest of this function
+    // won't run in this process).
+    ElevatePrivilege(argc, argv);
 
     // Create a message queue to handle the input messages.
     WNDCLASSEXW wndClass = { sizeof(wndClass) };
@@ -202,14 +204,14 @@ int main(int argc, char** argv)
     wndClass.lpszClassName = L"PresentMon";
     if (!RegisterClassExW(&wndClass)) {
         fprintf(stderr, "error: failed to register hotkey class.\n");
-        return 2;
+        return 3;
     }
 
     gWnd = CreateWindowExW(0, wndClass.lpszClassName, L"PresentMonWnd", 0, 0, 0, 0, 0, HWND_MESSAGE, 0, 0, nullptr);
     if (!gWnd) {
         fprintf(stderr, "error: failed to create hotkey window.\n");
         UnregisterClass(wndClass.lpszClassName, NULL);
-        return 3;
+        return 4;
     }
 
     // Register the hotkey.
@@ -217,7 +219,7 @@ int main(int argc, char** argv)
         fprintf(stderr, "error: failed to register hotkey.\n");
         DestroyWindow(gWnd);
         UnregisterClass(wndClass.lpszClassName, NULL);
-        return 4;
+        return 5;
     }
 
     // Set CTRL handler (note: must set gWnd before setting the handler).
@@ -228,7 +230,7 @@ int main(int argc, char** argv)
         SetConsoleCtrlHandler(HandleCtrlEvent, FALSE);
         DestroyWindow(gWnd);
         UnregisterClass(wndClass.lpszClassName, NULL);
-        return 5;
+        return 6;
     }
 
     // If the user wants to use the scroll lock key as an indicator of when

@@ -141,7 +141,7 @@ void StopOutputThread();
 void SetOutputRecordingState(bool record);
 
 // Privilege.cpp:
-bool ElevatePrivilege(int argc, char** argv);
+void ElevatePrivilege(int argc, char** argv);
 
 // TraceSession.cpp:
 bool StartTraceSession();

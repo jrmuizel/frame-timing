@@ -90,7 +90,15 @@ Execution options:
   -stop_existing_session    If a trace session with the same name is already
                             running, stop the existing session (to allow this
                             one to proceed).
-  -dont_restart_as_admin    Don't try to elevate privilege.
+  -dont_restart_as_admin    Don't try to elevate privilege.  Elevated privilege
+                            isn't required to trace a process you started, but
+                            PresentMon requires elevated privilege in order to
+                            query processes started on another account. Without
+                            it, these processes cannot be targetted by name and
+                            will be listed as '<error>', and if they are
+                            targetted -terminate_on_proc_exit won't work and
+                            there may be tracking errors near process
+                            termination.
   -terminate_on_proc_exit   Terminate PresentMon when all the target processes
                             have exited.
   -terminate_after_timed    When using -timed, terminate PresentMon after the

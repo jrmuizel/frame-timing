@@ -117,7 +117,7 @@ struct Advapi {
     }
 };
 
-bool RestartAsAdministrator(
+int RestartAsAdministrator(
     int argc,
     char** argv)
 {
@@ -139,66 +139,70 @@ bool RestartAsAdministrator(
         }
     }
 
-#pragma warning(suppress: 4302 4311) // truncate HINSTANCE to int
-    auto ret = (int) ShellExecuteA(NULL, "runas", exe_path, args, NULL, SW_SHOW);
-    if (ret > 32) {
-        return true;
+    SHELLEXECUTEINFOA info = {};
+    info.cbSize       = sizeof(info);
+    info.fMask        = SEE_MASK_NOCLOSEPROCESS;
+    info.lpVerb       = "runas";
+    info.lpFile       = exe_path;
+    info.lpParameters = args;
+    info.nShow        = SW_SHOW;
+    if (!ShellExecuteExA(&info) || info.hProcess == NULL) {
+        fprintf(stderr, "error: failed to elevate privilege ");
+        int e = GetLastError();
+        switch (e) {
+        case ERROR_FILE_NOT_FOUND:    fprintf(stderr, "(file not found).\n"); break;
+        case ERROR_PATH_NOT_FOUND:    fprintf(stderr, "(path not found).\n"); break;
+        case ERROR_DLL_NOT_FOUND:     fprintf(stderr, "(dll not found).\n"); break;
+        case ERROR_ACCESS_DENIED:     fprintf(stderr, "(access denied).\n"); break;
+        case ERROR_CANCELLED:         fprintf(stderr, "(cancelled).\n"); break;
+        case ERROR_NOT_ENOUGH_MEMORY: fprintf(stderr, "(out of memory).\n"); break;
+        case ERROR_SHARING_VIOLATION: fprintf(stderr, "(sharing violation).\n"); break;
+        default:                      fprintf(stderr, "(%u).\n", e); break;
+        }
+        return 2;
     }
-    fprintf(stderr, "warning: failed to elevate privilege");
-    switch (ret) {
-    case 0:                      fprintf(stderr, " (out of memory)"); break;
-    case ERROR_FILE_NOT_FOUND:   fprintf(stderr, " (file not found)"); break;
-    case ERROR_PATH_NOT_FOUND:   fprintf(stderr, " (path was not found)"); break;
-    case ERROR_BAD_FORMAT:       fprintf(stderr, " (image is invalid)"); break;
-    case SE_ERR_ACCESSDENIED:    fprintf(stderr, " (access denied)"); break;
-    case SE_ERR_ASSOCINCOMPLETE: fprintf(stderr, " (association is incomplete)"); break;
-    case SE_ERR_DDEBUSY:         fprintf(stderr, " (DDE busy)"); break;
-    case SE_ERR_DDEFAIL:         fprintf(stderr, " (DDE transaction failed)"); break;
-    case SE_ERR_DDETIMEOUT:      fprintf(stderr, " (DDE transaction timed out)"); break;
-    case SE_ERR_DLLNOTFOUND:     fprintf(stderr, " (DLL not found)"); break;
-    case SE_ERR_NOASSOC:         fprintf(stderr, " (no association)"); break;
-    case SE_ERR_OOM:             fprintf(stderr, " (out of memory)"); break;
-    case SE_ERR_SHARE:           fprintf(stderr, " (sharing violation)"); break;
-    }
-    fprintf(stderr, ".\n");
 
-    return false;
+    WaitForSingleObject(info.hProcess, INFINITE);
+
+    DWORD code = 0;
+    GetExitCodeProcess(info.hProcess, &code);
+    int e = GetLastError();
+    (void) e;
+    CloseHandle(info.hProcess);
+
+    return code;
 }
 
 }
 
-bool ElevatePrivilege(int argc, char** argv)
+// Returning from this function means keep running in this process.
+void ElevatePrivilege(int argc, char** argv)
 {
     auto const& args = GetCommandLineArgs();
 
     // If we are processing an ETL file, then we don't need elevated privilege
     if (args.mEtlFileName != nullptr) {
-        return true;
+        return;
     }
 
-    // Otherwise, we will attempt to elevate the privilege as necessary.  On
-    // failure, we warn the user but continue to try and capture what we can.
+    // Try to load advapi to check and set required privilege.
     Advapi advapi;
-    if (!advapi.Load()) {
-        fprintf(stderr, "warning: unable to detect privilege level. If not running with sufficient\n");
-        fprintf(stderr, "         privilege, PresentMon may not capture correctly.\n");
-        return true;
+    if (advapi.Load() && advapi.EnableDebugPrivilege()) {
+        return;
     }
 
-    if (!advapi.HasElevatedPrivilege() &&
-        args.mTryToElevate &&
-        RestartAsAdministrator(argc, argv)) {
-        return false;
+    // If user requested to run anyway, warn about potential issues.
+    if (!args.mTryToElevate) {
+        fprintf(stderr,
+            "warning: PresentMon requires elevated privilege in order to query processes\n"
+            "    started on another account, so these processes won't be targetted by name\n"
+            "    and will be listed as '<error>'.  Further, there may be tracking errors\n"
+            "    near process termination, and if they are targetted\n"
+            "    -terminate_on_proc_exit won't work.\n");
+        return;
     }
 
-    // On some versions of Windows, DWM processes run under a separate
-    // account.  Try to adjust permissions to get data about a process
-    // owned by another account.
-    if (!advapi.EnableDebugPrivilege()) {
-        fprintf(stderr, "warning: unable to enable debug privilege; PresentMon may not be able to trace all processes.\n");
-        return true;
-    }
-
-    return true;
+    // Try to restart PresentMon with admin privileve
+    exit(RestartAsAdministrator(argc, argv));
 }
 
