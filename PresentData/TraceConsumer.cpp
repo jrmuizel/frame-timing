@@ -220,28 +220,39 @@ static void GetPropertyByIndex(TRACE_EVENT_INFO const& traceEventInfo, EVENT_REC
 static void GetPropertySize(TRACE_EVENT_INFO const& traceEventInfo, EVENT_RECORD const& eventRecord, EVENT_PROPERTY_INFO const& propInfo,
                             uint32_t* outSize, uint32_t* outCount)
 {
-    // TODO: We don't handle nested structs or variable data lengths yet
-    assert((propInfo.Flags & (PropertyParamLength | PropertyStruct)) == 0);
+    // We don't handle all flags yet, these are the ones we do:
+    assert((propInfo.Flags & ~(PropertyStruct | PropertyParamCount | PropertyParamFixedCount)) == 0);
 
-    uint32_t size = propInfo.length;
+    uint32_t size = 0;
+    uint32_t count = 1;
 
-    // TODO: Not sure this is needed, propInfo.length seems to be correct?
-    if (propInfo.nonStructType.InType == TDH_INTYPE_SIZET ||
-        propInfo.nonStructType.InType == TDH_INTYPE_POINTER)
-    {
-        if (eventRecord.EventHeader.Flags & EVENT_HEADER_FLAG_64_BIT_HEADER)
-        {
-            size = 8;
+    if (propInfo.Flags & PropertyStruct) {
+        size = 0;
+        for (USHORT i = 0; i < propInfo.structType.NumOfStructMembers; ++i) {
+            uint32_t memberSize = 0;
+            uint32_t memberCount = 0;
+            GetPropertySize(traceEventInfo, eventRecord, traceEventInfo.EventPropertyInfoArray[propInfo.structType.StructStartIndex + i], &memberSize, &memberCount);
+            size += memberSize * memberCount;
         }
-        else if (eventRecord.EventHeader.Flags & EVENT_HEADER_FLAG_32_BIT_HEADER)
-        {
-            size = 4;
+    } else {
+        size = propInfo.length;
+
+        // TODO: Not sure this is needed, propInfo.length seems to be correct?
+        if (propInfo.nonStructType.InType == TDH_INTYPE_SIZET ||
+            propInfo.nonStructType.InType == TDH_INTYPE_POINTER) {
+            if (eventRecord.EventHeader.Flags & EVENT_HEADER_FLAG_64_BIT_HEADER) {
+                size = 8;
+            } else if (eventRecord.EventHeader.Flags & EVENT_HEADER_FLAG_32_BIT_HEADER) {
+                size = 4;
+            }
         }
     }
 
-    uint32_t count = propInfo.count;
-    if (propInfo.Flags & PropertyParamCount)
-    {
+    if (propInfo.Flags & PropertyParamFixedCount) {
+        count = propInfo.count;
+    }
+
+    if (propInfo.Flags & PropertyParamCount) {
         EVENT_PROPERTY_INFO const* countPropInfo = nullptr;
         uint32_t countPropOffset = 0;
         GetPropertyByIndex(traceEventInfo, eventRecord, count, &countPropInfo, &countPropOffset);
