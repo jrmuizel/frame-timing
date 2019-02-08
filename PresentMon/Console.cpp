@@ -80,11 +80,9 @@ void ConsolePrintLn(char const* format, ...)
     va_end(args);
 
     auto x = gConsoleWriteBufferIndex % gConsoleWidth;
-    if (x > 0) {
-        auto s = gConsoleWidth - x;
-        memset(gConsoleWriteBuffer + gConsoleWriteBufferIndex, ' ', s);
-        gConsoleWriteBufferIndex += s;
-    }
+    auto s = gConsoleWidth - x;
+    memset(gConsoleWriteBuffer + gConsoleWriteBufferIndex, ' ', s);
+    gConsoleWriteBufferIndex += s;
 }
 
 void CommitConsole()
