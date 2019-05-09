@@ -22,32 +22,32 @@
     <ProjectGuid>{892028E5-32F6-45FC-8AB2-90FCBCAC4BF6}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>PresentData</RootNamespace>
-    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.18362.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -108,7 +108,7 @@
       <TreatLinkerWarningAsErrors>true</TreatLinkerWarningAsErrors>
     </Link>
     <PreBuildEvent>
-        <Command>
+      <Command>
             @if not exist "$(WindowsSdkDir_10)Windows Performance Toolkit\KernelTraceControl.h" @(
                 echo Could not find required components "$(WindowsSdkDir_10)Windows Performance Toolkit\KernelTraceControl.h"
                 echo Install the Windows Performance Toolkit from Microsoft to build PresentMon.
@@ -132,7 +132,7 @@
       <TreatLinkerWarningAsErrors>true</TreatLinkerWarningAsErrors>
     </Link>
     <PreBuildEvent>
-        <Command>
+      <Command>
             @if not exist "$(WindowsSdkDir_10)Windows Performance Toolkit\KernelTraceControl.h" @(
                 echo Could not find required components "$(WindowsSdkDir_10)Windows Performance Toolkit\KernelTraceControl.h"
                 echo Install the Windows Performance Toolkit from Microsoft to build PresentMon.
@@ -160,7 +160,7 @@
       <TreatLinkerWarningAsErrors>true</TreatLinkerWarningAsErrors>
     </Link>
     <PreBuildEvent>
-        <Command>
+      <Command>
             @if not exist "$(WindowsSdkDir_10)Windows Performance Toolkit\KernelTraceControl.h" @(
                 echo Could not find required components "$(WindowsSdkDir_10)Windows Performance Toolkit\KernelTraceControl.h"
                 echo Install the Windows Performance Toolkit from Microsoft to build PresentMon.
@@ -188,7 +188,7 @@
       <TreatLinkerWarningAsErrors>true</TreatLinkerWarningAsErrors>
     </Link>
     <PreBuildEvent>
-        <Command>
+      <Command>
             @if not exist "$(WindowsSdkDir_10)Windows Performance Toolkit\KernelTraceControl.h" @(
                 echo Could not find required components "$(WindowsSdkDir_10)Windows Performance Toolkit\KernelTraceControl.h"
                 echo Install the Windows Performance Toolkit from Microsoft to build PresentMon.
