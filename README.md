@@ -59,6 +59,7 @@ Capture target options:
 
 Output options (see README for file naming defaults):
   -output_file [path]       Write CSV output to specified path.
+  -output_stdout            Write CSV output to STDOUT.
   -multi_csv                Create a separate CSV file for each captured
                             process.
   -no_csv                   Do not create any output file.

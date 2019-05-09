@@ -214,6 +214,7 @@ static void PrintHelp()
 
         "Output options (see README for file naming defaults)", nullptr,
         "-output_file [path]",      "Write CSV output to specified path.",
+        "-output_stdout",           "Write CSV output to STDOUT.",
         "-multi_csv",               "Create a separate CSV file for each captured process.",
         "-no_csv",                  "Do not create any output file.",
         "-no_top",                  "Don't display active swap chains in the console window.",
@@ -301,7 +302,7 @@ bool ParseCommandLine(int argc, char** argv)
 
     args->mTargetProcessNames.clear();
     args->mExcludeProcessNames.clear();
-    args->mOutputFileName = nullptr;
+    args->mOutputCsvFileName = nullptr;
     args->mEtlFileName = nullptr;
     args->mSessionName = "PresentMon";
     args->mTargetPid = 0;
@@ -309,11 +310,12 @@ bool ParseCommandLine(int argc, char** argv)
     args->mTimer = 0;
     args->mHotkeyModifiers = MOD_NOREPEAT;
     args->mHotkeyVirtualKeyCode = 0;
-    args->mOutputFile = true;
+    args->mOutputCsvToFile = true;
+    args->mOutputCsvToStdout = false;
     args->mScrollLockIndicator = false;
     args->mExcludeDropped = false;
     args->mVerbosity = Verbosity::Normal;
-    args->mSimpleConsole = false;
+    args->mConsoleOutputType = ConsoleOutput::Full;
     args->mTerminateOnProcExit = false;
     args->mTerminateAfterTimer = false;
     args->mHotkeySupport = false;
@@ -355,10 +357,11 @@ bool ParseCommandLine(int argc, char** argv)
         else ARG2("-etl_file",               args->mEtlFileName                = argv[i])
 
         // Output options:
-        else ARG2("-output_file",            args->mOutputFileName             = argv[i])
+        else ARG2("-output_file",            args->mOutputCsvFileName          = argv[i])
+        else ARG1("-output_stdout",          args->mOutputCsvToStdout          = true)
         else ARG1("-multi_csv",              args->mMultiCsv                   = true)
-        else ARG1("-no_csv",                 args->mOutputFile                 = false)
-        else ARG1("-no_top",                 args->mSimpleConsole              = true)
+        else ARG1("-no_csv",                 args->mOutputCsvToFile            = false)
+        else ARG1("-no_top",                 args->mConsoleOutputType          = ConsoleOutput::Simple)
 
         // Recording options:
         else if (strcmp(argv[i], "-hotkey") == 0) { if (AssignHotkey(++i, argc, argv, args)) continue; }
@@ -386,11 +389,19 @@ bool ParseCommandLine(int argc, char** argv)
         return false;
     }
 
-    // Validate command line arguments
-    if (args->mMultiCsv && !args->mOutputFile) {
-        args->mMultiCsv = false; // -multi_csv and -no_csv provided, don't need a warning on this one
+    // Set mVerbosity enum based on simple/verbose collection specified.  If
+    // both -simple and -verbose arguments are used, ignore -simple.
+    if (verbose) {
+        if (simple) {
+            fprintf(stderr, "warning: -simple and -verbose arguments are not compatible; ignoring -simple.\n");
+        }
+        args->mVerbosity = Verbosity::Verbose;
+    }
+    else if (simple) {
+        args->mVerbosity = Verbosity::Simple;
     }
 
+    // Disallow hotkey of CTRL+C, CTRL+SCROLL, and F12
     if (args->mHotkeySupport) {
         if ((args->mHotkeyModifiers & MOD_CONTROL) != 0 && (
             args->mHotkeyVirtualKeyCode == 0x44 /*C*/ ||
@@ -407,22 +418,57 @@ bool ParseCommandLine(int argc, char** argv)
         }
     }
 
-    if (verbose) {
-        if (simple) {
-            fprintf(stderr, "warning: -simple and -verbose arguments are not compatible; ignoring -simple.\n");
+    // If -no_csv is used, ignore -multi_csv, -output_file, or -output_stdout
+    // if they are also used.
+    if (!args->mOutputCsvToFile) {
+        if (args->mMultiCsv) {
+            fprintf(stderr, "warning: -multi_csv and -no_csv arguments are not compatible; ignoring -multi_csv.\n");
+            args->mMultiCsv = false;
         }
-        args->mVerbosity = Verbosity::Verbose;
-    }
-    else if (simple) {
-        args->mVerbosity = Verbosity::Simple;
+        if (args->mOutputCsvFileName != nullptr) {
+            fprintf(stderr, "warning: -output_file and -no_csv arguments are not compatible; ignoring -output_file.\n");
+            args->mOutputCsvFileName = nullptr;
+        }
+        if (args->mOutputCsvToStdout) {
+            fprintf(stderr, "warning: -output_stdout and -no_csv arguments are not compatible; ignoring -output_stdout.\n");
+            args->mOutputCsvToStdout = false;
+        }
     }
 
-    if (!args->mSimpleConsole && !InitializeConsole()) {
-        if (args->mOutputFile) {
+    // If we're outputing CSV to stdout, we can't use it for console output.
+    //
+    // Further, we're currently limited to outputing CSV to either file(s) or
+    // stdout, so disallow use of both -output_file and -output_stdout.  Also,
+    // since -output_stdout redirects all CSV output to stdout ignore
+    // -multi_csv or -include_mixed_reality in this case.
+    if (args->mOutputCsvToStdout) {
+        args->mConsoleOutputType = ConsoleOutput::None; // No warning needed if user used -no_top, just swap out Simple for None
+
+        if (args->mOutputCsvFileName != nullptr) {
+            fprintf(stderr, "error: only one of -output_file or -output_stdout arguments can be used.\n");
+            PrintHelp();
+            return false;
+        }
+
+        if (args->mMultiCsv) {
+            fprintf(stderr, "warning: -multi_csv and -output_stdout are not compatible; ignoring -multi_csv.\n");
+            args->mMultiCsv = false;
+        }
+
+        if (args->mIncludeWindowsMixedReality) {
+            fprintf(stderr, "warning: -include_mixed_reality and -output_stdout are not compatible; ignoring -include_mixed_reality.\n");
+            args->mIncludeWindowsMixedReality = false;
+        }
+    }
+
+    // Try to initialize the console, and warn if we're not going to be able to
+    // do the advanced display as requested.
+    if (args->mConsoleOutputType == ConsoleOutput::Full && !args->mOutputCsvToStdout && !InitializeConsole()) {
+        if (args->mOutputCsvToFile) {
             fprintf(stderr, "warning: could not initialize console display; continuing with -no_top.\n");
-            args->mSimpleConsole = true;
+            args->mConsoleOutputType = ConsoleOutput::Simple;
         } else {
-            fprintf(stderr, "error: could not initialize console display; use -no_top or CSV output to work around this error.\n");
+            fprintf(stderr, "error: could not initialize console display; use -no_top or -output_stdout in this environment.\n");
             PrintHelp();
             return false;
         }

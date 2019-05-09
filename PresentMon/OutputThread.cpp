@@ -461,10 +461,10 @@ done:
 
     // Limit the present history stored in SwapChainData to 2 seconds, so that
     // processes that stop presenting are removed from the console display.
-    // This only applies to console output, if using mSimpleConsole then it's
-    // ok to just leave the older presents in the history buffer since they
-    // aren't used for anything.
-    if (!args.mSimpleConsole) {
+    // This only applies to ConsoleOutput::Full, otherwise it's ok to just
+    // leave the older presents in the history buffer since they aren't used
+    // for anything.
+    if (args.mConsoleOutputType == ConsoleOutput::Full) {
         PruneHistory(*ntProcessEvents, *presentEvents, *lsrEvents);
     }
 
@@ -516,7 +516,17 @@ void Output()
         // just reading it without correlation to gRecordingToggleHistory, we
         // don't need the critical section.
         auto realtimeRecording = gIsRecording;
-        if (!args.mSimpleConsole) {
+        switch (args.mConsoleOutputType) {
+        case ConsoleOutput::None:
+            break;
+        case ConsoleOutput::Simple:
+#if _DEBUG
+            if (realtimeRecording) {
+                printf(".");
+            }
+#endif
+            break;
+        case ConsoleOutput::Full:
             for (auto const& pair : gProcesses) {
                 UpdateConsole(pair.first, pair.second);
             }
@@ -526,12 +536,8 @@ void Output()
                 ConsolePrintLn("** RECORDING **");
             }
             CommitConsole();
+            break;
         }
-#if _DEBUG
-        else if (realtimeRecording) {
-            printf(".");
-        }
-#endif
 
         // Everything is processed and output out at this point, so if we're
         // quiting we don't need to update the rest.

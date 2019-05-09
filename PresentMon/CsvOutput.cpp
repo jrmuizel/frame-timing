@@ -64,138 +64,6 @@ const char* FinalStateToDroppedString(PresentResult res)
     }
 }
 
-/* This text is reproduced in the readme, modify both if there are changes:
-
-By default, PresentMon creates a CSV file named `PresentMon-TIME.csv`, where
-`TIME` is the creation time in ISO 8601 format.  To specify your own output
-location, use the `-output_file PATH` command line argument.
-
-If `-multi_csv` is used, then one CSV is created for each process captured with
-`-PROCESSNAME` appended to the file name.
-
-If `-hotkey` is used, then one CSV is created each time recording is started
-with `-INDEX` appended to the file name.
-
-If `-include_mixed_reality` is used, a second CSV file will be generated with
-`_WMR` appended to the filename containing the WMR data.
-*/
-static void GenerateFilename(char const* processName, char* path)
-{
-    auto const& args = GetCommandLineArgs();
-
-    char ext[_MAX_EXT];
-    int pathLength = MAX_PATH;
-
-#define ADD_TO_PATH(...) do { \
-    if (path != nullptr) { \
-        auto result = _snprintf_s(path, pathLength, _TRUNCATE, __VA_ARGS__); \
-        if (result == -1) path = nullptr; else { path += result; pathLength -= result; } \
-    } \
-} while (0)
-
-    // Generate base filename.
-    if (args.mOutputFileName) {
-        char drive[_MAX_DRIVE];
-        char dir[_MAX_DIR];
-        char name[_MAX_FNAME];
-        _splitpath_s(args.mOutputFileName, drive, dir, name, ext);
-        ADD_TO_PATH("%s%s%s", drive, dir, name);
-    } else {
-        struct tm tm;
-        time_t time_now = time(NULL);
-        localtime_s(&tm, &time_now);
-        ADD_TO_PATH("PresentMon-%4d-%02d-%02dT%02d%02d%02d", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
-        strcpy_s(ext, ".csv");
-    }
-
-    // Append -PROCESSNAME if applicable.
-    if (processName != nullptr) {
-        ADD_TO_PATH("-%s", processName);
-    }
-
-    // Append -INDEX if applicable.
-    if (args.mHotkeySupport) {
-        ADD_TO_PATH("-%d", gRecordingCount);
-    }
-
-    // Append extension.
-    ADD_TO_PATH("%s", ext);
-}
-
-static void WriteCsvHeader(FILE* fp);
-
-static OutputCsv CreateOutputCsv(char const* processName)
-{
-    auto const& args = GetCommandLineArgs();
-
-    OutputCsv outputCsv = {};
-
-    // Generate filename.
-    char path[MAX_PATH];
-    GenerateFilename(processName, path);
-
-    // Open output file and print CSV header.
-    if (fopen_s(&outputCsv.mFile, path, "wb") == 0) {
-        WriteCsvHeader(outputCsv.mFile);
-    }
-
-    // Open WMR file if including WMR data.
-    if (args.mIncludeWindowsMixedReality) {
-        outputCsv.mWmrFile = CreateLsrCsvFile(path);
-    }
-
-    return outputCsv;
-}
-
-OutputCsv GetOutputCsv(ProcessInfo* processInfo)
-{
-    auto const& args = GetCommandLineArgs();
-
-    if (args.mOutputFile && processInfo->mOutputCsv.mFile == nullptr) {
-        if (args.mMultiCsv) {
-            processInfo->mOutputCsv = CreateOutputCsv(processInfo->mModuleName.c_str());
-        } else {
-            if (gSingleOutputCsv.mFile == nullptr) {
-                gSingleOutputCsv = CreateOutputCsv(nullptr);
-            }
-
-            processInfo->mOutputCsv = gSingleOutputCsv;
-        }
-    }
-
-    return processInfo->mOutputCsv;
-}
-
-static void Close(OutputCsv* outputCsv)
-{
-    if (outputCsv->mFile != nullptr) {
-        fclose(outputCsv->mFile);
-        outputCsv->mFile = nullptr;
-    }
-    if (outputCsv->mWmrFile != nullptr) {
-        fclose(outputCsv->mWmrFile);
-        outputCsv->mWmrFile = nullptr;
-    }
-}
-
-void CloseOutputCsv(ProcessInfo* processInfo)
-{
-    auto const& args = GetCommandLineArgs();
-
-    // nullptr means close the single output CSV.  Otherwise, if !mMultiCsv
-    // then processInfo's files are just pointers to the single output CSV.
-    if (processInfo == nullptr) {
-        Close(&gSingleOutputCsv);
-    } else {
-        if (args.mMultiCsv) {
-            Close(&processInfo->mOutputCsv);
-        } else {
-            processInfo->mOutputCsv.mFile = nullptr;
-            processInfo->mOutputCsv.mWmrFile = nullptr;
-        }
-    }
-}
-
 static void WriteCsvHeader(FILE* fp)
 {
     auto const& args = GetCommandLineArgs();
@@ -286,5 +154,146 @@ void UpdateCsv(ProcessInfo* processInfo, SwapChainData const& chain, PresentEven
         fprintf(fp, ",%.3lf,%.3lf", msUntilRenderComplete, msUntilDisplayed);
     }
     fprintf(fp, "\n");
+}
+
+/* This text is reproduced in the readme, modify both if there are changes:
+
+By default, PresentMon creates a CSV file named `PresentMon-TIME.csv`, where
+`TIME` is the creation time in ISO 8601 format.  To specify your own output
+location, use the `-output_file PATH` command line argument.
+
+If `-multi_csv` is used, then one CSV is created for each process captured with
+`-PROCESSNAME` appended to the file name.
+
+If `-hotkey` is used, then one CSV is created each time recording is started
+with `-INDEX` appended to the file name.
+
+If `-include_mixed_reality` is used, a second CSV file will be generated with
+`_WMR` appended to the filename containing the WMR data.
+*/
+static void GenerateFilename(char const* processName, char* path)
+{
+    auto const& args = GetCommandLineArgs();
+
+    char ext[_MAX_EXT];
+    int pathLength = MAX_PATH;
+
+#define ADD_TO_PATH(...) do { \
+    if (path != nullptr) { \
+        auto result = _snprintf_s(path, pathLength, _TRUNCATE, __VA_ARGS__); \
+        if (result == -1) path = nullptr; else { path += result; pathLength -= result; } \
+    } \
+} while (0)
+
+    // Generate base filename.
+    if (args.mOutputCsvFileName) {
+        char drive[_MAX_DRIVE];
+        char dir[_MAX_DIR];
+        char name[_MAX_FNAME];
+        _splitpath_s(args.mOutputCsvFileName, drive, dir, name, ext);
+        ADD_TO_PATH("%s%s%s", drive, dir, name);
+    } else {
+        struct tm tm;
+        time_t time_now = time(NULL);
+        localtime_s(&tm, &time_now);
+        ADD_TO_PATH("PresentMon-%4d-%02d-%02dT%02d%02d%02d", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+        strcpy_s(ext, ".csv");
+    }
+
+    // Append -PROCESSNAME if applicable.
+    if (processName != nullptr) {
+        ADD_TO_PATH("-%s", processName);
+    }
+
+    // Append -INDEX if applicable.
+    if (args.mHotkeySupport) {
+        ADD_TO_PATH("-%d", gRecordingCount);
+    }
+
+    // Append extension.
+    ADD_TO_PATH("%s", ext);
+}
+
+static OutputCsv CreateOutputCsv(char const* processName)
+{
+    auto const& args = GetCommandLineArgs();
+
+    OutputCsv outputCsv = {};
+
+    if (args.mOutputCsvToStdout) {
+        outputCsv.mFile = stdout;
+        outputCsv.mWmrFile = nullptr;       // WMR disallowed if -output_stdout
+    } else {
+        char path[MAX_PATH];
+        GenerateFilename(processName, path);
+
+        fopen_s(&outputCsv.mFile, path, "wb");
+
+        if (args.mIncludeWindowsMixedReality) {
+            outputCsv.mWmrFile = CreateLsrCsvFile(path);
+        }
+    }
+
+    if (outputCsv.mFile != nullptr) {
+        WriteCsvHeader(outputCsv.mFile);
+    }
+
+    return outputCsv;
+}
+
+OutputCsv GetOutputCsv(ProcessInfo* processInfo)
+{
+    auto const& args = GetCommandLineArgs();
+
+    // TODO: If fopen_s() fails to open mFile, we'll just keep trying here
+    // every time PresentMon wants to output to the file. We should detect the
+    // failure and generate an error instead.
+
+    if (args.mOutputCsvToFile && processInfo->mOutputCsv.mFile == nullptr) {
+        if (args.mMultiCsv) {
+            processInfo->mOutputCsv = CreateOutputCsv(processInfo->mModuleName.c_str());
+        } else {
+            if (gSingleOutputCsv.mFile == nullptr) {
+                gSingleOutputCsv = CreateOutputCsv(nullptr);
+            }
+
+            processInfo->mOutputCsv = gSingleOutputCsv;
+        }
+    }
+
+    return processInfo->mOutputCsv;
+}
+
+void CloseOutputCsv(ProcessInfo* processInfo)
+{
+    auto const& args = GetCommandLineArgs();
+
+    // If processInfo is nullptr, it means we should operate on the global
+    // single output CSV.
+    //
+    // We only actually close the FILE if we own it (we're operating on the
+    // single global output CSV, or we're writing a CSV per process) and it's
+    // not stdout.
+    OutputCsv* csv = nullptr;
+    bool closeFile = false;
+    if (processInfo == nullptr) {
+        csv = &gSingleOutputCsv;
+        closeFile = !args.mOutputCsvToStdout;
+    } else {
+        csv = &processInfo->mOutputCsv;
+        closeFile = !args.mOutputCsvToStdout && args.mMultiCsv;
+    }
+
+    if (closeFile) {
+        if (csv->mFile != nullptr) {
+            fclose(csv->mFile);
+        }
+        if (csv->mWmrFile != nullptr) {
+            fclose(csv->mWmrFile);
+        }
+    }
+
+    csv->mFile = nullptr;
+    csv->mWmrFile = nullptr;
 }
 

@@ -56,10 +56,16 @@ enum class Verbosity {
     Verbose
 };
 
+enum class ConsoleOutput {
+    None,
+    Simple,
+    Full
+};
+
 struct CommandLineArgs {
     std::vector<const char*> mTargetProcessNames;
     std::vector<const char*> mExcludeProcessNames;
-    const char *mOutputFileName;
+    const char *mOutputCsvFileName;
     const char *mEtlFileName;
     const char *mSessionName;
     UINT mTargetPid;
@@ -67,11 +73,12 @@ struct CommandLineArgs {
     UINT mTimer;
     UINT mHotkeyModifiers;
     UINT mHotkeyVirtualKeyCode;
+    ConsoleOutput mConsoleOutputType;
     Verbosity mVerbosity;
-    bool mOutputFile;
+    bool mOutputCsvToFile;
+    bool mOutputCsvToStdout;
     bool mScrollLockIndicator;
     bool mExcludeDropped;
-    bool mSimpleConsole;
     bool mTerminateOnProcExit;
     bool mTerminateAfterTimer;
     bool mHotkeySupport;
