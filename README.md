@@ -146,6 +146,14 @@ and `-INDEX` appended to the file name.
 | WasBatched             | Whether the frame was submitted by the driver on a different thread than the app (1) or not (0) | `-verbose` |
 | DwmNotified            | Whether the desktop compositor was notified about the frame (1) or not (0) | `-verbose` |
 
+PresentMon doesn't directly measure the latency from a user's input to the
+display of that frame because it doesn't have insight into when the application
+collects and applies user input.  A potential approximation is to assume that
+the application collects user input immediately after presenting the previous
+frame.  To compute this, search for the previous row that uses the same swap
+chain and then:
+
+```LatencyMs =~ 1000 * MsBetweenPresents + MsUntilDisplayed - previous(MsInPresentAPI)```
 
 ## Windows Mixed Reality CSV file output
 
