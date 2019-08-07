@@ -1,5 +1,5 @@
 /*
-Copyright 2017 Intel Corporation
+Copyright 2017-2019 Intel Corporation
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -30,27 +30,26 @@ SOFTWARE.
 
 PresentEvent::PresentEvent(EVENT_HEADER const& hdr, ::Runtime runtime)
     : QpcTime(*(uint64_t*) &hdr.TimeStamp)
+    , ProcessId(hdr.ProcessId)
+    , ThreadId(hdr.ThreadId)
+    , TimeTaken(0)
+    , ReadyTime(0)
+    , ScreenTime(0)
     , SwapChainAddress(0)
     , SyncInterval(-1)
     , PresentFlags(0)
-    , ProcessId(hdr.ProcessId)
+    , Hwnd(0)
+    , TokenPtr(0)
+    , QueueSubmitSequence(0)
+    , Runtime(runtime)
     , PresentMode(PresentMode::Unknown)
+    , FinalState(PresentResult::Unknown)
     , SupportsTearing(false)
     , MMIO(false)
     , SeenDxgkPresent(false)
     , SeenWin32KEvents(false)
     , WasBatched(false)
     , DwmNotified(false)
-    , Runtime(runtime)
-    , TimeTaken(0)
-    , ReadyTime(0)
-    , ScreenTime(0)
-    , FinalState(PresentResult::Unknown)
-    , PlaneIndex(0)
-    , QueueSubmitSequence(0)
-    , RuntimeThread(hdr.ThreadId)
-    , Hwnd(0)
-    , TokenPtr(0)
     , Completed(false)
 {
 }
@@ -340,7 +339,7 @@ void PMTraceConsumer::HandleDxgkPropagatePresentHistoryEventArgs(DxgkPropagatePr
     if (eventIter->second->PresentMode == PresentMode::Composed_Copy_GPU_GDI) {
         // Manipulate the map here
         // When DWM is ready to present, we'll query for the most recent blt targeting this window and take it out of the map
-        mPresentByWindow[eventIter->second->Hwnd] = eventIter->second;
+        mLastWindowPresent[eventIter->second->Hwnd] = eventIter->second;
     }
 
     mDxgKrnlPresentHistoryTokens.erase(eventIter);
@@ -446,7 +445,6 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         // Avoid double-marking a single present packet coming from the MPO API
         if (eventIter->second->ReadyTime == 0) {
             eventIter->second->ReadyTime = EventTime;
-            eventIter->second->PlaneIndex = pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"LayerIndex");
         }
 
         if (eventIter->second->PresentMode == PresentMode::Hardware_Independent_Flip ||
@@ -529,7 +527,7 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
             pmConsumer->CompletePresent(eventIter->second);
         }
 
-        if (eventIter->second->RuntimeThread != hdr.ThreadId) {
+        if (eventIter->second->ThreadId != hdr.ThreadId) {
             if (eventIter->second->TimeTaken == 0) {
                 eventIter->second->TimeTaken = EventTime - eventIter->second->QpcTime;
             }
@@ -734,9 +732,9 @@ void HandleWin32kEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         {
             // InFrame = composition is starting
             if (event.Hwnd) {
-                auto hWndIter = pmConsumer->mPresentByWindow.find(event.Hwnd);
-                if (hWndIter == pmConsumer->mPresentByWindow.end()) {
-                    pmConsumer->mPresentByWindow.emplace(event.Hwnd, eventIter->second);
+                auto hWndIter = pmConsumer->mLastWindowPresent.find(event.Hwnd);
+                if (hWndIter == pmConsumer->mLastWindowPresent.end()) {
+                    pmConsumer->mLastWindowPresent.emplace(event.Hwnd, eventIter->second);
                 }
                 else if (hWndIter->second != eventIter->second) {
                     hWndIter->second->FinalState = PresentResult::Discarded;
@@ -766,7 +764,7 @@ void HandleWin32kEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
                 }
             }
             if (event.Hwnd) {
-                pmConsumer->mPresentByWindow.erase(event.Hwnd);
+                pmConsumer->mLastWindowPresent.erase(event.Hwnd);
             }
             break;
         }
@@ -811,7 +809,7 @@ void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
     {
     case DWM_GetPresentHistory:
     {
-        for (auto& hWndPair : pmConsumer->mPresentByWindow)
+        for (auto& hWndPair : pmConsumer->mLastWindowPresent)
         {
             auto& present = hWndPair.second;
             // Pickup the most recent present from a given window
@@ -822,7 +820,7 @@ void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
             present->DwmNotified = true;
             pmConsumer->mPresentsWaitingForDWM.emplace_back(present);
         }
-        pmConsumer->mPresentByWindow.clear();
+        pmConsumer->mLastWindowPresent.clear();
         break;
     }
     case DWM_Schedule_Present_Start:
@@ -849,7 +847,7 @@ void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 
         // Watch for multiple legacy blits completing against the same window		
         auto hWnd = pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"hwnd");
-        pmConsumer->mPresentByWindow[hWnd] = flipIter->second;
+        pmConsumer->mLastWindowPresent[hWnd] = flipIter->second;
         flipIter->second->DwmNotified = true;
         pmConsumer->mPresentsByLegacyBlitToken.erase(flipIter);
         break;
@@ -925,9 +923,9 @@ void PMTraceConsumer::CompletePresent(std::shared_ptr<PresentEvent> p)
         mPresentsBySubmitSequence.erase(p->QueueSubmitSequence);
     }
     if (p->Hwnd != 0) {
-        auto hWndIter = mPresentByWindow.find(p->Hwnd);
-        if (hWndIter != mPresentByWindow.end() && hWndIter->second == p) {
-            mPresentByWindow.erase(hWndIter);
+        auto hWndIter = mLastWindowPresent.find(p->Hwnd);
+        if (hWndIter != mLastWindowPresent.end() && hWndIter->second == p) {
+            mLastWindowPresent.erase(hWndIter);
         }
     }
     if (p->TokenPtr != 0) {
@@ -973,23 +971,22 @@ decltype(PMTraceConsumer::mPresentByThreadId.begin()) PMTraceConsumer::FindOrCre
     auto& processMap = mPresentsByProcess[hdr.ProcessId];
     auto processIter = std::find_if(processMap.begin(), processMap.end(),
         [](auto processIter) {return processIter.second->PresentMode == PresentMode::Unknown; });
-    if (processIter == processMap.end()) {
-        // This likely didn't originate from a runtime whose events we're tracking (DXGI/D3D9)
-        // Could be composition buffers, or maybe another runtime (e.g. GL)
-        auto newEvent = std::make_shared<PresentEvent>(hdr, Runtime::Other);
-        processMap.emplace(newEvent->QpcTime, newEvent);
-
-        auto& processSwapChainDeque = mPresentsByProcessAndSwapChain[std::make_tuple(hdr.ProcessId, 0ull)];
-        processSwapChainDeque.emplace_back(newEvent);
-
-        eventIter = mPresentByThreadId.emplace(hdr.ThreadId, newEvent).first;
-    }
-    else {
+    if (processIter != processMap.end()) {
         // Assume batched presents are popped off the front of the driver queue by process in order, do the same here
         eventIter = mPresentByThreadId.emplace(hdr.ThreadId, processIter->second).first;
         processMap.erase(processIter);
+        return eventIter;
     }
 
+    // This likely didn't originate from a runtime whose events we're tracking (DXGI/D3D9)
+    // Could be composition buffers, or maybe another runtime (e.g. GL)
+    auto newEvent = std::make_shared<PresentEvent>(hdr, Runtime::Other);
+    processMap.emplace(newEvent->QpcTime, newEvent);
+
+    auto& processSwapChainDeque = mPresentsByProcessAndSwapChain[std::make_tuple(hdr.ProcessId, 0ull)];
+    processSwapChainDeque.emplace_back(newEvent);
+
+    eventIter = mPresentByThreadId.emplace(hdr.ThreadId, newEvent).first;
     return eventIter;
 }
 
@@ -1002,7 +999,7 @@ void PMTraceConsumer::RuntimePresentStart(PresentEvent &event)
     }
 
     auto pEvent = std::make_shared<PresentEvent>(event);
-    mPresentByThreadId[event.RuntimeThread] = pEvent;
+    mPresentByThreadId[event.ThreadId] = pEvent;
 
     auto& processMap = mPresentsByProcess[event.ProcessId];
     processMap.emplace(event.QpcTime, pEvent);
