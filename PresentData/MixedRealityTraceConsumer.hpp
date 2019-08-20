@@ -231,6 +231,8 @@ struct MRTraceConsumer
     {}
     ~MRTraceConsumer();
 
+    EventMetadata mMetadata;
+
     const bool mSimpleMode;
 
     std::mutex mMutex;

@@ -1,5 +1,5 @@
 /*
-Copyright 2017 Intel Corporation
+Copyright 2017-2019 Intel Corporation
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -22,118 +22,87 @@ SOFTWARE.
 
 #pragma once
 
-#include <windows.h>
+#define NOMINMAX
+#include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
-#include <string>
-#include <map>
-#include <memory>
-#include <tdh.h>
+#include <unordered_map>
 #include <vector>
+#include <windows.h>
+#include <evntcons.h> // must include after windows.h
 
-inline bool operator<(GUID const& lhs, GUID const& rhs)
-{
-    return memcmp(&lhs, &rhs, sizeof(lhs)) < 0;
-}
-inline bool operator<(EVENT_DESCRIPTOR const& lhs, EVENT_DESCRIPTOR const& rhs)
-{
-    return memcmp(&lhs, &rhs, sizeof(lhs)) < 0;
-}
-class EventMetadataContainer
-{
-public:
-    void InsertMetadata(GUID const& Provider, EVENT_DESCRIPTOR const& EventDescriptor, TRACE_EVENT_INFO const* pInfo, SIZE_T TeiSize);
-
-    template <typename T> bool GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name, T* out);
-    template <typename T> T GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name);
-    template <typename T> T GetEventDataFromArray(EVENT_RECORD* pEventRecord, wchar_t const* name, uint32_t index);
-
-private:
-    const void* GetEventDataImpl(EVENT_RECORD* pEventRecord, wchar_t const* name, SIZE_T* pSize);
-    const void* GetEventDataFromArrayImpl(EVENT_RECORD* pEventRecord, wchar_t const* name, uint32_t index, SIZE_T* pSize);
-    std::map<GUID, std::map<EVENT_DESCRIPTOR, std::unique_ptr<byte[]>>> mMetadata;
+struct EventMetadataKey {
+    GUID guid_;
+    EVENT_DESCRIPTOR desc_;
 };
 
-void PrintEventInformationFromTdh(FILE* fp, EVENT_RECORD* pEventRecord);
-std::wstring GetEventTaskNameFromTdh(EVENT_RECORD* pEventRecord);
+struct EventMetadataKeyHash { size_t operator()(EventMetadataKey const& k) const; }; 
+struct EventMetadataKeyEqual { bool operator()(EventMetadataKey const& lhs, EventMetadataKey const& rhs) const; };
 
-template <typename T>
-bool GetEventDataFromTdh(EVENT_RECORD* pEventRecord, wchar_t const* name, T* out, uint32_t arrayIndex, bool bPrintOnError = true)
-{
-    PROPERTY_DATA_DESCRIPTOR descriptor;
-    descriptor.PropertyName = (ULONGLONG) name;
-    descriptor.ArrayIndex = arrayIndex;
+struct EventDataDesc {
+    wchar_t const* name_;   // Property name
+    uint32_t arrayIndex_;   // Array index (optional)
+    void* data_;            // OUT pointer to property data
+    uint32_t size_;         // OUT size of property data
 
-    auto status = TdhGetProperty(pEventRecord, 0, nullptr, 1, &descriptor, sizeof(T), (BYTE*) out);
-    if (status != ERROR_SUCCESS) {
-        if (bPrintOnError) {
-            fprintf(stderr, "error: could not get event %ls property (error=%lu).\n", name, status);
-            PrintEventInformationFromTdh(stderr, pEventRecord);
+    template<typename T> T GetData() const
+    {
+        if (data_ == nullptr) {
+            static bool first = true;
+            if (first) {
+                fprintf(stderr, "error: could not find event's %ls property.\n", name_);
+                first = false;
+            }
+            assert(false);
+            return T {};
         }
-        return false;
+        if (size_ > sizeof(T)) {
+            static bool first = true;
+            if (first) {
+                fprintf(stderr, "error: event's %ls property had unexpected size (%u > %zu).\n", name_, size_, sizeof(T));
+                first = false;
+            }
+            assert(false);
+            return *(T*) data_;
+        }
+        if (size_ < sizeof(T)) {
+
+            // This is allowed and expected.  e.g., sometimes we want a
+            // uint32_t promoted into uint64_t (for example to simplify pointer
+            // handling).  It may also be a mistake though so we keep a warning
+            // in DEBUG_VERBOSE.
+#if DEBUG_VERBOSE
+            static bool first = true;
+            if (first) {
+                fprintf(stderr, "warning: event's %ls property had unexpected size (%u < %zu).\n", name_, size_, sizeof(T));
+                first = false;
+            }
+#endif
+            T t {};
+            memcpy(&t, data_, size_);
+            return t;
+        }
+
+        return *(T*) data_;
     }
+};
 
-    return true;
-}
+struct EventMetadata {
+    std::unordered_map<EventMetadataKey, std::vector<uint8_t>, EventMetadataKeyHash, EventMetadataKeyEqual> metadata_;
 
-template <typename T>
-T GetEventDataFromArrayFromTdh(EVENT_RECORD* pEventRecord, wchar_t const* name, uint32_t index)
-{
-    T value = {};
-    auto ok = GetEventDataFromTdh(pEventRecord, name, &value, index);
-    (void)ok;
-    return value;
-}
+    void AddMetadata(EVENT_RECORD* eventRecord);
+    void GetEventData(EVENT_RECORD* eventRecord, EventDataDesc* desc, uint32_t descCount);
 
-template <typename T>
-bool GetEventDataFromTdh(EVENT_RECORD* pEventRecord, wchar_t const* name, T* out, bool bPrintOnError = true)
-{
-    return GetEventDataFromTdh<T>(pEventRecord, name, out, ULONG_MAX, bPrintOnError);
-}
-
-template <typename T>
-bool EventMetadataContainer::GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name, T* out)
-{
-    SIZE_T Size = 0;
-    const void* pData = GetEventDataImpl(pEventRecord, name, &Size);
-    if (pData != nullptr && Size <= sizeof(*out))
+    template<typename T> T GetEventData(EVENT_RECORD* eventRecord, wchar_t const* name, uint32_t arrayIndex = 0)
     {
-        memcpy(out, pData, Size);
-        return true;
+        EventDataDesc desc = {};
+        desc.name_ = name;
+        desc.arrayIndex_ = arrayIndex;
+        GetEventData(eventRecord, &desc, 1);
+
+        return desc.GetData<T>();
     }
-    return GetEventDataFromTdh(pEventRecord, name, out);
-}
+};
 
-template <typename T>
-T GetEventDataFromTdh(EVENT_RECORD* pEventRecord, wchar_t const* name)
-{
-    T value = {};
-    auto ok = GetEventDataFromTdh(pEventRecord, name, &value);
-    (void) ok;
-    return value;
-}
-
-template <typename T>
-T EventMetadataContainer::GetEventData(EVENT_RECORD* pEventRecord, wchar_t const* name)
-{
-    T value = {};
-    auto ok = GetEventData(pEventRecord, name, &value);
-    (void) ok;
-    return value;
-}
-
-template <typename T>
-T EventMetadataContainer::GetEventDataFromArray(EVENT_RECORD* pEventRecord, wchar_t const* name, uint32_t index)
-{
-    T value = {};
-    SIZE_T Size = 0;
-    const void* pData = GetEventDataFromArrayImpl(pEventRecord, name, index, &Size);
-    if (pData != nullptr && Size <= sizeof(T))
-    {
-        memcpy(&value, pData, Size);
-        return value;
-    }
-    return GetEventDataFromArrayFromTdh<T>(pEventRecord, name, index);
-}
-
-template <> bool GetEventDataFromTdh<std::string>(EVENT_RECORD* pEventRecord, wchar_t const* name, std::string* out, bool bPrintOnError);
-template <> bool EventMetadataContainer::GetEventData<std::string>(EVENT_RECORD* pEventRecord, wchar_t const* name, std::string* out);
+template<> std::string EventMetadata::GetEventData<std::string>(EVENT_RECORD* eventRecord, wchar_t const* name, uint32_t arrayIndex);
+template<> std::wstring EventMetadata::GetEventData<std::wstring>(EVENT_RECORD* eventRecord, wchar_t const* name, uint32_t arrayIndex);

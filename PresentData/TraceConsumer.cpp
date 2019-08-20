@@ -1,5 +1,5 @@
 /*
-Copyright 2017 Intel Corporation
+Copyright 2017-2019 Intel Corporation
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -20,349 +20,255 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+#include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
 #include <windows.h>
 #include <tdh.h> // must include after windows.h
-#include <assert.h>
 
 #include "TraceConsumer.hpp"
+#include "EventMetadataEventStructs.hpp"
 
 namespace {
 
-void PrintIndent(FILE* fp, uint32_t indent)
+uint32_t GetPropertyDataOffset(TRACE_EVENT_INFO const& tei, EVENT_RECORD const& eventRecord, uint32_t index);
+
+// If ((epi.Flags & PropertyParamLength) != 0), the epi.lengthPropertyIndex
+// field contains the index of the property that contains the number of
+// CHAR/WCHARs in the string.
+//
+// Else if ((epi.Flags & PropertyLength) != 0 || epi.length != 0), the
+// epi.length field contains number of CHAR/WCHARs in the string.
+//
+// Else the string is nul-terminated (terminated by (CHAR/WCHAR)0).
+//
+// Note that some event providers do not correctly nul-terminate the last
+// string field in the event. While this is technically invalid, event decoders
+// may silently tolerate such behavior instead of rejecting the event as
+// invalid.
+
+template<typename T>
+uint32_t GetStringPropertySize(TRACE_EVENT_INFO const& tei, EVENT_RECORD const& eventRecord, uint32_t index, uint32_t offset)
 {
-    for (uint32_t i = 0; i < indent; ++i) {
-        fprintf(fp, "    ");
+    auto const& epi = tei.EventPropertyInfoArray[index];
+
+    if ((epi.Flags & PropertyParamLength) != 0) {
+        assert(false); // TODO: These paths just not implemented yet
+        return 0;
     }
-}
 
-char const* InType(USHORT intype) {
-#define RETURN_INTYPE(_Type) if (intype == TDH_INTYPE_##_Type) return #_Type
-    RETURN_INTYPE(NULL);
-    RETURN_INTYPE(UNICODESTRING);
-    RETURN_INTYPE(ANSISTRING);
-    RETURN_INTYPE(INT8);
-    RETURN_INTYPE(UINT8);
-    RETURN_INTYPE(INT16);
-    RETURN_INTYPE(UINT16);
-    RETURN_INTYPE(INT32);
-    RETURN_INTYPE(UINT32);
-    RETURN_INTYPE(INT64);
-    RETURN_INTYPE(UINT64);
-    RETURN_INTYPE(FLOAT);
-    RETURN_INTYPE(DOUBLE);
-    RETURN_INTYPE(BOOLEAN);
-    RETURN_INTYPE(BINARY);
-    RETURN_INTYPE(GUID);
-    RETURN_INTYPE(POINTER);
-    RETURN_INTYPE(FILETIME);
-    RETURN_INTYPE(SYSTEMTIME);
-    RETURN_INTYPE(SID);
-    RETURN_INTYPE(HEXINT32);
-    RETURN_INTYPE(HEXINT64);
-    return "Unknown intype";
-}
+    if (epi.length != 0) {
+        return epi.length;
+    }
 
-char const* OutType(USHORT outtype) {
-#define RETURN_OUTTYPE(_Type) if (outtype == TDH_OUTTYPE_##_Type) return #_Type
-    RETURN_OUTTYPE(NULL);
-    RETURN_OUTTYPE(STRING);
-    RETURN_OUTTYPE(DATETIME);
-    RETURN_OUTTYPE(BYTE);
-    RETURN_OUTTYPE(UNSIGNEDBYTE);
-    RETURN_OUTTYPE(SHORT);
-    RETURN_OUTTYPE(UNSIGNEDSHORT);
-    RETURN_OUTTYPE(INT);
-    RETURN_OUTTYPE(UNSIGNEDINT);
-    RETURN_OUTTYPE(LONG);
-    RETURN_OUTTYPE(UNSIGNEDLONG);
-    RETURN_OUTTYPE(FLOAT);
-    RETURN_OUTTYPE(DOUBLE);
-    RETURN_OUTTYPE(BOOLEAN);
-    RETURN_OUTTYPE(GUID);
-    RETURN_OUTTYPE(HEXBINARY);
-    RETURN_OUTTYPE(HEXINT8);
-    RETURN_OUTTYPE(HEXINT16);
-    RETURN_OUTTYPE(HEXINT32);
-    RETURN_OUTTYPE(HEXINT64);
-    RETURN_OUTTYPE(PID);
-    RETURN_OUTTYPE(TID);
-    RETURN_OUTTYPE(PORT);
-    RETURN_OUTTYPE(IPV4);
-    RETURN_OUTTYPE(IPV6);
-    RETURN_OUTTYPE(SOCKETADDRESS);
-    RETURN_OUTTYPE(CIMDATETIME);
-    RETURN_OUTTYPE(ETWTIME);
-    RETURN_OUTTYPE(XML);
-    RETURN_OUTTYPE(ERRORCODE);
-    RETURN_OUTTYPE(WIN32ERROR);
-    RETURN_OUTTYPE(NTSTATUS);
-    RETURN_OUTTYPE(HRESULT);
-    RETURN_OUTTYPE(CULTURE_INSENSITIVE_DATETIME);
-    RETURN_OUTTYPE(JSON);
-  //RETURN_OUTTYPE(UTF8);
- // RETURN_OUTTYPE(PKCS7_WITH_TYPE_INFO);
-    return "Unknown outtype";
-}
+    if (offset == UINT32_MAX) {
+        offset = GetPropertyDataOffset(tei, eventRecord, index);
+        assert(offset <= eventRecord.UserDataLength);
+    }
 
-void PrintEventProperty(FILE* fp, uintptr_t bufferAddr, EVENT_PROPERTY_INFO const& prop, uint32_t indent)
-{
-    PrintIndent(fp, indent); fprintf(fp, "%ls\n", (wchar_t*)(bufferAddr + prop.NameOffset));
-    ++indent;
+    auto s = (T const*) ((uintptr_t) eventRecord.UserData + offset);
 
-  //PrintIndent(fp, indent); fprintf(fp, "Flags    = %08x\n", prop.Flags);
-    if (prop.Flags & PropertyStruct) {
-        for (ULONG i = 0; i < prop.structType.NumOfStructMembers; ++i) {
-            auto info = (TRACE_EVENT_INFO*) bufferAddr;
-            PrintEventProperty(fp, bufferAddr, info->EventPropertyInfoArray[prop.structType.StructStartIndex + i], indent);
+    uint32_t size = 0;
+    for (uint32_t max = eventRecord.UserDataLength - offset; size < max; ++size) {
+        if (s[size] == (T) 0) {
+            break;
         }
-    } else {
-      //PrintIndent(fp, indent); fprintf(fp, "Map     = %ls\n", (wchar_t*)(bufferAddr + prop.nonStructType.MapNameOffset));
-        PrintIndent(fp, indent); fprintf(fp, "%s -> %s\n",
-            InType(prop.nonStructType.InType),
-            OutType(prop.nonStructType.OutType));
     }
+    return size;
 }
 
-}
-
-void PrintEventInformationFromTdh(FILE* fp, EVENT_RECORD* pEventRecord)
-{
-    ULONG bufferSize = 0;
-    auto status = TdhGetEventInformation(pEventRecord, 0, nullptr, nullptr, &bufferSize);
-    if (status == ERROR_INSUFFICIENT_BUFFER) {
-        auto bufferAddr = (uintptr_t) malloc(bufferSize);
-
-        auto info = (TRACE_EVENT_INFO*) bufferAddr;
-        status = TdhGetEventInformation(pEventRecord, 0, nullptr, info, &bufferSize);
-        if (status == ERROR_SUCCESS) {
-            fprintf(fp, "%ls::%ls::%ls\n",
-                (wchar_t*)(bufferAddr + info->ProviderNameOffset),
-                (wchar_t*)(bufferAddr + info->TaskNameOffset),
-                (wchar_t*)(bufferAddr + info->OpcodeNameOffset));
-          //printf("Keywords = %ls\n\n", (wchar_t*)(bufferAddr + info->KeywordsNameOffset));
-          //printf("TopLevelPropertyCount = %u\n", info->TopLevelPropertyCount);
-          //printf("PropertyCount = %u\n", info->PropertyCount);
-            for (ULONG i = 0, N = info->TopLevelPropertyCount; i < N; ++i) {
-                PrintEventProperty(fp, bufferAddr, info->EventPropertyInfoArray[i], 1);
-            }
-        }
-
-        free((void*) bufferAddr);
-    }
-}
-
-std::wstring GetEventTaskNameFromTdh(EVENT_RECORD* pEventRecord)
-{
-    std::wstring taskName = L"";
-    ULONG bufferSize = 0;
-    auto status = TdhGetEventInformation(pEventRecord, 0, nullptr, nullptr, &bufferSize);
-    if (status == ERROR_INSUFFICIENT_BUFFER) {
-        auto bufferAddr = (uintptr_t)malloc(bufferSize);
-
-        auto info = (TRACE_EVENT_INFO*)bufferAddr;
-        status = TdhGetEventInformation(pEventRecord, 0, nullptr, info, &bufferSize);
-        if (status == ERROR_SUCCESS) {
-            taskName = (wchar_t*)(bufferAddr + info->TaskNameOffset);
-        }
-
-        free((void*)bufferAddr);
-    }
-
-    return taskName;
-}
-
-template <>
-bool GetEventDataFromTdh<std::string>(EVENT_RECORD* pEventRecord, wchar_t const* name, std::string* out, bool bPrintOnError)
-{
-    PROPERTY_DATA_DESCRIPTOR descriptor;
-    descriptor.PropertyName = (ULONGLONG) name;
-    descriptor.ArrayIndex = ULONG_MAX;
-
-    ULONG propertySize = 0;
-    auto status = TdhGetPropertySize(pEventRecord, 0, nullptr, 1, &descriptor, &propertySize);
-    if (status != ERROR_SUCCESS) {
-        if (bPrintOnError) {
-            fprintf(stderr, "error: could not get event %ls property's size (error=%u).\n", name, status);
-        }
-        return false;
-    }
-
-    out->resize(propertySize);
-    auto buffer = (BYTE*) out->data();
-    status = TdhGetProperty(pEventRecord, 0, nullptr, 1, &descriptor, propertySize, buffer);
-    if (status != ERROR_SUCCESS) {
-        if (bPrintOnError) {
-            fprintf(stderr, "error: could not get event %ls property (error=%u).\n", name, status);
-        }
-        return false;
-    }
-
-    return true;
-}
-
-void EventMetadataContainer::InsertMetadata(GUID const& Provider, EVENT_DESCRIPTOR const& EventDescriptor, TRACE_EVENT_INFO const* pInfo, SIZE_T TeiSize)
-{
-    auto& spCachedInfo = mMetadata[Provider][EventDescriptor];
-    if (!spCachedInfo)
-    {
-        spCachedInfo.reset(new byte[TeiSize]);
-        memcpy(spCachedInfo.get(), pInfo, TeiSize);
-    }
-}
-
-static void GetPropertyByIndex(TRACE_EVENT_INFO const& traceEventInfo, EVENT_RECORD const& eventRecord, uint32_t index,
-                               EVENT_PROPERTY_INFO const** outPropInfo, uint32_t* outOffset);
-
-static void GetPropertySize(TRACE_EVENT_INFO const& traceEventInfo, EVENT_RECORD const& eventRecord, EVENT_PROPERTY_INFO const& propInfo,
-                            uint32_t* outSize, uint32_t* outCount)
+void GetPropertySize(TRACE_EVENT_INFO const& tei, EVENT_RECORD const& eventRecord, uint32_t index, uint32_t offset,
+                     uint32_t* outSize, uint32_t* outCount)
 {
     // We don't handle all flags yet, these are the ones we do:
-    assert((propInfo.Flags & ~(PropertyStruct | PropertyParamCount | PropertyParamFixedCount)) == 0);
+    auto const& epi = tei.EventPropertyInfoArray[index];
+    assert((epi.Flags & ~(PropertyStruct | PropertyParamCount | PropertyParamFixedCount)) == 0);
 
     uint32_t size = 0;
     uint32_t count = 1;
 
-    if (propInfo.Flags & PropertyStruct) {
+    if (epi.Flags & PropertyStruct) {
         size = 0;
-        for (USHORT i = 0; i < propInfo.structType.NumOfStructMembers; ++i) {
+        for (USHORT i = 0; i < epi.structType.NumOfStructMembers; ++i) {
             uint32_t memberSize = 0;
             uint32_t memberCount = 0;
-            GetPropertySize(traceEventInfo, eventRecord, traceEventInfo.EventPropertyInfoArray[propInfo.structType.StructStartIndex + i], &memberSize, &memberCount);
+            GetPropertySize(tei, eventRecord, epi.structType.StructStartIndex + i, UINT32_MAX, &memberSize, &memberCount);
             size += memberSize * memberCount;
         }
     } else {
-        size = propInfo.length;
+        switch (epi.nonStructType.InType) {
+        case TDH_INTYPE_UNICODESTRING: size = GetStringPropertySize<wchar_t>(tei, eventRecord, index, offset); break;
+        case TDH_INTYPE_ANSISTRING:    size = GetStringPropertySize<char>   (tei, eventRecord, index, offset); break;
 
-        // TODO: Not sure this is needed, propInfo.length seems to be correct?
-        if (propInfo.nonStructType.InType == TDH_INTYPE_SIZET ||
-            propInfo.nonStructType.InType == TDH_INTYPE_POINTER) {
-            if (eventRecord.EventHeader.Flags & EVENT_HEADER_FLAG_64_BIT_HEADER) {
-                size = 8;
-            } else if (eventRecord.EventHeader.Flags & EVENT_HEADER_FLAG_32_BIT_HEADER) {
-                size = 4;
+        case TDH_INTYPE_POINTER:    // TODO: Not sure this is needed, epi.length seems to be correct?
+        case TDH_INTYPE_SIZET:
+            size = (eventRecord.EventHeader.Flags & EVENT_HEADER_FLAG_64_BIT_HEADER) ? 8 : 4;
+            break;
+
+        case TDH_INTYPE_WBEMSID:
+            // TODO: can't figure out how to decode this... so reverting to TDH for now
+            {
+                PROPERTY_DATA_DESCRIPTOR descriptor;
+                descriptor.PropertyName = (ULONGLONG) &tei + epi.NameOffset;
+                descriptor.ArrayIndex = UINT32_MAX;
+                auto status = TdhGetPropertySize((EVENT_RECORD*) &eventRecord, 0, nullptr, 1, &descriptor, (ULONG*) &size);
+                (void) status;
             }
+            break;
+
+        default:
+            assert(epi.length > 0);
+            size = epi.length;
+            break;
         }
     }
 
-    if (propInfo.Flags & PropertyParamFixedCount) {
-        count = propInfo.count;
+    if (epi.Flags & PropertyParamFixedCount) {
+        count = epi.count;
     }
 
-    if (propInfo.Flags & PropertyParamCount) {
-        EVENT_PROPERTY_INFO const* countPropInfo = nullptr;
-        uint32_t countPropOffset = 0;
-        GetPropertyByIndex(traceEventInfo, eventRecord, count, &countPropInfo, &countPropOffset);
-
-        assert(countPropInfo->Flags == 0);
-        assert(countPropInfo->nonStructType.InType == TDH_INTYPE_UINT32); // TODO: handle other int types
-        count = *(uint32_t const*) ((uintptr_t) eventRecord.UserData + countPropOffset);
+    if (epi.Flags & PropertyParamCount) {
+        assert(count < tei.TopLevelPropertyCount);
+        assert(tei.EventPropertyInfoArray[count].Flags == 0);
+        assert(tei.EventPropertyInfoArray[count].nonStructType.InType == TDH_INTYPE_UINT32);
+        count = *(uint32_t const*) ((uintptr_t) eventRecord.UserData + GetPropertyDataOffset(tei, eventRecord, count));
     }
 
     *outSize = size;
     *outCount = count;
 }
 
-static void GetPropertyByIndex(TRACE_EVENT_INFO const& traceEventInfo, EVENT_RECORD const& eventRecord, uint32_t index,
-                               EVENT_PROPERTY_INFO const** outPropInfo, uint32_t* outOffset)
+uint32_t GetPropertyDataOffset(TRACE_EVENT_INFO const& tei, EVENT_RECORD const& eventRecord, uint32_t index)
 {
-    assert(index < traceEventInfo.TopLevelPropertyCount);
-
+    assert(index < tei.TopLevelPropertyCount);
+    uint32_t size = 0;
+    uint32_t count = 0;
     uint32_t offset = 0;
-    for (uint32_t i = 0;; ++i)
-    {
-        auto const& propInfo = traceEventInfo.EventPropertyInfoArray[i];
-
-        if (i == index)
-        {
-            *outPropInfo = &propInfo;
-            *outOffset = offset;
-            break;
-        }
-
-        uint32_t size = 0;
-        uint32_t count = 0;
-        GetPropertySize(traceEventInfo, eventRecord, propInfo, &size, &count);
+    for (uint32_t i = 0; i < index; ++i) {
+        GetPropertySize(tei, eventRecord, i, offset, &size, &count);
         offset += size * count;
     }
+    return offset;
 }
 
-const void* EventMetadataContainer::GetEventDataImpl(EVENT_RECORD* pEventRecord, wchar_t const* name, SIZE_T* pSize)
+}
+
+size_t EventMetadataKeyHash::operator()(EventMetadataKey const& key) const
 {
-    auto ProviderIter = mMetadata.find(pEventRecord->EventHeader.ProviderId);
-    if (ProviderIter == mMetadata.end())
-        return nullptr;
+    static_assert((sizeof(key) % sizeof(size_t)) == 0, "sizeof(EventMetadataKey) must be multiple of sizeof(size_t)");
+    auto p = (size_t const*) &key;
+    auto h = (size_t) 0;
+    for (size_t i = 0; i < sizeof(key) / sizeof(size_t); ++i) {
+        h ^= p[i];
+    }
+    return h;
+}
 
-    auto EventIter = ProviderIter->second.find(pEventRecord->EventHeader.EventDescriptor);
-    if (EventIter == ProviderIter->second.end())
-        return nullptr;
+bool EventMetadataKeyEqual::operator()(EventMetadataKey const& lhs, EventMetadataKey const& rhs) const
+{
+    return memcmp(&lhs, &rhs, sizeof(EventMetadataKey)) == 0;
+}
 
-    auto& tei = *reinterpret_cast<TRACE_EVENT_INFO*>(EventIter->second.get());
-    uint32_t DataOffset = 0;
-    for (uint32_t i = 0; i < tei.TopLevelPropertyCount; ++i)
-    {
-        auto& prop = tei.EventPropertyInfoArray[i];
+void EventMetadata::AddMetadata(EVENT_RECORD* eventRecord)
+{
+    if (eventRecord->EventHeader.EventDescriptor.Opcode == Microsoft_Windows_EventMetadata::EventInfo::Opcode) {
+        auto userData = (uint8_t const*) eventRecord->UserData;
+        auto tei = (TRACE_EVENT_INFO const*) userData;
 
-        uint32_t size = 0;
-        uint32_t count = 0;
-        GetPropertySize(tei, *pEventRecord, prop, &size, &count);
-        size = size * count;
-
-        if (wcscmp(TEI_PROPERTY_NAME(&tei, &prop), name) == 0)
-        {
-            *pSize = size;
-            return reinterpret_cast<BYTE*>(pEventRecord->UserData) + DataOffset;
+        if (tei->DecodingSource == DecodingSourceTlg || tei->EventDescriptor.Channel == 0xB) {
+            return; // Don't store tracelogging metadata
         }
 
-        DataOffset += size;
+        // Store metadata (overwriting any previous)
+        EventMetadataKey key;
+        key.guid_ = tei->ProviderGuid;
+        key.desc_ = tei->EventDescriptor;
+        metadata_[key].assign(userData, userData + eventRecord->UserDataLength);
     }
-    return nullptr;
 }
 
-const void* EventMetadataContainer::GetEventDataFromArrayImpl(EVENT_RECORD* pEventRecord, wchar_t const* name, uint32_t index, SIZE_T* pSize)
+// Look up metadata for this provider/event and use it to look up the property.
+// If the metadata isn't found look it up using TDH.  Then, look up each
+// property in the metadata to obtain it's data pointer and size.
+void EventMetadata::GetEventData(EVENT_RECORD* eventRecord, EventDataDesc* desc, uint32_t descCount)
 {
-    auto ProviderIter = mMetadata.find(pEventRecord->EventHeader.ProviderId);
-    if (ProviderIter == mMetadata.end())
-        return nullptr;
+    // Look up stored metadata
+    EventMetadataKey key;
+    key.guid_ = eventRecord->EventHeader.ProviderId;
+    key.desc_ = eventRecord->EventHeader.EventDescriptor;
+    auto ii = metadata_.find(key);
 
-    auto EventIter = ProviderIter->second.find(pEventRecord->EventHeader.EventDescriptor);
-    if (EventIter == ProviderIter->second.end())
-        return nullptr;
+    // If not found, look up metadata using TDH
+    if (ii == metadata_.end()) {
+        ULONG bufferSize = 0;
+        auto status = TdhGetEventInformation(eventRecord, 0, nullptr, nullptr, &bufferSize);
+        assert(status == ERROR_INSUFFICIENT_BUFFER);
 
-    auto& tei = *reinterpret_cast<TRACE_EVENT_INFO*>(EventIter->second.get());
-    uint32_t DataOffset = 0;
-    for (uint32_t i = 0; i < tei.TopLevelPropertyCount; ++i)
-    {
-        auto& prop = tei.EventPropertyInfoArray[i];
+        ii = metadata_.emplace(key, std::vector<uint8_t>(bufferSize, 0)).first;
 
+        status = TdhGetEventInformation(eventRecord, 0, nullptr, (TRACE_EVENT_INFO*) ii->second.data(), &bufferSize);
+        assert(status == ERROR_SUCCESS);
+    }
+
+    // Lookup properties in metadata
+    uint32_t foundCount = 0;
+    auto tei = (TRACE_EVENT_INFO*) ii->second.data();
+    for (uint32_t i = 0, offset = 0; i < tei->TopLevelPropertyCount; ++i) {
         uint32_t size = 0;
         uint32_t count = 0;
-        GetPropertySize(tei, *pEventRecord, prop, &size, &count);
+        GetPropertySize(*tei, *eventRecord, i, offset, &size, &count);
 
-        if (wcscmp(TEI_PROPERTY_NAME(&tei, &prop), name) == 0)
-        {
-            assert(index < count);
-            *pSize = size;
-            return reinterpret_cast<BYTE*>(pEventRecord->UserData) + DataOffset + index * size;
+        auto propName = TEI_PROPERTY_NAME(tei, &tei->EventPropertyInfoArray[i]);
+        for (uint32_t j = 0; j < descCount; ++j) {
+            if (wcscmp(propName, desc[j].name_) == 0) {
+                assert(desc[j].arrayIndex_ < count);
+
+                desc[j].data_ = (void*) ((uintptr_t) eventRecord->UserData + offset + desc[j].arrayIndex_ * size);
+                desc[j].size_ = size;
+
+                foundCount += 1;
+                if (foundCount == descCount) {
+                    return;
+                }
+            }
         }
 
-        DataOffset += size * count;
+        offset += size * count;
     }
-    return nullptr;
+
+    // TODO: How should we handle the case of not all properties found?
+    // Sometimes, this is expected: e.g., see MixedRealityTraceConsumer where
+    // it tests if a property exists.
 }
 
-template <> bool EventMetadataContainer::GetEventData<std::string>(EVENT_RECORD* pEventRecord, wchar_t const* name, std::string* out)
+namespace {
+
+template <typename T>
+T GetEventString(EventMetadata* metadata, EVENT_RECORD* eventRecord, wchar_t const* name, uint32_t arrayIndex)
 {
-    SIZE_T Size = 0;
-    const void* pData = GetEventDataImpl(pEventRecord, name, &Size);
-    if (pData != nullptr && Size > 0)
-    {
-        out->resize(Size + 1);
-        memcpy((BYTE*)out->data(), pData, Size);
-        return true;
-    }
-    return GetEventDataFromTdh(pEventRecord, name, out);
+    EventDataDesc desc;
+    desc.name_ = name;
+    desc.arrayIndex_ = arrayIndex;
+    metadata->GetEventData(eventRecord, &desc, 1);
+
+    auto start = (T::value_type*) desc.data_;
+    auto end   = (T::value_type*) ((uintptr_t) desc.data_ + desc.size_);
+    return T(start, end);
 }
+
+}
+
+template <>
+std::string EventMetadata::GetEventData<std::string>(EVENT_RECORD* eventRecord, wchar_t const* name, uint32_t arrayIndex)
+{
+    return GetEventString<std::string>(this, eventRecord, name, arrayIndex);
+}
+
+template <>
+std::wstring EventMetadata::GetEventData<std::wstring>(EVENT_RECORD* eventRecord, wchar_t const* name, uint32_t arrayIndex)
+{
+    return GetEventString<std::wstring>(this, eventRecord, name, arrayIndex);
+}
+

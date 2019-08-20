@@ -77,6 +77,7 @@ PresentEvent::~PresentEvent()
 void PresentEvent::SetPresentMode(::PresentMode mode)
 {
     PresentMode = mode;
+    DebugPrintPresentMode(*this);
 }
 
 void PresentEvent::SetDwmNotified(bool notified)
@@ -107,10 +108,17 @@ void HandleDXGIEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
     case Microsoft_Windows_DXGI::Present_Start::Id:
     case Microsoft_Windows_DXGI::PresentMultiplaneOverlay_Start::Id:
     {
+        EventDataDesc desc[] = {
+            { L"pIDXGISwapChain" },
+            { L"Flags" },
+            { L"SyncInterval" },
+        };
+        pmConsumer->mMetadata.GetEventData(pEventRecord, desc, _countof(desc));
+
         PresentEvent event(hdr, Runtime::DXGI);
-        pmConsumer->mMetadata.GetEventData(pEventRecord, L"pIDXGISwapChain", &event.SwapChainAddress);
-        pmConsumer->mMetadata.GetEventData(pEventRecord, L"Flags",           &event.PresentFlags);
-        pmConsumer->mMetadata.GetEventData(pEventRecord, L"SyncInterval",    &event.SyncInterval);
+        event.SwapChainAddress = desc[0].GetData<uint64_t>();
+        event.PresentFlags     = desc[1].GetData<uint32_t>();
+        event.SyncInterval     = desc[2].GetData<int32_t>();
 
         pmConsumer->CreatePresent(event);
         break;
@@ -393,32 +401,54 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
     auto const& hdr = pEventRecord->EventHeader;
     switch (hdr.EventDescriptor.Id) {
     case Microsoft_Windows_DxgKrnl::Flip_Info::Id:
-        pmConsumer->HandleDxgkFlip(
-            hdr,
-            pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"FlipInterval"),
-            pmConsumer->mMetadata.GetEventData<BOOL>(pEventRecord, L"MMIOFlip") != 0);
+    {
+        EventDataDesc desc[] = {
+            { L"FlipInterval" },
+            { L"MMIOFlip" },
+        };
+        pmConsumer->mMetadata.GetEventData(pEventRecord, desc, _countof(desc));
+        auto FlipInterval = desc[0].GetData<uint32_t>();
+        auto MMIOFlip     = desc[1].GetData<BOOL>() != 0;
+
+        pmConsumer->HandleDxgkFlip(hdr, FlipInterval, MMIOFlip);
         break;
+    }
     case Microsoft_Windows_DxgKrnl::FlipMultiPlaneOverlay_Info::Id:
         pmConsumer->HandleDxgkFlip(hdr, -1, true);
         break;
     case Microsoft_Windows_DxgKrnl::QueuePacket_Start::Id:
-        pmConsumer->HandleDxgkQueueSubmit(
-            hdr,
-            pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"PacketType"),
-            pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"SubmitSequence"),
-            pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"hContext"),
-            pmConsumer->mMetadata.GetEventData<BOOL>(pEventRecord, L"bPresent") != 0,
-            true);
+    {
+        EventDataDesc desc[] = {
+            { L"PacketType" },
+            { L"SubmitSequence" },
+            { L"hContext" },
+            { L"bPresent" },
+        };
+        pmConsumer->mMetadata.GetEventData(pEventRecord, desc, _countof(desc));
+        auto PacketType     = desc[0].GetData<uint32_t>();
+        auto SubmitSequence = desc[1].GetData<uint32_t>();
+        auto hContext       = desc[2].GetData<uint64_t>();
+        auto bPresent       = desc[3].GetData<BOOL>() != 0;
+
+        pmConsumer->HandleDxgkQueueSubmit(hdr, PacketType, SubmitSequence, hContext, bPresent, true);
         break;
+    }
     case Microsoft_Windows_DxgKrnl::QueuePacket_Stop::Id:
         pmConsumer->HandleDxgkQueueComplete(hdr, pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"SubmitSequence"));
         break;
     case Microsoft_Windows_DxgKrnl::MMIOFlip_Info::Id:
-        pmConsumer->HandleDxgkMMIOFlip(
-            hdr,
-            pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"FlipSubmitSequence"),
-            pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"Flags"));
+    {
+        EventDataDesc desc[] = {
+            { L"FlipSubmitSequence" },
+            { L"Flags" },
+        };
+        pmConsumer->mMetadata.GetEventData(pEventRecord, desc, _countof(desc));
+        auto FlipSubmitSequence = desc[0].GetData<uint32_t>();
+        auto Flags              = desc[1].GetData<uint32_t>();
+
+        pmConsumer->HandleDxgkMMIOFlip(hdr, FlipSubmitSequence, Flags);
         break;
+    }
     case Microsoft_Windows_DxgKrnl::MMIOFlipMultiPlaneOverlay_Info::Id:
     {
         // See above for more info about this packet.
@@ -466,7 +496,8 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 
         auto FlipCount = pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"FlipEntryCount");
         for (uint32_t i = 0; i < FlipCount; i++) {
-            auto FlipId = pmConsumer->mMetadata.GetEventDataFromArray<uint64_t>(pEventRecord, L"FlipSubmitSequence", i);
+            // TODO: Combine these into single GetEventData() call?
+            auto FlipId = pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"FlipSubmitSequence", i);
             pmConsumer->HandleDxgkSyncDPC(hdr, (uint32_t)(FlipId >> 32u));
         }
         break;
@@ -511,7 +542,16 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
     case Microsoft_Windows_DxgKrnl::PresentHistoryDetailed_Start::Id:
     case Microsoft_Windows_DxgKrnl::PresentHistory_Start::Id:
     {
-        auto Model = pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"Model");
+        EventDataDesc desc[] = {
+            { L"Token" },
+            { L"TokenData" },
+            { L"Model" },
+        };
+        pmConsumer->mMetadata.GetEventData(pEventRecord, desc, _countof(desc));
+        auto Token     = desc[0].GetData<uint64_t>();
+        auto TokenData = desc[1].GetData<uint64_t>();
+        auto Model     = desc[2].GetData<uint32_t>();
+
         if (Model == D3DKMT_PM_REDIRECTED_GDI) {
             break;
         }
@@ -524,22 +564,25 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         case D3DKMT_PM_REDIRECTED_COMPOSITION: presentMode = PresentMode::Composed_Composition_Atlas; break;
         }
 
-        pmConsumer->HandleDxgkSubmitPresentHistoryEventArgs(
-            hdr,
-            pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"Token"),
-            pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"TokenData"),
-            presentMode);
+        pmConsumer->HandleDxgkSubmitPresentHistoryEventArgs(hdr, Token, TokenData, presentMode);
         break;
     }
     case Microsoft_Windows_DxgKrnl::PresentHistory_Info::Id:
         pmConsumer->HandleDxgkPropagatePresentHistoryEventArgs(hdr, pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"Token"));
         break;
     case Microsoft_Windows_DxgKrnl::Blit_Info::Id:
-        pmConsumer->HandleDxgkBlt(
-            hdr,
-            pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"hwnd"),
-            pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"bRedirectedPresent") != 0);
+    {
+        EventDataDesc desc[] = {
+            { L"hwnd" },
+            { L"bRedirectedPresent" },
+        };
+        pmConsumer->mMetadata.GetEventData(pEventRecord, desc, _countof(desc));
+        auto hwnd               = desc[0].GetData<uint64_t>();
+        auto bRedirectedPresent = desc[1].GetData<uint32_t>();
+
+        pmConsumer->HandleDxgkBlt(hdr, hwnd, bRedirectedPresent);
         break;
+    }
     default:
         assert(!pmConsumer->mFilteredEvents); // Assert that filtering is working if expected
         break;
@@ -773,6 +816,16 @@ void HandleWin32kEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
     switch (hdr.EventDescriptor.Id) {
     case Microsoft_Windows_Win32k::TokenCompositionSurfaceObject_Info::Id:
     {
+        EventDataDesc desc[] = {
+            { L"CompositionSurfaceLuid" },
+            { L"PresentCount" },
+            { L"BindId" },
+        };
+        pmConsumer->mMetadata.GetEventData(pEventRecord, desc, _countof(desc));
+        auto CompositionSurfaceLuid = desc[0].GetData<uint64_t>();
+        auto PresentCount           = desc[1].GetData<uint64_t>();
+        auto BindId                 = desc[2].GetData<uint64_t>();
+
         auto eventIter = pmConsumer->FindOrCreatePresent(hdr);
 
         // Check if we might have retrieved a 'stuck' present from a previous frame.
@@ -784,17 +837,25 @@ void HandleWin32kEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         eventIter->second->SetPresentMode(PresentMode::Composed_Flip);
         eventIter->second->SeenWin32KEvents = true;
 
-        PMTraceConsumer::Win32KPresentHistoryTokenKey key(pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"CompositionSurfaceLuid"),
-            pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"PresentCount"),
-            pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"BindId"));
+        PMTraceConsumer::Win32KPresentHistoryTokenKey key(CompositionSurfaceLuid, PresentCount, BindId);
         pmConsumer->mWin32KPresentHistoryTokens[key] = eventIter->second;
         break;
     }
     case Microsoft_Windows_Win32k::TokenStateChanged_Info::Id:
     {
-        PMTraceConsumer::Win32KPresentHistoryTokenKey key(pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"CompositionSurfaceLuid"),
-            pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"PresentCount"),
-            pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"BindId"));
+        EventDataDesc desc[] = {
+            { L"CompositionSurfaceLuid" },
+            { L"PresentCount" },
+            { L"BindId" },
+            { L"NewState" },
+        };
+        pmConsumer->mMetadata.GetEventData(pEventRecord, desc, _countof(desc));
+        auto CompositionSurfaceLuid = desc[0].GetData<uint64_t>();
+        auto PresentCount           = desc[1].GetData<uint32_t>();
+        auto BindId                 = desc[2].GetData<uint64_t>();
+        auto NewState               = desc[3].GetData<uint32_t>();
+
+        PMTraceConsumer::Win32KPresentHistoryTokenKey key(CompositionSurfaceLuid, PresentCount, BindId);
         auto eventIter = pmConsumer->mWin32KPresentHistoryTokens.find(key);
         if (eventIter == pmConsumer->mWin32KPresentHistoryTokens.end()) {
             return;
@@ -802,8 +863,7 @@ void HandleWin32kEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 
         auto &event = *eventIter->second;
 
-        auto state = (Microsoft_Windows_Win32k::TokenState) pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"NewState");
-        switch (state) {
+        switch (NewState) {
         case Microsoft_Windows_Win32k::TokenState::InFrame: // Composition is starting
         {
             if (event.Hwnd) {
@@ -897,19 +957,25 @@ void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
             return;
         }
 
-        auto flipChainId  = pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"ulFlipChain");
-        auto serialNumber = pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"ulSerialNumber");
+        EventDataDesc desc[] = {
+            { L"ulFlipChain" },
+            { L"ulSerialNumber" },
+            { L"hwnd" },
+        };
+        pmConsumer->mMetadata.GetEventData(pEventRecord, desc, _countof(desc));
+        auto ulFlipChain    = desc[0].GetData<uint32_t>();
+        auto ulSerialNumber = desc[1].GetData<uint32_t>();
+        auto hwnd           = desc[2].GetData<uint64_t>();
 
         // The 64-bit token data from the PHT submission is actually two 32-bit
         // data chunks, corresponding to a "flip chain" id and present id
-        auto token = ((uint64_t) flipChainId << 32ull) | serialNumber;
+        auto token = ((uint64_t) ulFlipChain << 32ull) | ulSerialNumber;
         auto flipIter = pmConsumer->mDxgKrnlPresentHistoryTokens.find(token);
         if (flipIter == pmConsumer->mDxgKrnlPresentHistoryTokens.end()) {
             return;
         }
 
         // Watch for multiple legacy blits completing against the same window		
-        auto hwnd = pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"hwnd");
         pmConsumer->mLastWindowPresent[hwnd] = flipIter->second;
         flipIter->second->SetDwmNotified(true);
         pmConsumer->mPresentsByLegacyBlitToken.erase(flipIter);
@@ -917,9 +983,17 @@ void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
     }
     case Microsoft_Windows_Dwm_Core::SCHEDULE_SURFACEUPDATE_Info::Id:
     {
-        PMTraceConsumer::Win32KPresentHistoryTokenKey key(pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"luidSurface"),
-                                                          pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"PresentCount"),
-                                                          pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"bindId"));
+        EventDataDesc desc[] = {
+            { L"luidSurface" },
+            { L"PresentCount" },
+            { L"bindId" },
+        };
+        pmConsumer->mMetadata.GetEventData(pEventRecord, desc, _countof(desc));
+        auto luidSurface  = desc[0].GetData<uint64_t>();
+        auto PresentCount = desc[1].GetData<uint64_t>();
+        auto bindId       = desc[2].GetData<uint64_t>();
+
+        PMTraceConsumer::Win32KPresentHistoryTokenKey key(luidSurface, PresentCount, bindId);
         auto eventIter = pmConsumer->mWin32KPresentHistoryTokens.find(key);
         if (eventIter != pmConsumer->mWin32KPresentHistoryTokens.end()) {
             eventIter->second->SetDwmNotified(true);
@@ -941,14 +1015,21 @@ void HandleD3D9Event(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
     switch (hdr.EventDescriptor.Id) {
     case Microsoft_Windows_D3D9::Present_Start::Id:
     {
+        EventDataDesc desc[] = {
+            { L"pSwapchain" },
+            { L"Flags" },
+        };
+        pmConsumer->mMetadata.GetEventData(pEventRecord, desc, _countof(desc));
+        auto pSwapchain = desc[0].GetData<uint32_t>();
+        auto Flags      = desc[1].GetData<uint32_t>();
+
         PresentEvent event(hdr, Runtime::D3D9);
-        pmConsumer->mMetadata.GetEventData(pEventRecord, L"pSwapchain", &event.SwapChainAddress);
-        uint32_t D3D9Flags = pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"Flags");
+        event.SwapChainAddress = pSwapchain;
         event.PresentFlags =
-            ((D3D9Flags & D3DPRESENT_DONOTFLIP) ? DXGI_PRESENT_DO_NOT_SEQUENCE : 0) |
-            ((D3D9Flags & D3DPRESENT_DONOTWAIT) ? DXGI_PRESENT_DO_NOT_WAIT : 0) |
-            ((D3D9Flags & D3DPRESENT_FLIPRESTART) ? DXGI_PRESENT_RESTART : 0);
-        if ((D3D9Flags & D3DPRESENT_FORCEIMMEDIATE) != 0) {
+            ((Flags & D3DPRESENT_DONOTFLIP) ? DXGI_PRESENT_DO_NOT_SEQUENCE : 0) |
+            ((Flags & D3DPRESENT_DONOTWAIT) ? DXGI_PRESENT_DO_NOT_WAIT : 0) |
+            ((Flags & D3DPRESENT_FLIPRESTART) ? DXGI_PRESENT_RESTART : 0);
+        if ((Flags & D3DPRESENT_FORCEIMMEDIATE) != 0) {
             event.SyncInterval = 0;
         }
 
@@ -1113,13 +1194,13 @@ void HandleNTProcessEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsume
     switch (pEventRecord->EventHeader.EventDescriptor.Opcode) {
     case EVENT_TRACE_TYPE_START:
     case EVENT_TRACE_TYPE_DC_START:
-        pmConsumer->mMetadata.GetEventData(pEventRecord, L"ProcessId",     &event.ProcessId);
-        pmConsumer->mMetadata.GetEventData(pEventRecord, L"ImageFileName", &event.ImageFileName);
+        event.ProcessId     = pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"ProcessId");
+        event.ImageFileName = pmConsumer->mMetadata.GetEventData<std::string>(pEventRecord, L"ImageFileName");
         break;
 
     case EVENT_TRACE_TYPE_END:
     case EVENT_TRACE_TYPE_DC_END:
-        pmConsumer->mMetadata.GetEventData(pEventRecord, L"ProcessId", &event.ProcessId);
+        event.ProcessId = pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"ProcessId");
         break;
     }
 
@@ -1131,19 +1212,6 @@ void HandleNTProcessEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsume
 
 void HandleMetadataEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 {
-    if (pEventRecord->EventHeader.EventDescriptor.Opcode == Microsoft_Windows_EventMetadata::EventInfo::Opcode) {
-        auto pTraceEventInfo = reinterpret_cast<TRACE_EVENT_INFO const*>(pEventRecord->UserData);
-        if (pTraceEventInfo->DecodingSource == DecodingSourceTlg ||
-            pTraceEventInfo->EventDescriptor.Channel == 0xB) {
-            // Unlikely to have tracelogging metadata, but don't store it.
-            return;
-        }
-
-        pmConsumer->mMetadata.InsertMetadata(
-            pTraceEventInfo->ProviderGuid,
-            pTraceEventInfo->EventDescriptor,
-            pTraceEventInfo,
-            pEventRecord->UserDataLength);
-    }
+    pmConsumer->mMetadata.AddMetadata(pEventRecord);
 }
 

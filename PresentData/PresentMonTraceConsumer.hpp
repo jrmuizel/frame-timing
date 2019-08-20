@@ -170,7 +170,7 @@ struct PMTraceConsumer
     PMTraceConsumer(bool filteredEvents, bool simple) : mFilteredEvents(filteredEvents), mSimpleMode(simple) { }
     ~PMTraceConsumer();
 
-    EventMetadataContainer mMetadata;
+    EventMetadata mMetadata;
 
     bool mFilteredEvents;
     bool mSimpleMode;
