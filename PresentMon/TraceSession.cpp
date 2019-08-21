@@ -30,6 +30,9 @@ SOFTWARE.
 #include "../PresentData/NTProcessEventStructs.hpp"
 #include "../PresentData/Win32kEventStructs.hpp"
 
+#include <initializer_list>
+#include <VersionHelpers.h>
+
 struct TraceProperties : public EVENT_TRACE_PROPERTIES {
     wchar_t mSessionName[MAX_PATH];
 };
@@ -42,37 +45,170 @@ static uint64_t gQpcTraceStart = 0;
 static uint64_t gQpcFrequency = 0;
 static ULONG gContinueProcessingBuffers = TRUE;
 
-static bool EnableProviders()
+static ULONG EnableFilteredProvider(GUID const& sessionGuid, GUID const& providerGuid, UCHAR level,
+                                    ULONGLONG anyKeywordMask, ULONGLONG allKeywordMask,
+                                    std::initializer_list<USHORT> const& eventIds)
 {
-#define EnableProvider(Provider, Level, Any) do { \
-    auto status = EnableTraceEx2(gSessionHandle, &Provider, EVENT_CONTROL_CODE_ENABLE_PROVIDER, TRACE_LEVEL_##Level, Any, 0, 0, nullptr); \
-    if (status != ERROR_SUCCESS) { \
-        fprintf(stderr, "error: failed to enable trace provider \"%s\" (error=%lu).\n", #Provider, status); \
-        return false; \
-    } \
-} while (0)
+    assert(eventIds.size() >= ANYSIZE_ARRAY);
+    assert(eventIds.size() <= MAX_EVENT_FILTER_EVENT_ID_COUNT);
+    auto memorySize = sizeof(EVENT_FILTER_EVENT_ID) + sizeof(USHORT) * (eventIds.size() - ANYSIZE_ARRAY);
+    auto memory = _aligned_malloc(memorySize, alignof(USHORT));
 
+    auto filterEventIds = (EVENT_FILTER_EVENT_ID*) memory;
+    filterEventIds->FilterIn = TRUE;
+    filterEventIds->Reserved = 0;
+    filterEventIds->Count = 0;
+    for (auto id : eventIds) {
+        filterEventIds->Events[filterEventIds->Count++] = id;
+    }
+
+    EVENT_FILTER_DESCRIPTOR filterDesc = {};
+    filterDesc.Ptr = (ULONGLONG) filterEventIds;
+    filterDesc.Size = (ULONG) memorySize;
+    filterDesc.Type = EVENT_FILTER_TYPE_EVENT_ID;
+
+    ENABLE_TRACE_PARAMETERS params = {};
+    params.Version = ENABLE_TRACE_PARAMETERS_VERSION_2;
+    params.EnableProperty = EVENT_ENABLE_PROPERTY_IGNORE_KEYWORD_0;
+    params.SourceId = sessionGuid;
+    params.EnableFilterDesc = &filterDesc;
+    params.FilterDescCount = 1;
+
+    ULONG timeout = 0;
+    auto status = EnableTraceEx2(gSessionHandle, &providerGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER, level, anyKeywordMask, allKeywordMask, timeout, &params);
+    _aligned_free(memory);
+    return status;
+}
+
+static bool EnableProviders(GUID const& sessionGuid)
+{
     auto const& args = GetCommandLineArgs();
+    auto filteredEvents =
+        args.mEtlFileName == nullptr && // Scope filtering based on event ID only works for realtime collection
+        IsWindows8Point1OrGreater();    // and requires Win8.1+
     auto simple = args.mVerbosity == Verbosity::Simple;
 
-    gPMConsumer = new PMTraceConsumer(simple);
+    gPMConsumer = new PMTraceConsumer(filteredEvents, simple);
 
-                 EnableProvider(Microsoft_Windows_DXGI::GUID,           INFORMATION, 0);
-                 EnableProvider(Microsoft_Windows_D3D9::GUID,           INFORMATION, 0);
-    if (!simple) EnableProvider(Microsoft_Windows_DxgKrnl::GUID,        INFORMATION, 1);
-    if (!simple) EnableProvider(Microsoft_Windows_Win32k::GUID,         INFORMATION, 0x1000);
-    if (!simple) EnableProvider(Microsoft_Windows_Dwm_Core::GUID,       VERBOSE,     0);
-    if (!simple) EnableProvider(Microsoft_Windows_Dwm_Core::Win7::GUID, VERBOSE,     0);
-    if (!simple) EnableProvider(Microsoft_Windows_DxgKrnl::Win7::GUID,  INFORMATION, 1);
+    // DXGI
+    auto keywordMask =
+        (uint64_t) Microsoft_Windows_DXGI::Keyword::Microsoft_Windows_DXGI_Analytic |
+        (uint64_t) Microsoft_Windows_DXGI::Keyword::Events;
+    auto status = EnableFilteredProvider(sessionGuid, Microsoft_Windows_DXGI::GUID, TRACE_LEVEL_INFORMATION, keywordMask, keywordMask, {
+        Microsoft_Windows_DXGI::Present_Start::Id,
+        Microsoft_Windows_DXGI::Present_Stop::Id,
+        Microsoft_Windows_DXGI::PresentMultiplaneOverlay_Start::Id,
+        Microsoft_Windows_DXGI::PresentMultiplaneOverlay_Stop::Id,
+    });
+    if (status != ERROR_SUCCESS) {
+        fprintf(stderr, "error: failed to enable DXGI provider (error=%lu).\n", status);
+        return false;
+    }
+
+    // D3D9
+    keywordMask =
+        (uint64_t) Microsoft_Windows_D3D9::Keyword::Microsoft_Windows_Direct3D9_Analytic |
+        (uint64_t) Microsoft_Windows_D3D9::Keyword::Events;
+    status = EnableFilteredProvider(sessionGuid, Microsoft_Windows_D3D9::GUID, TRACE_LEVEL_INFORMATION, keywordMask, keywordMask, {
+        Microsoft_Windows_D3D9::Present_Start::Id,
+        Microsoft_Windows_D3D9::Present_Stop::Id,
+    });
+    if (status != ERROR_SUCCESS) {
+        fprintf(stderr, "error: failed to enable D3D9 provider (error=%lu).\n", status);
+        return false;
+    }
+
+    if (!simple) {
+        // DxgKrnl
+        keywordMask =
+            (uint64_t) Microsoft_Windows_DxgKrnl::Keyword::Microsoft_Windows_DxgKrnl_Performance |
+            (uint64_t) Microsoft_Windows_DxgKrnl::Keyword::Base;
+        status = EnableFilteredProvider(sessionGuid, Microsoft_Windows_DxgKrnl::GUID, TRACE_LEVEL_INFORMATION, keywordMask, keywordMask, {
+                Microsoft_Windows_DxgKrnl::Blit_Info::Id,
+                Microsoft_Windows_DxgKrnl::Flip_Info::Id,
+                Microsoft_Windows_DxgKrnl::FlipMultiPlaneOverlay_Info::Id,
+                Microsoft_Windows_DxgKrnl::HSyncDPCMultiPlane_Info::Id,
+                Microsoft_Windows_DxgKrnl::MMIOFlip_Info::Id,
+                Microsoft_Windows_DxgKrnl::MMIOFlipMultiPlaneOverlay_Info::Id,
+                Microsoft_Windows_DxgKrnl::Present_Info::Id,
+                Microsoft_Windows_DxgKrnl::PresentHistory_Start::Id,
+                Microsoft_Windows_DxgKrnl::PresentHistory_Info::Id,
+                Microsoft_Windows_DxgKrnl::PresentHistoryDetailed_Start::Id,
+                Microsoft_Windows_DxgKrnl::QueuePacket_Start::Id,
+                Microsoft_Windows_DxgKrnl::QueuePacket_Stop::Id,
+                Microsoft_Windows_DxgKrnl::VSyncDPC_Info::Id,
+            });
+        if (status != ERROR_SUCCESS) {
+            fprintf(stderr, "error: failed to enable DxgKrnl provider (error=%lu).\n", status);
+            return false;
+        }
+
+        status = EnableTraceEx2(gSessionHandle, &Microsoft_Windows_DxgKrnl::Win7::GUID, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
+                                TRACE_LEVEL_INFORMATION, keywordMask, keywordMask, 0, nullptr);
+        if (status != ERROR_SUCCESS) {
+            fprintf(stderr, "error: failed to enable Win7 DxgKrnl provider (error=%lu).\n", status);
+            return false;
+        }
+
+        // Win32k
+        keywordMask =
+            (uint64_t) Microsoft_Windows_Win32k::Keyword::Updates |
+            (uint64_t) Microsoft_Windows_Win32k::Keyword::Visualization |
+            (uint64_t) Microsoft_Windows_Win32k::Keyword::Microsoft_Windows_Win32k_Tracing;
+        status = EnableFilteredProvider(sessionGuid, Microsoft_Windows_Win32k::GUID, TRACE_LEVEL_INFORMATION, keywordMask,
+            (uint64_t) Microsoft_Windows_Win32k::Keyword::Updates |
+            (uint64_t) Microsoft_Windows_Win32k::Keyword::Microsoft_Windows_Win32k_Tracing, {
+            Microsoft_Windows_Win32k::TokenCompositionSurfaceObject_Info::Id,
+            Microsoft_Windows_Win32k::TokenStateChanged_Info::Id,
+        });
+        if (status != ERROR_SUCCESS) {
+            fprintf(stderr, "error: failed to enable Win32k provider (error=%lu).\n", status);
+            return false;
+        }
+
+        // Dwm_Core
+        status = EnableFilteredProvider(sessionGuid, Microsoft_Windows_Dwm_Core::GUID, TRACE_LEVEL_VERBOSE, 0, 0, {
+            Microsoft_Windows_Dwm_Core::MILEVENT_MEDIA_UCE_PROCESSPRESENTHISTORY_GetPresentHistory_Info::Id,
+            Microsoft_Windows_Dwm_Core::SCHEDULE_PRESENT_Start::Id,
+            Microsoft_Windows_Dwm_Core::SCHEDULE_SURFACEUPDATE_Info::Id,
+            Microsoft_Windows_Dwm_Core::FlipChain_Pending::Id,
+            Microsoft_Windows_Dwm_Core::FlipChain_Complete::Id,
+            Microsoft_Windows_Dwm_Core::FlipChain_Dirty::Id,
+        });
+        if (status != ERROR_SUCCESS) {
+            fprintf(stderr, "error: failed to enable DWM provider (error=%lu).\n", status);
+            return false;
+        }
+
+        status = EnableTraceEx2(gSessionHandle, &Microsoft_Windows_Dwm_Core::Win7::GUID, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
+                                TRACE_LEVEL_VERBOSE, 0, 0, 0, nullptr);
+        if (status != ERROR_SUCCESS) {
+            fprintf(stderr, "error: failed to enable Win7 DWM provider (error=%lu).\n", status);
+            return false;
+        }
+    }
 
     if (args.mIncludeWindowsMixedReality) {
         gMRConsumer = new MRTraceConsumer(simple);
 
-                     EnableProvider(DHD_PROVIDER_GUID,                VERBOSE, 0x1C00000);
-        if (!simple) EnableProvider(SPECTRUMCONTINUOUS_PROVIDER_GUID, VERBOSE, 0x800000);
-    }
+        // DHD
+        status = EnableTraceEx2(gSessionHandle, &DHD_PROVIDER_GUID, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
+                                TRACE_LEVEL_VERBOSE, 0x1C00000, 0, 0, nullptr);
+        if (status != ERROR_SUCCESS) {
+            fprintf(stderr, "error: failed to enable DHD provider (error=%lu).\n", status);
+            return false;
+        }
 
-#undef EnableProvider
+        if (!simple) {
+            // SPECTRUMCONTINUOUS
+            status = EnableTraceEx2(gSessionHandle, &SPECTRUMCONTINUOUS_PROVIDER_GUID, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
+                                    TRACE_LEVEL_VERBOSE, 0x800000, 0, 0, nullptr);
+            if (status != ERROR_SUCCESS) {
+                fprintf(stderr, "error: failed to enable SPECTRUMCONTINUOUS provider (error=%lu).\n", status);
+                return false;
+            }
+        }
+    }
 
     return true;
 }
@@ -246,7 +382,7 @@ bool StartTraceSession()
     }
 
     // Enable desired providers
-    if (!EnableProviders()) {
+    if (!EnableProviders(sessionProps.Wnode.Guid)) {
         StopTraceSession();
         return false;
     }

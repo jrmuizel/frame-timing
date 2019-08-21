@@ -129,6 +129,9 @@ void HandleDXGIEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         pmConsumer->RuntimePresentStop(hdr, AllowBatching);
         break;
     }
+    default:
+        assert(!pmConsumer->mFilteredEvents); // Assert that filtering is working if expected
+        break;
     }
 }
 
@@ -537,6 +540,9 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
             pmConsumer->mMetadata.GetEventData<uint64_t>(pEventRecord, L"hwnd"),
             pmConsumer->mMetadata.GetEventData<uint32_t>(pEventRecord, L"bRedirectedPresent") != 0);
         break;
+    default:
+        assert(!pmConsumer->mFilteredEvents); // Assert that filtering is working if expected
+        break;
     }
 }
 
@@ -853,6 +859,9 @@ void HandleWin32kEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         }
         break;
     }
+    default:
+        assert(!pmConsumer->mFilteredEvents); // Assert that filtering is working if expected
+        break;
     }
 }
 
@@ -917,6 +926,10 @@ void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         }
         break;
     }
+    default:
+        assert(!pmConsumer->mFilteredEvents || // Assert that filtering is working if expected
+               hdr.ProviderId == Microsoft_Windows_Dwm_Core::Win7::GUID);
+        break;
     }
 }
 
@@ -953,6 +966,9 @@ void HandleD3D9Event(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         pmConsumer->RuntimePresentStop(hdr, AllowBatching);
         break;
     }
+    default:
+        assert(!pmConsumer->mFilteredEvents); // Assert that filtering is working if expected
+        break;
     }
 }
 

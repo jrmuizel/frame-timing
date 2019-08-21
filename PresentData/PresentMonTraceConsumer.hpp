@@ -167,11 +167,12 @@ struct PresentEvent {
 
 struct PMTraceConsumer
 {
-    PMTraceConsumer(bool simple) : mSimpleMode(simple) { }
+    PMTraceConsumer(bool filteredEvents, bool simple) : mFilteredEvents(filteredEvents), mSimpleMode(simple) { }
     ~PMTraceConsumer();
 
     EventMetadataContainer mMetadata;
 
+    bool mFilteredEvents;
     bool mSimpleMode;
 
     std::mutex mMutex;
