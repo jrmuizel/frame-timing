@@ -22,28 +22,21 @@ SOFTWARE.
 
 #pragma once
 
-#include <assert.h>
+#define NOMINMAX
+
 #include <deque>
 #include <map>
+#include <memory>
 #include <mutex>
-#include <numeric>
-#include <set>
+#include <stdint.h>
+#include <string>
+#include <tuple>
 #include <vector>
 #include <windows.h>
 #include <evntcons.h> // must include after windows.h
 
 #include "Debug.hpp"
 #include "TraceConsumer.hpp"
-
-// Forward-declare structs that will be used by both modern and legacy dxgkrnl events.
-struct DxgkBltEventArgs;
-struct DxgkFlipEventArgs;
-struct DxgkQueueSubmitEventArgs;
-struct DxgkQueueCompleteEventArgs;
-struct DxgkMMIOFlipEventArgs;
-struct DxgkSyncDPCEventArgs;
-struct DxgkSubmitPresentHistoryEventArgs;
-struct DxgkPropagatePresentHistoryEventArgs;
 
 template <typename mutex_t> std::unique_lock<mutex_t> scoped_lock(mutex_t &m)
 {
@@ -285,14 +278,14 @@ struct PMTraceConsumer
         return true;
     }
 
-    void HandleDxgkBlt(DxgkBltEventArgs& args);
-    void HandleDxgkFlip(DxgkFlipEventArgs& args);
-    void HandleDxgkQueueSubmit(DxgkQueueSubmitEventArgs& args);
-    void HandleDxgkQueueComplete(DxgkQueueCompleteEventArgs& args);
-    void HandleDxgkMMIOFlip(DxgkMMIOFlipEventArgs& args);
-    void HandleDxgkSyncDPC(DxgkSyncDPCEventArgs& args);
-    void HandleDxgkSubmitPresentHistoryEventArgs(DxgkSubmitPresentHistoryEventArgs& args);
-    void HandleDxgkPropagatePresentHistoryEventArgs(DxgkPropagatePresentHistoryEventArgs& args);
+    void HandleDxgkBlt(EVENT_HEADER const& hdr, uint64_t hwnd, bool redirectedPresent);
+    void HandleDxgkFlip(EVENT_HEADER const& hdr, int32_t flipInterval, bool mmio);
+    void HandleDxgkQueueSubmit(EVENT_HEADER const& hdr, uint32_t packetType, uint32_t submitSequence, uint64_t context, bool present, bool supportsDxgkPresentEvent);
+    void HandleDxgkQueueComplete(EVENT_HEADER const& hdr, uint32_t submitSequence);
+    void HandleDxgkMMIOFlip(EVENT_HEADER const& hdr, uint32_t flipSubmitSequence, uint32_t flags);
+    void HandleDxgkSyncDPC(EVENT_HEADER const& hdr, uint32_t flipSubmitSequence);
+    void HandleDxgkSubmitPresentHistoryEventArgs(EVENT_HEADER const& hdr, uint64_t token, uint64_t tokenData, PresentMode knownPresentMode);
+    void HandleDxgkPropagatePresentHistoryEventArgs(EVENT_HEADER const& hdr, uint64_t token);
 
     void CompletePresent(std::shared_ptr<PresentEvent> p, uint32_t recurseDepth=0);
     decltype(mPresentByThreadId.begin()) FindOrCreatePresent(EVENT_HEADER const& hdr);

@@ -20,10 +20,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include <stdint.h>
-#include <windows.h>
-#include <tdh.h> // must be after windows.h
-
 #include "PresentMonTraceConsumer.hpp"
 
 #include "D3d9EventStructs.hpp"
@@ -32,19 +28,9 @@ SOFTWARE.
 #include "DxgkrnlEventStructs.hpp"
 #include "Win32kEventStructs.hpp"
 
-#if DEBUG_VERBOSE
+#include <assert.h>
 
-typedef enum _D3DKMT_PRESENT_MODEL
-{
-    D3DKMT_PM_UNINITIALIZED = 0,
-    D3DKMT_PM_REDIRECTED_GDI = 1,
-    D3DKMT_PM_REDIRECTED_FLIP = 2,
-    D3DKMT_PM_REDIRECTED_BLT = 3,
-    D3DKMT_PM_REDIRECTED_VISTABLT = 4,
-    D3DKMT_PM_SCREENCAPTUREFENCE = 5,
-    D3DKMT_PM_REDIRECTED_GDI_SYSMEM = 6,
-    D3DKMT_PM_REDIRECTED_COMPOSITION = 7,
-} D3DKMT_PRESENT_MODEL;
+#if DEBUG_VERBOSE
 
 namespace {
 
