@@ -7,6 +7,14 @@ trace key performance metrics for graphics applications (e.g.,
 CPU and Display frame durations and latencies) and works across all graphics
 APIs, including UWP applications.
 
+While PresentMon itself is focused on lightweight collection and analysis,
+there are several other programs that build on its functionality and/or helps
+visualize the resulting data.  For example, see
+- [presentmon-graph](https://github.com/PaulPiatek/presentmon-graph)
+- [CapFrameX](https://github.com/DevTechProfile/CapFrameX)
+- [OCAT](https://github.com/GPUOpen-Tools/OCAT)
+- [FrameView](https://www.nvidia.com/en-us/geforce/technologies/frameview/)
+
 ## License
 
 Copyright 2017-2019 Intel Corporation
