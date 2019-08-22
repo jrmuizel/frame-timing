@@ -73,6 +73,8 @@ Output options (see README for file naming defaults):
   -no_csv                   Do not create any output file.
   -no_top                   Don't display active swap chains in the console
                             window.
+  -qpc_time                 Output present time as performance counter value
+                            (see QueryPerformanceCounter()).
 
 Recording options:
   -hotkey [key]             Use specified key to start and stop recording,
@@ -145,6 +147,7 @@ and `-INDEX` appended to the file name.
 | PresentMode            | The presentation mode used by the system for this Present | not `-simple` |
 | AllowsTearing          | Whether tearing is possible (1) or not (0) | not `-simple` |
 | TimeInSeconds          | The time of the Present call, measured from when PresentMon recording started in seconds | |
+| QPCTime                | The time of the Present call, as a performance counter value (see [QueryPerformanceCounter()](https://docs.microsoft.com/en-us/windows/win32/api/profileapi/nf-profileapi-queryperformancecounter)) | `-qpc_time` |
 | MsInPresentAPI         | The time spent inside the Present call, in milliseconds |
 | MsUntilRenderComplete  | The time between the Present call (TimeInSeconds) and when the GPU work completed, in milliseconds | not `-simple` |
 | MsUntilDisplayed       | The time between the Present call (TimeInSeconds) and when the frame was displayed, in milliseconds | not `-simple` |

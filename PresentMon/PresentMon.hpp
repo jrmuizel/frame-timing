@@ -77,6 +77,7 @@ struct CommandLineArgs {
     Verbosity mVerbosity;
     bool mOutputCsvToFile;
     bool mOutputCsvToStdout;
+    bool mOutputQpcTime;
     bool mScrollLockIndicator;
     bool mExcludeDropped;
     bool mTerminateOnProcExit;

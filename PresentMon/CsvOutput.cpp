@@ -69,23 +69,22 @@ static void WriteCsvHeader(FILE* fp)
     auto const& args = GetCommandLineArgs();
 
     fprintf(fp, "Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags");
-    if (args.mVerbosity > Verbosity::Simple)
-    {
+    if (args.mVerbosity > Verbosity::Simple) {
         fprintf(fp, ",AllowsTearing,PresentMode");
     }
-    if (args.mVerbosity >= Verbosity::Verbose)
-    {
+    if (args.mVerbosity >= Verbosity::Verbose) {
         fprintf(fp, ",WasBatched,DwmNotified");
     }
     fprintf(fp, ",Dropped,TimeInSeconds,MsBetweenPresents");
-    if (args.mVerbosity > Verbosity::Simple)
-    {
+    if (args.mVerbosity > Verbosity::Simple) {
         fprintf(fp, ",MsBetweenDisplayChange");
     }
     fprintf(fp, ",MsInPresentAPI");
-    if (args.mVerbosity > Verbosity::Simple)
-    {
+    if (args.mVerbosity > Verbosity::Simple) {
         fprintf(fp, ",MsUntilRenderComplete,MsUntilDisplayed");
+    }
+    if (args.mOutputQpcTime) {
+        fprintf(fp, ",QPCTime");
     }
     fprintf(fp, "\n");
 }
@@ -152,6 +151,9 @@ void UpdateCsv(ProcessInfo* processInfo, SwapChainData const& chain, PresentEven
     fprintf(fp, ",%.3lf", msInPresentApi);
     if (args.mVerbosity > Verbosity::Simple) {
         fprintf(fp, ",%.3lf,%.3lf", msUntilRenderComplete, msUntilDisplayed);
+    }
+    if (args.mOutputQpcTime) {
+        fprintf(fp, ",%llu", p.QpcTime);
     }
     fprintf(fp, "\n");
 }

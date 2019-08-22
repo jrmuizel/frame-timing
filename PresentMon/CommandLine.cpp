@@ -218,6 +218,8 @@ static void PrintHelp()
         "-multi_csv",               "Create a separate CSV file for each captured process.",
         "-no_csv",                  "Do not create any output file.",
         "-no_top",                  "Don't display active swap chains in the console window.",
+        "-qpc_time",                "Output present time as performance counter value (see"
+                                    " QueryPerformanceCounter()).",
 
         "Recording options", nullptr,
         "-hotkey [key]",            "Use specified key to start and stop recording, writing to a"
@@ -312,6 +314,7 @@ bool ParseCommandLine(int argc, char** argv)
     args->mHotkeyVirtualKeyCode = 0;
     args->mOutputCsvToFile = true;
     args->mOutputCsvToStdout = false;
+    args->mOutputQpcTime = false;
     args->mScrollLockIndicator = false;
     args->mExcludeDropped = false;
     args->mVerbosity = Verbosity::Normal;
@@ -362,6 +365,7 @@ bool ParseCommandLine(int argc, char** argv)
         else ARG1("-multi_csv",              args->mMultiCsv                   = true)
         else ARG1("-no_csv",                 args->mOutputCsvToFile            = false)
         else ARG1("-no_top",                 args->mConsoleOutputType          = ConsoleOutput::Simple)
+        else ARG1("-qpc_time",               args->mOutputQpcTime              = true)
 
         // Recording options:
         else if (strcmp(argv[i], "-hotkey") == 0) { if (AssignHotkey(++i, argc, argv, args)) continue; }
@@ -418,9 +422,13 @@ bool ParseCommandLine(int argc, char** argv)
         }
     }
 
-    // If -no_csv is used, ignore -multi_csv, -output_file, or -output_stdout
+    // If -no_csv is used, ignore -qpc_time, -multi_csv, -output_file, or -output_stdout
     // if they are also used.
     if (!args->mOutputCsvToFile) {
+        if (args->mOutputQpcTime) {
+            fprintf(stderr, "warning: -qpc_time and -no_csv arguments are not compatible; ignoring -qpc_time.\n");
+            args->mOutputQpcTime = false;
+        }
         if (args->mMultiCsv) {
             fprintf(stderr, "warning: -multi_csv and -no_csv arguments are not compatible; ignoring -multi_csv.\n");
             args->mMultiCsv = false;
