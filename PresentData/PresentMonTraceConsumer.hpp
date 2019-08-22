@@ -118,6 +118,9 @@ struct PresentEvent {
     void SetPresentMode(::PresentMode mode);
     void SetDwmNotified(bool notified);
     void SetTokenPtr(uint64_t tokenPtr);
+
+private:
+    PresentEvent(PresentEvent const& copy); // dne
 };
 
 // A high-level description of the sequence of events for each present type,
@@ -290,7 +293,8 @@ struct PMTraceConsumer
 
     void CompletePresent(std::shared_ptr<PresentEvent> p, uint32_t recurseDepth=0);
     decltype(mPresentByThreadId.begin()) FindOrCreatePresent(EVENT_HEADER const& hdr);
-    void CreatePresent(PresentEvent &event);
+    decltype(mPresentByThreadId.begin()) CreatePresent(std::shared_ptr<PresentEvent> present, decltype(mPresentsByProcess.begin()->second)& processMap);
+    void CreatePresent(std::shared_ptr<PresentEvent> present);
     void RuntimePresentStop(EVENT_HEADER const& hdr, bool AllowPresentBatching);
 };
 

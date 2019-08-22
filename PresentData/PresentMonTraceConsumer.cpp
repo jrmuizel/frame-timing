@@ -114,13 +114,21 @@ void HandleDXGIEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
             { L"SyncInterval" },
         };
         pmConsumer->mMetadata.GetEventData(pEventRecord, desc, _countof(desc));
+        auto pIDXGISwapChain = desc[0].GetData<uint64_t>();
+        auto Flags           = desc[1].GetData<uint32_t>();
+        auto SyncInterval    = desc[2].GetData<int32_t>();
 
-        PresentEvent event(hdr, Runtime::DXGI);
-        event.SwapChainAddress = desc[0].GetData<uint64_t>();
-        event.PresentFlags     = desc[1].GetData<uint32_t>();
-        event.SyncInterval     = desc[2].GetData<int32_t>();
+        // Ignore PRESENT_TEST: it's just to check if you're still fullscreen
+        if ((Flags & DXGI_PRESENT_TEST) != 0) {
+            break;
+        }
 
-        pmConsumer->CreatePresent(event);
+        auto present = std::make_shared<PresentEvent>(hdr, Runtime::DXGI);
+        present->SwapChainAddress = pIDXGISwapChain;
+        present->PresentFlags     = Flags;
+        present->SyncInterval     = SyncInterval;
+
+        pmConsumer->CreatePresent(present);
         break;
     }
     case Microsoft_Windows_DXGI::Present_Stop::Id:
@@ -1023,17 +1031,17 @@ void HandleD3D9Event(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         auto pSwapchain = desc[0].GetData<uint32_t>();
         auto Flags      = desc[1].GetData<uint32_t>();
 
-        PresentEvent event(hdr, Runtime::D3D9);
-        event.SwapChainAddress = pSwapchain;
-        event.PresentFlags =
+        auto present = std::make_shared<PresentEvent>(hdr, Runtime::D3D9);
+        present->SwapChainAddress = pSwapchain;
+        present->PresentFlags =
             ((Flags & D3DPRESENT_DONOTFLIP) ? DXGI_PRESENT_DO_NOT_SEQUENCE : 0) |
             ((Flags & D3DPRESENT_DONOTWAIT) ? DXGI_PRESENT_DO_NOT_WAIT : 0) |
             ((Flags & D3DPRESENT_FLIPRESTART) ? DXGI_PRESENT_RESTART : 0);
         if ((Flags & D3DPRESENT_FORCEIMMEDIATE) != 0) {
-            event.SyncInterval = 0;
+            present->SyncInterval = 0;
         }
 
-        pmConsumer->CreatePresent(event);
+        pmConsumer->CreatePresent(present);
         break;
     }
     case Microsoft_Windows_D3D9::Present_Stop::Id:
@@ -1134,37 +1142,34 @@ decltype(PMTraceConsumer::mPresentByThreadId.begin()) PMTraceConsumer::FindOrCre
     // This likely didn't originate from a runtime whose events we're tracking (DXGI/D3D9)
     // Could be composition buffers, or maybe another runtime (e.g. GL)
     auto newEvent = std::make_shared<PresentEvent>(hdr, Runtime::Other);
-    processMap.emplace(newEvent->QpcTime, newEvent);
-
-    auto& processSwapChainDeque = mPresentsByProcessAndSwapChain[std::make_tuple(hdr.ProcessId, 0ull)];
-    processSwapChainDeque.emplace_back(newEvent);
-
-    eventIter = mPresentByThreadId.emplace(hdr.ThreadId, newEvent).first;
-    return eventIter;
+    return CreatePresent(newEvent, processMap);
 }
 
-void PMTraceConsumer::CreatePresent(PresentEvent &event)
+decltype(PMTraceConsumer::mPresentByThreadId.begin()) PMTraceConsumer::CreatePresent(
+    std::shared_ptr<PresentEvent> newEvent,
+    decltype(PMTraceConsumer::mPresentsByProcess.begin()->second)& processMap)
 {
-    // Ignore PRESENT_TEST: it's just to check if you're still fullscreen, doesn't actually do anything
-    if ((event.PresentFlags & DXGI_PRESENT_TEST) != 0) {
-        event.Completed = true;
-        return;
+    DebugCreatePresent(*newEvent);
+
+    processMap.emplace(newEvent->QpcTime, newEvent);
+    mPresentsByProcessAndSwapChain[std::make_tuple(newEvent->ProcessId, newEvent->SwapChainAddress)].emplace_back(newEvent);
+
+    auto p = mPresentByThreadId.emplace(newEvent->ThreadId, newEvent);
+    assert(p.second);
+    return p.first;
+}
+
+void PMTraceConsumer::CreatePresent(std::shared_ptr<PresentEvent> present)
+{
+    // TODO: This version of CreatePresent() will overwrite any in-progress
+    // present from this thread with the new one.  Does this ever happen?  If
+    // so, should we really be just throwing away the old one?  If not, we can
+    // just call the other CreatePresent() without this check.
+    auto iter = mPresentByThreadId.find(present->ThreadId);
+    if (iter != mPresentByThreadId.end()) {
+        mPresentByThreadId.erase(iter);
     }
-
-    DebugCreatePresent(event);
-
-    auto pEvent = std::make_shared<PresentEvent>(event);
-    mPresentByThreadId[event.ThreadId] = pEvent;
-
-    auto& processMap = mPresentsByProcess[event.ProcessId];
-    processMap.emplace(event.QpcTime, pEvent);
-
-    auto& processSwapChainDeque = mPresentsByProcessAndSwapChain[std::make_tuple(event.ProcessId, event.SwapChainAddress)];
-    processSwapChainDeque.emplace_back(pEvent);
-
-    // Set the caller's local event instance to completed so the assert
-    // in ~PresentEvent() doesn't fire when it is destructed.
-    event.Completed = true;
+    CreatePresent(present, mPresentsByProcess[present->ProcessId]);
 }
 
 void PMTraceConsumer::RuntimePresentStop(EVENT_HEADER const& hdr, bool AllowPresentBatching)
