@@ -145,7 +145,7 @@ LateStageReprojectionRuntimeStats LateStageReprojectionData::ComputeRuntimeStats
         stats.mCopyPreemptionInMs.AddValue(current.GpuStopToCopyStartInMs);
         stats.mCopyExecutionInMs.AddValue(current.CopyStartToCopyStopInMs);
 
-        const double lsrInputLatchToVsyncInMs =
+        const double lsrInputLatchToVsyncInMs = (double)
             current.InputLatchToGpuSubmissionInMs +
             current.GpuSubmissionToGpuStartInMs +
             current.GpuStartToGpuStopInMs +
@@ -157,14 +157,14 @@ LateStageReprojectionRuntimeStats LateStageReprojectionData::ComputeRuntimeStats
         // Stats just with averages
         totalAppSourceReleaseToLsrAcquireTime += current.Source.GetReleaseFromRenderingToAcquireForPresentationTime();
         totalAppSourceCpuRenderTime += current.GetAppCpuRenderFrameTime();
-        stats.mLsrCpuRenderTimeInMs +=
+        stats.mLsrCpuRenderTimeInMs += (double)
             current.CpuRenderFrameStartToHeadPoseCallbackStartInMs +
             current.HeadPoseCallbackStartToHeadPoseCallbackStopInMs +
             current.HeadPoseCallbackStopToInputLatchInMs +
             current.InputLatchToGpuSubmissionInMs;
 
         stats.mGpuEndToVsyncInMs += current.CopyStopToVsyncInMs;
-        stats.mVsyncToPhotonsMiddleInMs += (current.TimeUntilPhotonsMiddleMs - current.TimeUntilVsyncMs);
+        stats.mVsyncToPhotonsMiddleInMs += (double) current.TimeUntilPhotonsMiddleMs - current.TimeUntilVsyncMs;
         stats.mLsrPoseLatencyInMs += current.LsrPredictionLatencyMs;
         stats.mAppPoseLatencyInMs += current.AppPredictionLatencyMs;
 

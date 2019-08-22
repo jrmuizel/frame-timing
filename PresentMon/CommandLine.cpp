@@ -255,25 +255,25 @@ static void PrintHelp()
     // NOTE: remember to update README.md when modifying usage
     fprintf(stderr, "PresentMon %s\n", PRESENT_MON_VERSION);
 
-    int argWidth = 0;
-    for (int i = 0; i < _countof(s); i += 2) {
+    size_t argWidth = 0;
+    for (size_t i = 0; i < _countof(s); i += 2) {
         auto arg = s[i];
         auto desc = s[i + 1];
         if (desc != nullptr) {
-            argWidth = max(argWidth, (int) strlen(arg));
+            argWidth = max(argWidth, strlen(arg));
         }
     }
 
-    int descWidth = 80 - argWidth - 4;
+    size_t descWidth = 80 - 4 - min(40, argWidth);
 
-    for (int i = 0; i < _countof(s); i += 2) {
+    for (size_t i = 0; i < _countof(s); i += 2) {
         auto arg = s[i];
         auto desc = s[i + 1];
         if (desc == nullptr) {
             fprintf(stderr, "\n%s:\n", arg);
         } else {
-            fprintf(stderr, "  %-*s  ", argWidth, arg);
-            for (auto len = (int) strlen(desc); len > 0; ) {
+            fprintf(stderr, "  %-*s  ", (int) argWidth, arg);
+            for (auto len = strlen(desc); len > 0; ) {
                 if (len <= descWidth) {
                     fprintf(stderr, "%s\n", desc);
                     break;
@@ -283,7 +283,7 @@ static void PrintHelp()
                 while (desc[w] != ' ') {
                     --w;
                 }
-                fprintf(stderr, "%.*s\n%-*s", w, desc, argWidth + 4, "");
+                fprintf(stderr, "%.*s\n%-*s", (int) w, desc, (int) (argWidth + 4), "");
                 desc += w + 1;
                 len -= w + 1;
             }

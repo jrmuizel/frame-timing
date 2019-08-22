@@ -126,16 +126,16 @@ int RestartAsAdministrator(
 
     // Combine arguments into single array
     char args[1024] = {};
-    for (int idx = 0, argsSize = (int) sizeof(args), i = 1; i < argc && idx < argsSize; ++i) {
-        if (idx >= argsSize) {
+    for (int idx = 0, i = 1; i < argc && (size_t) idx < sizeof(args); ++i) {
+        if (idx >= sizeof(args)) {
             fprintf(stderr, "internal error: command line arguments too long.\n");
             return false; // was truncated
         }
 
         if (argv[i][0] != '\"' && strchr(argv[i], ' ')) {
-            idx += snprintf(args + idx, argsSize - idx, " \"%s\"", argv[i]);
+            idx += snprintf(args + idx, sizeof(args) - idx, " \"%s\"", argv[i]);
         } else {
-            idx += snprintf(args + idx, argsSize - idx, " %s", argv[i]);
+            idx += snprintf(args + idx, sizeof(args) - idx, " %s", argv[i]);
         }
     }
 

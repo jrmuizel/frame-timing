@@ -390,7 +390,7 @@ static void ProcessEvents(
     auto recording = CopyRecordingToggleHistory(recordingToggleHistory);
 
     // Process NTProcess events; created processes are added to gProcesses and
-    // termianted processes are added to termiantedProcesses.
+    // terminated processes are added to terminatedProcesses.
     //
     // Handling of terminated processes need to be deferred until we observe
     // present event that started after the termination time.  This is because

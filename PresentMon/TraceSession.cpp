@@ -53,6 +53,9 @@ static ULONG EnableFilteredProvider(GUID const& sessionGuid, GUID const& provide
     assert(eventIds.size() <= MAX_EVENT_FILTER_EVENT_ID_COUNT);
     auto memorySize = sizeof(EVENT_FILTER_EVENT_ID) + sizeof(USHORT) * (eventIds.size() - ANYSIZE_ARRAY);
     auto memory = _aligned_malloc(memorySize, alignof(USHORT));
+    if (memory == nullptr) {
+        return ERROR_NOT_ENOUGH_MEMORY;
+    }
 
     auto filterEventIds = (EVENT_FILTER_EVENT_ID*) memory;
     filterEventIds->FilterIn = TRUE;

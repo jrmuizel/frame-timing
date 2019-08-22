@@ -578,7 +578,7 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
         };
         pmConsumer->mMetadata.GetEventData(pEventRecord, desc, _countof(desc));
         auto hwnd               = desc[0].GetData<uint64_t>();
-        auto bRedirectedPresent = desc[1].GetData<uint32_t>();
+        auto bRedirectedPresent = desc[1].GetData<uint32_t>() != 0;
 
         pmConsumer->HandleDxgkBlt(hdr, hwnd, bRedirectedPresent);
         break;

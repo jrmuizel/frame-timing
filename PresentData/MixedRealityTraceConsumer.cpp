@@ -43,15 +43,17 @@ std::wstring GetEventTaskNameFromTdh(EVENT_RECORD* pEventRecord)
     ULONG bufferSize = 0;
     auto status = TdhGetEventInformation(pEventRecord, 0, nullptr, nullptr, &bufferSize);
     if (status == ERROR_INSUFFICIENT_BUFFER) {
-        auto bufferAddr = (uintptr_t)malloc(bufferSize);
+        auto bufferAddr = malloc(bufferSize);
+        if (bufferAddr != nullptr) {
 
-        auto info = (TRACE_EVENT_INFO*)bufferAddr;
-        status = TdhGetEventInformation(pEventRecord, 0, nullptr, info, &bufferSize);
-        if (status == ERROR_SUCCESS) {
-            taskName = (wchar_t*)(bufferAddr + info->TaskNameOffset);
+            auto info = (TRACE_EVENT_INFO*)bufferAddr;
+            status = TdhGetEventInformation(pEventRecord, 0, nullptr, info, &bufferSize);
+            if (status == ERROR_SUCCESS) {
+                taskName = (wchar_t*)((uintptr_t) bufferAddr + info->TaskNameOffset);
+            }
+
+            free(bufferAddr);
         }
-
-        free((void*)bufferAddr);
     }
 
     return taskName;

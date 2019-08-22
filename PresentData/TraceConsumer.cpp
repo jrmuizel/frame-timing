@@ -225,7 +225,7 @@ void EventMetadata::GetEventData(EVENT_RECORD* eventRecord, EventDataDesc* desc,
             if (wcscmp(propName, desc[j].name_) == 0) {
                 assert(desc[j].arrayIndex_ < count);
 
-                desc[j].data_ = (void*) ((uintptr_t) eventRecord->UserData + offset + desc[j].arrayIndex_ * size);
+                desc[j].data_ = (void*) ((uintptr_t) eventRecord->UserData + (uintptr_t) desc[j].arrayIndex_ * size + offset);
                 desc[j].size_ = size;
 
                 foundCount += 1;
