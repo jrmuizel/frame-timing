@@ -154,6 +154,22 @@ and `-INDEX` appended to the file name.
 | WasBatched             | Whether the frame was submitted by the driver on a different thread than the app (1) or not (0) | `-verbose` |
 | DwmNotified            | Whether the desktop compositor was notified about the frame (1) or not (0) | `-verbose` |
 
+Applications that do not use D3D9 or DXGI APIs for presenting frames (e.g., as
+is typical with OpenGL or Vulkan applications) will report the following:
+- Runtime = Other.
+- SwapChainAddress = 0
+- SyncInterval = -1
+- PresentFlags = 0
+- MsInPresentAPI = 0
+
+In this case, TimeInSeconds will represent the first time the present is
+observed in the kernel, as opposed to the runtime, and therefore will be
+sometime after the application presented the frame (typically ~0.5ms).  Since
+MsUntilRenderComplete and MsUntilDisplayed are deltas from TimeInSeconds, they
+will be correspondingly smaller then they would have been if measured from
+application present.  MsBetweenDisplayChange will still be correct, and
+MsBetweenPresents should be correct on average.
+
 PresentMon doesn't directly measure the latency from a user's input to the
 display of that frame because it doesn't have insight into when the application
 collects and applies user input.  A potential approximation is to assume that
