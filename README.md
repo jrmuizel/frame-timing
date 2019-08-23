@@ -15,6 +15,19 @@ visualize the resulting data.  For example, see
 - [OCAT](https://github.com/GPUOpen-Tools/OCAT)
 - [FrameView](https://www.nvidia.com/en-us/geforce/technologies/frameview/)
 
+This readme contains the following sections:
+- [License](#License)
+- [Releases](#releases)
+- [Command line options](#command-line-options)
+- [Comma-separated value (CSV) file output](#comma-separated-value-csv-file-output)
+    - [CSV file names](#csv-file-names)
+    - [CSV columns](#csv-columns)
+    - [Windows Mixed Reality](#windows-mixed-reality)
+- [Known issues](#known-issues)
+    - [Analyzing OpenGL and Vulkan applications](analyzing-opengl-and-vulkan-applications)
+    - [Measuring application latency](measuring-application-latency)
+    - [Shutting down PresentMon on Windows 7](shutting-down-presentmon-on-windows-7)
+
 ## License
 
 Copyright 2017-2019 Intel Corporation
@@ -49,8 +62,6 @@ for information on how to request features, report issues, or contribute code
 changes.
 
 ## Command line options
-
-#### Capture target options
 
 ```
 Capture target options:
@@ -157,32 +168,7 @@ and `-INDEX` appended to the file name.
 | WasBatched             | Whether the frame was submitted by the driver on a different thread than the app (1) or not (0) | `-verbose` |
 | DwmNotified            | Whether the desktop compositor was notified about the frame (1) or not (0) | `-verbose` |
 
-Applications that do not use D3D9 or DXGI APIs for presenting frames (e.g., as
-is typical with OpenGL or Vulkan applications) will report the following:
-- Runtime = Other.
-- SwapChainAddress = 0
-- SyncInterval = -1
-- PresentFlags = 0
-- MsInPresentAPI = 0
-
-In this case, TimeInSeconds will represent the first time the present is
-observed in the kernel, as opposed to the runtime, and therefore will be
-sometime after the application presented the frame (typically ~0.5ms).  Since
-MsUntilRenderComplete and MsUntilDisplayed are deltas from TimeInSeconds, they
-will be correspondingly smaller then they would have been if measured from
-application present.  MsBetweenDisplayChange will still be correct, and
-MsBetweenPresents should be correct on average.
-
-PresentMon doesn't directly measure the latency from a user's input to the
-display of that frame because it doesn't have insight into when the application
-collects and applies user input.  A potential approximation is to assume that
-the application collects user input immediately after presenting the previous
-frame.  To compute this, search for the previous row that uses the same swap
-chain and then:
-
-```LatencyMs =~ 1000 * MsBetweenPresents + MsUntilDisplayed - previous(MsInPresentAPI)```
-
-## Windows Mixed Reality CSV file output
+### Windows Mixed Reality
 
 *Note: Windows Mixed Reality support is in beta, with limited OS support.*
 
@@ -222,3 +208,43 @@ If `-include_mixed_reality` is used, a second CSV file will be generated with
 | MsHeadPoseCallbackStopToInputLatch           | Time between Lsr pose sample end and input latch | `-include_mixed_reality` `-verbose` |
 | MsInputLatchToGpuSubmission                  | Time between Lsr input latch and GPU work submit | `-include_mixed_reality` `-verbose` |
 
+## Known issues
+
+See [GitHub Issues](https://github.com/GameTechDev/PresentMon/issues) for a
+complete list of reported issues.
+
+### Analyzing OpenGL and Vulkan applications
+
+Applications that do not use D3D9 or DXGI APIs for presenting frames (e.g., as
+is typical with OpenGL or Vulkan applications) will report the following:
+- Runtime = Other.
+- SwapChainAddress = 0
+- SyncInterval = -1
+- PresentFlags = 0
+- MsInPresentAPI = 0
+
+In this case, TimeInSeconds will represent the first time the present is
+observed in the kernel, as opposed to the runtime, and therefore will be
+sometime after the application presented the frame (typically ~0.5ms).  Since
+MsUntilRenderComplete and MsUntilDisplayed are deltas from TimeInSeconds, they
+will be correspondingly smaller then they would have been if measured from
+application present.  MsBetweenDisplayChange will still be correct, and
+MsBetweenPresents should be correct on average.
+
+### Measuring application latency
+
+PresentMon doesn't directly measure the latency from a user's input to the
+display of that frame because it doesn't have insight into when the application
+collects and applies user input.  A potential approximation is to assume that
+the application collects user input immediately after presenting the previous
+frame.  To compute this, search for the previous row that uses the same swap
+chain and then:
+
+```LatencyMs =~ 1000 * MsBetweenPresents + MsUntilDisplayed - previous(MsInPresentAPI)```
+
+### Shutting down PresentMon on Windows 7
+
+Some users have observed system stability issues when forcibly shutting down
+PresentMon on Windows 7.  PresentMon shutdown code was rewritten to address
+this, but if you are having similar issues shutting PresentMon down using
+Ctrl+C in it's window may be a workaround.

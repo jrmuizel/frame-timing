@@ -136,6 +136,13 @@ static BOOL CALLBACK HandleCtrlEvent(DWORD ctrlType)
         StopRecording();
     }
     ExitMainThread();
+
+    // The other threads are now shutting down but if we return the system may
+    // terminate the process before they complete, which may leave the trace
+    // session open.  We could wait for shutdown confirmation, but this
+    // function is run in a separate thread so we just put it to sleep
+    // indefinately and let the application shut itself down.
+    Sleep(INFINITE);
     return TRUE; // The signal was handled, don't call any other handlers
 }
 
@@ -272,7 +279,13 @@ int main(int argc, char** argv)
         EnableScrollLock(originalScrollLockEnabled);
     }
     StopTraceSession();
+    /* We cannot remove the Ctrl handler because it is in an infinite sleep so
+     * this call will never return, either hanging the application or having
+     * the threshold timer trigger and force terminate (depending on what Ctrl
+     * code was used).  Instead, we just let the process tear down take care of
+     * it.
     SetConsoleCtrlHandler(HandleCtrlEvent, FALSE);
+    */
     DestroyWindow(gWnd);
     UnregisterClass(wndClass.lpszClassName, NULL);
     return 0;
