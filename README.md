@@ -241,7 +241,7 @@ the application collects user input immediately after presenting the previous
 frame.  To compute this, search for the previous row that uses the same swap
 chain and then:
 
-```LatencyMs =~ 1000 * MsBetweenPresents + MsUntilDisplayed - previous(MsInPresentAPI)```
+```LatencyMs =~ MsBetweenPresents + MsUntilDisplayed - previous(MsInPresentAPI)```
 
 ### Shutting down PresentMon on Windows 7
 
