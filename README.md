@@ -14,6 +14,7 @@ visualize the resulting data.  For example, see
 - [CapFrameX](https://github.com/DevTechProfile/CapFrameX)
 - [OCAT](https://github.com/GPUOpen-Tools/OCAT)
 - [FrameView](https://www.nvidia.com/en-us/geforce/technologies/frameview/)
+- [PIX](https://devblogs.microsoft.com/pix/download/) uses PresentMon as part of its [system monitor UI](https://devblogs.microsoft.com/pix/system-monitor/)
 
 This readme contains the following sections:
 - [License](#License)
