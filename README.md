@@ -247,4 +247,4 @@ chain and then:
 Some users have observed system stability issues when forcibly shutting down
 PresentMon on Windows 7.  PresentMon shutdown code was rewritten to address
 this, but if you are having similar issues shutting PresentMon down using
-Ctrl+C in it's window may be a workaround.
+Ctrl+C in its window may be a workaround.
