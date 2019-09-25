@@ -22,11 +22,7 @@ SOFTWARE.
 
 #pragma once
 
-/* Uncomment to force-enable:
-#undef DEBUG_VERBOSE
-#define DEBUG_VERBOSE 1
-*/
-
+#define DEBUG_VERBOSE 0
 #if DEBUG_VERBOSE
 
 #define DEBUG_START_TIME_NS     0ull    /* 0 means first event */
