@@ -1028,7 +1028,7 @@ void HandleD3D9Event(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
             { L"Flags" },
         };
         pmConsumer->mMetadata.GetEventData(pEventRecord, desc, _countof(desc));
-        auto pSwapchain = desc[0].GetData<uint32_t>();
+        auto pSwapchain = desc[0].GetData<uint64_t>();
         auto Flags      = desc[1].GetData<uint32_t>();
 
         auto present = std::make_shared<PresentEvent>(hdr, Runtime::D3D9);

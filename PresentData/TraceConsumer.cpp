@@ -232,6 +232,8 @@ void EventMetadata::GetEventData(EVENT_RECORD* eventRecord, EventDataDesc* desc,
                 if (foundCount == descCount) {
                     return;
                 }
+
+                break; // Stop the search, this won't work if the desc list has duplicates
             }
         }
 
