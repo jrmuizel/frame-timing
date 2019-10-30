@@ -242,8 +242,8 @@ void PMTraceConsumer::HandleDxgkQueueSubmit(
 
     // This event is emitted after a flip/blt/PHT event, and may be the only way
     // to trace completion of the present.
-    if (packetType == (uint32_t) Microsoft_Windows_DxgKrnl::QueueSubmitType::MMIOFlip ||
-        packetType == (uint32_t) Microsoft_Windows_DxgKrnl::QueueSubmitType::Software ||
+    if (packetType == DXGKETW_MMIOFLIP_COMMAND_BUFFER ||
+        packetType == DXGKETW_SOFTWARE_COMMAND_BUFFER ||
         present) {
         auto eventIter = mPresentByThreadId.find(hdr.ThreadId);
         if (eventIter == mPresentByThreadId.end() || eventIter->second->QueueSubmitSequence != 0) {
@@ -599,18 +599,6 @@ void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer)
 
 namespace Win7 {
 
-typedef enum _DXGKETW_QUEUE_PACKET_TYPE {
-    DXGKETW_RENDER_COMMAND_BUFFER = 0,
-    DXGKETW_DEFERRED_COMMAND_BUFFER = 1,
-    DXGKETW_SYSTEM_COMMAND_BUFFER = 2,
-    DXGKETW_MMIOFLIP_COMMAND_BUFFER = 3,
-    DXGKETW_WAIT_COMMAND_BUFFER = 4,
-    DXGKETW_SIGNAL_COMMAND_BUFFER = 5,
-    DXGKETW_DEVICE_COMMAND_BUFFER = 6,
-    DXGKETW_SOFTWARE_COMMAND_BUFFER = 7,
-    DXGKETW_PAGING_COMMAND_BUFFER = 8,
-} DXGKETW_QUEUE_PACKET_TYPE;
-
 typedef LARGE_INTEGER PHYSICAL_ADDRESS;
 
 #pragma pack(push)
@@ -753,30 +741,12 @@ void HandleDxgkQueuePacket(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsum
 
     if (pEventRecord->EventHeader.EventDescriptor.Opcode == EVENT_TRACE_TYPE_START) {
         auto pSubmitEvent = reinterpret_cast<DXGKETW_QUEUESUBMITEVENT*>(pEventRecord->UserData);
-
-        uint32_t packetType;
-        bool present;
-        switch (pSubmitEvent->PacketType) {
-        case DXGKETW_MMIOFLIP_COMMAND_BUFFER:
-            packetType = (uint32_t) Microsoft_Windows_DxgKrnl::QueueSubmitType::MMIOFlip;
-            present = false;
-            break;
-        case DXGKETW_SOFTWARE_COMMAND_BUFFER:
-            packetType = (uint32_t) Microsoft_Windows_DxgKrnl::QueueSubmitType::Software;
-            present = false;
-            break;
-        default:
-            packetType = 0;
-            present = pSubmitEvent->bPresent != 0;
-            break;
-        }
-
         pmConsumer->HandleDxgkQueueSubmit(
             pEventRecord->EventHeader,
-            packetType,
+            pSubmitEvent->PacketType,
             pSubmitEvent->SubmitSequence,
             pSubmitEvent->hContext,
-            present,
+            pSubmitEvent->bPresent != 0,
             false);
     } else if (pEventRecord->EventHeader.EventDescriptor.Opcode == EVENT_TRACE_TYPE_STOP) {
         auto pCompleteEvent = reinterpret_cast<DXGKETW_QUEUECOMPLETEEVENT*>(pEventRecord->UserData);
