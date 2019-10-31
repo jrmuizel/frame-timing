@@ -296,23 +296,20 @@ struct PMTraceConsumer
     decltype(mPresentByThreadId.begin()) CreatePresent(std::shared_ptr<PresentEvent> present, decltype(mPresentsByProcess.begin()->second)& processMap);
     void CreatePresent(std::shared_ptr<PresentEvent> present);
     void RuntimePresentStop(EVENT_HEADER const& hdr, bool AllowPresentBatching);
+
+    void HandleNTProcessEvent(EVENT_RECORD* pEventRecord);
+    void HandleDXGIEvent(EVENT_RECORD* pEventRecord);
+    void HandleD3D9Event(EVENT_RECORD* pEventRecord);
+    void HandleDXGKEvent(EVENT_RECORD* pEventRecord);
+    void HandleWin32kEvent(EVENT_RECORD* pEventRecord);
+    void HandleDWMEvent(EVENT_RECORD* pEventRecord);
+    void HandleMetadataEvent(EVENT_RECORD* pEventRecord);
+
+    void HandleWin7DxgkBlt(EVENT_RECORD* pEventRecord);
+    void HandleWin7DxgkFlip(EVENT_RECORD* pEventRecord);
+    void HandleWin7DxgkPresentHistory(EVENT_RECORD* pEventRecord);
+    void HandleWin7DxgkQueuePacket(EVENT_RECORD* pEventRecord);
+    void HandleWin7DxgkVSyncDPC(EVENT_RECORD* pEventRecord);
+    void HandleWin7DxgkMMIOFlip(EVENT_RECORD* pEventRecord);
 };
 
-void HandleNTProcessEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
-void HandleDXGIEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
-void HandleD3D9Event(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
-void HandleDXGKEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
-void HandleWin32kEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
-void HandleDWMEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
-void HandleMetadataEvent(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
-
-// These are only for Win7 support
-namespace Win7
-{
-    void HandleDxgkBlt(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
-    void HandleDxgkFlip(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
-    void HandleDxgkPresentHistory(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
-    void HandleDxgkQueuePacket(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
-    void HandleDxgkVSyncDPC(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
-    void HandleDxgkMMIOFlip(EVENT_RECORD* pEventRecord, PMTraceConsumer* pmConsumer);
-}

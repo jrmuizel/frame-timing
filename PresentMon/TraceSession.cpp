@@ -238,11 +238,11 @@ static void CALLBACK SimpleEventRecordCallback(EVENT_RECORD* pEventRecord)
         gQpcTraceStart = hdr.TimeStamp.QuadPart;
     }
 
-         if (hdr.ProviderId == Microsoft_Windows_DXGI::GUID)            HandleDXGIEvent      (pEventRecord, gPMConsumer);
-    else if (hdr.ProviderId == Microsoft_Windows_D3D9::GUID)            HandleD3D9Event      (pEventRecord, gPMConsumer);
-    else if (hdr.ProviderId == NTProcessProvider::GUID)                 HandleNTProcessEvent (pEventRecord, gPMConsumer);
-    else if (hdr.ProviderId == Microsoft_Windows_EventMetadata::GUID)   HandleMetadataEvent  (pEventRecord, gPMConsumer);
-    else if (hdr.ProviderId == DHD_PROVIDER_GUID)                       HandleDHDEvent       (pEventRecord, gMRConsumer);
+         if (hdr.ProviderId == Microsoft_Windows_DXGI::GUID)            gPMConsumer->HandleDXGIEvent     (pEventRecord);
+    else if (hdr.ProviderId == Microsoft_Windows_D3D9::GUID)            gPMConsumer->HandleD3D9Event     (pEventRecord);
+    else if (hdr.ProviderId == NTProcessProvider::GUID)                 gPMConsumer->HandleNTProcessEvent(pEventRecord);
+    else if (hdr.ProviderId == Microsoft_Windows_EventMetadata::GUID)   gPMConsumer->HandleMetadataEvent (pEventRecord);
+    else if (hdr.ProviderId == DHD_PROVIDER_GUID)                       gMRConsumer->HandleDHDEvent      (pEventRecord);
 }
 
 static void CALLBACK EventRecordCallback(EVENT_RECORD* pEventRecord)
@@ -253,22 +253,22 @@ static void CALLBACK EventRecordCallback(EVENT_RECORD* pEventRecord)
         gQpcTraceStart = hdr.TimeStamp.QuadPart;
     }
 
-         if (hdr.ProviderId == Microsoft_Windows_DxgKrnl::GUID)                      HandleDXGKEvent                (pEventRecord, gPMConsumer);
-    else if (hdr.ProviderId == Microsoft_Windows_Win32k::GUID)                       HandleWin32kEvent              (pEventRecord, gPMConsumer);
-    else if (hdr.ProviderId == Microsoft_Windows_Dwm_Core::GUID)                     HandleDWMEvent                 (pEventRecord, gPMConsumer);
-    else if (hdr.ProviderId == Microsoft_Windows_DXGI::GUID)                         HandleDXGIEvent                (pEventRecord, gPMConsumer);
-    else if (hdr.ProviderId == Microsoft_Windows_D3D9::GUID)                         HandleD3D9Event                (pEventRecord, gPMConsumer);
-    else if (hdr.ProviderId == NTProcessProvider::GUID)                              HandleNTProcessEvent           (pEventRecord, gPMConsumer);
-    else if (hdr.ProviderId == Microsoft_Windows_Dwm_Core::Win7::GUID)               HandleDWMEvent                 (pEventRecord, gPMConsumer);
-    else if (hdr.ProviderId == Microsoft_Windows_DxgKrnl::Win7::BLT_GUID)            Win7::HandleDxgkBlt            (pEventRecord, gPMConsumer);
-    else if (hdr.ProviderId == Microsoft_Windows_DxgKrnl::Win7::FLIP_GUID)           Win7::HandleDxgkFlip           (pEventRecord, gPMConsumer);
-    else if (hdr.ProviderId == Microsoft_Windows_DxgKrnl::Win7::PRESENTHISTORY_GUID) Win7::HandleDxgkPresentHistory (pEventRecord, gPMConsumer);
-    else if (hdr.ProviderId == Microsoft_Windows_DxgKrnl::Win7::QUEUEPACKET_GUID)    Win7::HandleDxgkQueuePacket    (pEventRecord, gPMConsumer);
-    else if (hdr.ProviderId == Microsoft_Windows_DxgKrnl::Win7::VSYNCDPC_GUID)       Win7::HandleDxgkVSyncDPC       (pEventRecord, gPMConsumer);
-    else if (hdr.ProviderId == Microsoft_Windows_DxgKrnl::Win7::MMIOFLIP_GUID)       Win7::HandleDxgkMMIOFlip       (pEventRecord, gPMConsumer);
-    else if (hdr.ProviderId == Microsoft_Windows_EventMetadata::GUID)                HandleMetadataEvent            (pEventRecord, gPMConsumer);
-    else if (hdr.ProviderId == DHD_PROVIDER_GUID)                                    HandleDHDEvent                 (pEventRecord, gMRConsumer);
-    else if (hdr.ProviderId == SPECTRUMCONTINUOUS_PROVIDER_GUID)                     HandleSpectrumContinuousEvent  (pEventRecord, gMRConsumer);
+         if (hdr.ProviderId == Microsoft_Windows_DxgKrnl::GUID)                      gPMConsumer->HandleDXGKEvent              (pEventRecord);
+    else if (hdr.ProviderId == Microsoft_Windows_Win32k::GUID)                       gPMConsumer->HandleWin32kEvent            (pEventRecord);
+    else if (hdr.ProviderId == Microsoft_Windows_Dwm_Core::GUID)                     gPMConsumer->HandleDWMEvent               (pEventRecord);
+    else if (hdr.ProviderId == Microsoft_Windows_DXGI::GUID)                         gPMConsumer->HandleDXGIEvent              (pEventRecord);
+    else if (hdr.ProviderId == Microsoft_Windows_D3D9::GUID)                         gPMConsumer->HandleD3D9Event              (pEventRecord);
+    else if (hdr.ProviderId == NTProcessProvider::GUID)                              gPMConsumer->HandleNTProcessEvent         (pEventRecord);
+    else if (hdr.ProviderId == Microsoft_Windows_Dwm_Core::Win7::GUID)               gPMConsumer->HandleDWMEvent               (pEventRecord);
+    else if (hdr.ProviderId == Microsoft_Windows_DxgKrnl::Win7::BLT_GUID)            gPMConsumer->HandleWin7DxgkBlt            (pEventRecord);
+    else if (hdr.ProviderId == Microsoft_Windows_DxgKrnl::Win7::FLIP_GUID)           gPMConsumer->HandleWin7DxgkFlip           (pEventRecord);
+    else if (hdr.ProviderId == Microsoft_Windows_DxgKrnl::Win7::PRESENTHISTORY_GUID) gPMConsumer->HandleWin7DxgkPresentHistory (pEventRecord);
+    else if (hdr.ProviderId == Microsoft_Windows_DxgKrnl::Win7::QUEUEPACKET_GUID)    gPMConsumer->HandleWin7DxgkQueuePacket    (pEventRecord);
+    else if (hdr.ProviderId == Microsoft_Windows_DxgKrnl::Win7::VSYNCDPC_GUID)       gPMConsumer->HandleWin7DxgkVSyncDPC       (pEventRecord);
+    else if (hdr.ProviderId == Microsoft_Windows_DxgKrnl::Win7::MMIOFLIP_GUID)       gPMConsumer->HandleWin7DxgkMMIOFlip       (pEventRecord);
+    else if (hdr.ProviderId == Microsoft_Windows_EventMetadata::GUID)                gPMConsumer->HandleMetadataEvent          (pEventRecord);
+    else if (hdr.ProviderId == DHD_PROVIDER_GUID)                                    gMRConsumer->HandleDHDEvent               (pEventRecord);
+    else if (hdr.ProviderId == SPECTRUMCONTINUOUS_PROVIDER_GUID)                     gMRConsumer->HandleSpectrumContinuousEvent(pEventRecord);
 }
 
 static ULONG CALLBACK BufferCallback(EVENT_TRACE_LOGFILEA* pLogFile)
