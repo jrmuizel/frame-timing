@@ -48,7 +48,9 @@ enum class PresentMode
     Unknown,
     Hardware_Legacy_Flip,
     Hardware_Legacy_Copy_To_Front_Buffer,
+    /* Not detected:
     Hardware_Direct_Flip,
+    */
     Hardware_Independent_Flip,
     Composed_Flip,
     Composed_Copy_GPU_GDI,
@@ -114,10 +116,6 @@ struct PresentEvent {
 
     PresentEvent(EVENT_HEADER const& hdr, ::Runtime runtime);
     ~PresentEvent();
-
-    void SetPresentMode(::PresentMode mode);
-    void SetDwmNotified(bool notified);
-    void SetTokenPtr(uint64_t tokenPtr);
 
 private:
     PresentEvent(PresentEvent const& copy); // dne
@@ -292,6 +290,7 @@ struct PMTraceConsumer
     void HandleDxgkPropagatePresentHistoryEventArgs(EVENT_HEADER const& hdr, uint64_t token);
 
     void CompletePresent(std::shared_ptr<PresentEvent> p, uint32_t recurseDepth=0);
+    std::shared_ptr<PresentEvent> FindBySubmitSequence(uint32_t submitSequence);
     decltype(mPresentByThreadId.begin()) FindOrCreatePresent(EVENT_HEADER const& hdr);
     decltype(mPresentByThreadId.begin()) CreatePresent(std::shared_ptr<PresentEvent> present, decltype(mPresentsByProcess.begin()->second)& processMap);
     void CreatePresent(std::shared_ptr<PresentEvent> present);
