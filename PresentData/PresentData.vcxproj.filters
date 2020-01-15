@@ -8,7 +8,7 @@
     <ClInclude Include="DxgkrnlEventStructs.hpp" />
     <ClInclude Include="EventMetadataEventStructs.hpp" />
     <ClInclude Include="MixedRealityTraceConsumer.hpp" />
-    <ClInclude Include="NTProcessEventEventStructs.hpp" />
+    <ClInclude Include="NTProcessEventStructs.hpp" />
     <ClInclude Include="PresentMonTraceConsumer.hpp" />
     <ClInclude Include="TraceConsumer.hpp" />
     <ClInclude Include="Win32kEventStructs.hpp" />
