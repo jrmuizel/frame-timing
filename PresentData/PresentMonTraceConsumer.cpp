@@ -315,6 +315,11 @@ void PMTraceConsumer::HandleDxgkMMIOFlipMPO(EVENT_HEADER const& hdr, uint32_t fl
         return;
     }
 
+    // Present could tear if we're not waiting for vsync
+    if (flipEntryStatusAfterFlip != (uint32_t) Microsoft_Windows_DxgKrnl::FlipEntryStatus::FlipWaitVSync) {
+        pEvent->SupportsTearing = true;
+    }
+
     // For the VSync ahd HSync paths, we'll wait for the corresponding ?SyncDPC
     // event before being considering the present complete to get a more-accurate
     // ScreenTime (see HandleDxgkSyncDPC).
@@ -324,7 +329,6 @@ void PMTraceConsumer::HandleDxgkMMIOFlipMPO(EVENT_HEADER const& hdr, uint32_t fl
     }
 
     pEvent->FinalState = PresentResult::Presented;
-    pEvent->SupportsTearing = true;
     if (flipEntryStatusAfterFlip == (uint32_t) Microsoft_Windows_DxgKrnl::FlipEntryStatus::FlipWaitComplete) {
         pEvent->ScreenTime = hdr.TimeStamp.QuadPart;
     }
