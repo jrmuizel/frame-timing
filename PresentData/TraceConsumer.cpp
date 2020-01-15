@@ -255,8 +255,8 @@ T GetEventString(EventMetadata* metadata, EVENT_RECORD* eventRecord, wchar_t con
     desc.arrayIndex_ = arrayIndex;
     metadata->GetEventData(eventRecord, &desc, 1);
 
-    auto start = (T::value_type*) desc.data_;
-    auto end   = (T::value_type*) ((uintptr_t) desc.data_ + desc.size_);
+    auto start = (typename T::value_type*) desc.data_;
+    auto end   = (typename T::value_type*) ((uintptr_t) desc.data_ + desc.size_);
     return T(start, end);
 }
 

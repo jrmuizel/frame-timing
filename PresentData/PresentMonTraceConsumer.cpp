@@ -852,7 +852,7 @@ void PMTraceConsumer::HandleWin32kEvent(EVENT_RECORD* pEventRecord)
         DebugModifyPresent(event);
 
         switch (NewState) {
-        case Microsoft_Windows_Win32k::TokenState::InFrame: // Composition is starting
+        case (uint32_t) Microsoft_Windows_Win32k::TokenState::InFrame: // Composition is starting
         {
             if (event.Hwnd) {
                 auto hWndIter = mLastWindowPresent.find(event.Hwnd);
@@ -873,7 +873,7 @@ void PMTraceConsumer::HandleWin32kEvent(EVENT_RECORD* pEventRecord)
             break;
         }
 
-        case Microsoft_Windows_Win32k::TokenState::Confirmed: // Present has been submitted
+        case (uint32_t) Microsoft_Windows_Win32k::TokenState::Confirmed: // Present has been submitted
             // If we haven't already decided we're going to discard a token,
             // now's a good time to indicate it'll make it to screen
             if (event.FinalState == PresentResult::Unknown) {
@@ -890,11 +890,11 @@ void PMTraceConsumer::HandleWin32kEvent(EVENT_RECORD* pEventRecord)
             }
             break;
 
-        case Microsoft_Windows_Win32k::TokenState::Retired: // Present has been completed, token's buffer is now displayed
+        case (uint32_t) Microsoft_Windows_Win32k::TokenState::Retired: // Present has been completed, token's buffer is now displayed
             event.ScreenTime = hdr.TimeStamp.QuadPart;
             break;
 
-        case Microsoft_Windows_Win32k::TokenState::Discarded: // Present has been discarded
+        case (uint32_t) Microsoft_Windows_Win32k::TokenState::Discarded: // Present has been discarded
         {
             auto sharedPtr = eventIter->second;
             mWin32KPresentHistoryTokens.erase(eventIter);
