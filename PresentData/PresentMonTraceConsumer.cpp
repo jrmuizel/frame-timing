@@ -266,13 +266,13 @@ void PMTraceConsumer::HandleDxgkQueueComplete(EVENT_HEADER const& hdr, uint32_t 
     }
 }
 
+// An MMIOFlip event is emitted when an MMIOFlip packet is dequeued.  All GPU
+// work submitted prior to the flip has been completed.
+//
+// It also is emitted when an independent flip PHT is dequed, and will tell us
+// whether the present is immediate or vsync.
 void PMTraceConsumer::HandleDxgkMMIOFlip(EVENT_HEADER const& hdr, uint32_t flipSubmitSequence, uint32_t flags)
 {
-    // An MMIOFlip event is emitted when an MMIOFlip packet is dequeued.
-    // This corresponds to all GPU work prior to the flip being completed
-    // (i.e. present "ready")
-    // It also is emitted when an independent flip PHT is dequed,
-    // and will tell us whether the present is immediate or vsync.
     auto pEvent = FindBySubmitSequence(flipSubmitSequence);
     if (pEvent == nullptr) {
         return;
@@ -291,6 +291,45 @@ void PMTraceConsumer::HandleDxgkMMIOFlip(EVENT_HEADER const& hdr, uint32_t flipS
         if (pEvent->PresentMode == PresentMode::Hardware_Legacy_Flip) {
             CompletePresent(pEvent);
         }
+    }
+}
+
+void PMTraceConsumer::HandleDxgkMMIOFlipMPO(EVENT_HEADER const& hdr, uint32_t flipSubmitSequence, uint32_t flipEntryStatusAfterFlip, bool flipEntryStatusAfterFlipValid)
+{
+    auto pEvent = FindBySubmitSequence(flipSubmitSequence);
+    if (pEvent == nullptr) {
+        return;
+    }
+
+    // Avoid double-marking a single present packet coming from the MPO API
+    if (pEvent->ReadyTime == 0) {
+        pEvent->ReadyTime = hdr.TimeStamp.QuadPart;
+    }
+
+    if (pEvent->PresentMode == PresentMode::Hardware_Independent_Flip ||
+        pEvent->PresentMode == PresentMode::Composed_Flip) {
+        pEvent->PresentMode = PresentMode::Hardware_Composed_Independent_Flip;
+    }
+
+    if (!flipEntryStatusAfterFlipValid) {
+        return;
+    }
+
+    // For the VSync ahd HSync paths, we'll wait for the corresponding ?SyncDPC
+    // event before being considering the present complete to get a more-accurate
+    // ScreenTime (see HandleDxgkSyncDPC).
+    if (flipEntryStatusAfterFlip == (uint32_t) Microsoft_Windows_DxgKrnl::FlipEntryStatus::FlipWaitVSync ||
+        flipEntryStatusAfterFlip == (uint32_t) Microsoft_Windows_DxgKrnl::FlipEntryStatus::FlipWaitHSync) {
+        return;
+    }
+
+    pEvent->FinalState = PresentResult::Presented;
+    pEvent->SupportsTearing = true;
+    if (flipEntryStatusAfterFlip == (uint32_t) Microsoft_Windows_DxgKrnl::FlipEntryStatus::FlipWaitComplete) {
+        pEvent->ScreenTime = hdr.TimeStamp.QuadPart;
+    }
+    if (pEvent->PresentMode == PresentMode::Hardware_Legacy_Flip) {
+        CompletePresent(pEvent);
     }
 }
 
@@ -444,40 +483,18 @@ void PMTraceConsumer::HandleDXGKEvent(EVENT_RECORD* pEventRecord)
     }
     case Microsoft_Windows_DxgKrnl::MMIOFlipMultiPlaneOverlay_Info::Id:
     {
-        // See above for more info about this packet.
-        // Note: Event does not exist on Win7
-        auto FlipFenceId = mMetadata.GetEventData<uint64_t>(pEventRecord, L"FlipSubmitSequence");
-        uint32_t FlipSubmitSequence = (uint32_t)(FlipFenceId >> 32u);
+        auto flipEntryStatusAfterFlipValid = hdr.EventDescriptor.Version >= 2;
+        EventDataDesc desc[] = {
+            { L"FlipSubmitSequence" },
+            { L"FlipEntryStatusAfterFlip" }, // optional
+        };
+        mMetadata.GetEventData(pEventRecord, desc, _countof(desc) - (flipEntryStatusAfterFlipValid ? 0 : 1));
+        auto FlipFenceId              = desc[0].GetData<uint64_t>();
+        auto FlipEntryStatusAfterFlip = flipEntryStatusAfterFlipValid ? desc[1].GetData<uint32_t>() : 0u;
 
-        auto pEvent = FindBySubmitSequence(FlipSubmitSequence);
-        if (pEvent == nullptr) {
-            return;
-        }
+        auto flipSubmitSequence = (uint32_t) (FlipFenceId >> 32u);
 
-        // Avoid double-marking a single present packet coming from the MPO API
-        if (pEvent->ReadyTime == 0) {
-            pEvent->ReadyTime = hdr.TimeStamp.QuadPart;
-        }
-
-        if (pEvent->PresentMode == PresentMode::Hardware_Independent_Flip ||
-            pEvent->PresentMode == PresentMode::Composed_Flip) {
-            pEvent->PresentMode = PresentMode::Hardware_Composed_Independent_Flip;
-        }
-
-        if (hdr.EventDescriptor.Version >= 2) {
-            auto FlipEntryStatusAfterFlip = (Microsoft_Windows_DxgKrnl::FlipEntryStatus) mMetadata.GetEventData<uint32_t>(pEventRecord, L"FlipEntryStatusAfterFlip");
-            if (FlipEntryStatusAfterFlip != Microsoft_Windows_DxgKrnl::FlipEntryStatus::FlipWaitVSync &&
-                FlipEntryStatusAfterFlip != Microsoft_Windows_DxgKrnl::FlipEntryStatus::FlipWaitHSync) {
-                pEvent->FinalState = PresentResult::Presented;
-                pEvent->SupportsTearing = true;
-                if (FlipEntryStatusAfterFlip == Microsoft_Windows_DxgKrnl::FlipEntryStatus::FlipWaitComplete) {
-                    pEvent->ScreenTime = hdr.TimeStamp.QuadPart;
-                }
-                if (pEvent->PresentMode == PresentMode::Hardware_Legacy_Flip) {
-                    CompletePresent(pEvent);
-                }
-            }
-        }
+        HandleDxgkMMIOFlipMPO(hdr, flipSubmitSequence, FlipEntryStatusAfterFlip, flipEntryStatusAfterFlipValid);
         break;
     }
     case Microsoft_Windows_DxgKrnl::HSyncDPCMultiPlane_Info::Id:
