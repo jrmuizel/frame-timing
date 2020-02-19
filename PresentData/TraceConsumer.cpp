@@ -79,8 +79,10 @@ void GetPropertySize(TRACE_EVENT_INFO const& tei, EVENT_RECORD const& eventRecor
     auto const& epi = tei.EventPropertyInfoArray[index];
     assert((epi.Flags & ~(PropertyStruct | PropertyParamCount | PropertyParamFixedCount)) == 0);
 
-    uint32_t size = 0;
-    uint32_t count = 1;
+    // Use the epi length and count by default.  There are cases where the count
+    // is valid but (epi.Flags & PropertyParamFixedCount) == 0.
+    uint32_t size = epi.length;
+    uint32_t count = epi.count;
 
     if (epi.Flags & PropertyStruct) {
         size = 0;
@@ -117,24 +119,27 @@ void GetPropertySize(TRACE_EVENT_INFO const& tei, EVENT_RECORD const& eventRecor
                 (void) status;
             }
             break;
-
-        default:
-            assert(epi.length > 0);
-            size = epi.length;
-            break;
         }
     }
 
-    if (epi.Flags & PropertyParamFixedCount) {
-        count = epi.count;
+    if (epi.Flags & PropertyParamCount) {
+        auto countIdx = epi.countPropertyIndex;
+        auto addr = (uintptr_t) eventRecord.UserData + GetPropertyDataOffset(tei, eventRecord, countIdx);
+
+        assert(tei.EventPropertyInfoArray[countIdx].Flags == 0);
+        switch (tei.EventPropertyInfoArray[countIdx].nonStructType.InType) {
+        case TDH_INTYPE_INT8:   count = *(int8_t const*) addr; break;
+        case TDH_INTYPE_UINT8:  count = *(uint8_t const*) addr; break;
+        case TDH_INTYPE_INT16:  count = *(int16_t const*) addr; break;
+        case TDH_INTYPE_UINT16: count = *(uint16_t const*) addr; break;
+        case TDH_INTYPE_INT32:  count = *(int32_t const*) addr; break;
+        case TDH_INTYPE_UINT32: count = *(uint32_t const*) addr; break;
+        default: assert(!"INTYPE not yet implemented for count.");
+        }
     }
 
-    if (epi.Flags & PropertyParamCount) {
-        assert(count < tei.TopLevelPropertyCount);
-        assert(tei.EventPropertyInfoArray[count].Flags == 0);
-        assert(tei.EventPropertyInfoArray[count].nonStructType.InType == TDH_INTYPE_UINT32);
-        count = *(uint32_t const*) ((uintptr_t) eventRecord.UserData + GetPropertyDataOffset(tei, eventRecord, count));
-    }
+    assert(size > 0);
+    assert(count > 0);
 
     *outSize = size;
     *outCount = count;
