@@ -198,7 +198,7 @@ void UpdateConsole(uint32_t processId, ProcessInfo const& processInfo)
 
         if (displayCount >= 2) {
             auto displayAvg = QpcDeltaToSeconds(displayN->QpcTime - display0QpcTime) / (displayCount - 1);
-            auto latencyAvg = QpcDeltaToSeconds(latencySum) / (displayCount - 1);
+            auto latencyAvg = QpcDeltaToSeconds(latencySum) / displayCount;
 
             ConsolePrint(", %.1lf fps displayed, %.2lf ms latency",
                 1.0 / displayAvg,
