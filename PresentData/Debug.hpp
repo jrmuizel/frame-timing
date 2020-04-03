@@ -25,8 +25,9 @@ SOFTWARE.
 #define DEBUG_VERBOSE 0
 #if DEBUG_VERBOSE
 
-#define DEBUG_START_TIME_NS     0ull    /* 0 means first event */
-#define DEBUG_STOP_TIME_NS      0ull    /* 0 means end of trace */
+// Time relative to first event
+#define DEBUG_START_TIME_NS     0ull
+#define DEBUG_STOP_TIME_NS      UINT64_MAX
 
 #include <stdint.h>
 
