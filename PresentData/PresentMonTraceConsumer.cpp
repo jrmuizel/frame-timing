@@ -50,6 +50,9 @@ PresentEvent::PresentEvent(EVENT_HEADER const& hdr, ::Runtime runtime)
     , Runtime(runtime)
     , PresentMode(PresentMode::Unknown)
     , FinalState(PresentResult::Unknown)
+    , DestWidth(0)
+    , DestHeight(0)
+    , CompositionSurfaceLuid(0)
     , SupportsTearing(false)
     , MMIO(false)
     , SeenDxgkPresent(false)
@@ -806,11 +809,15 @@ void PMTraceConsumer::HandleWin32kEvent(EVENT_RECORD* pEventRecord)
             { L"CompositionSurfaceLuid" },
             { L"PresentCount" },
             { L"BindId" },
+            { L"DestWidth" },
+            { L"DestHeight" }
         };
         mMetadata.GetEventData(pEventRecord, desc, _countof(desc));
         auto CompositionSurfaceLuid = desc[0].GetData<uint64_t>();
         auto PresentCount           = desc[1].GetData<uint64_t>();
         auto BindId                 = desc[2].GetData<uint64_t>();
+        auto DestWidth              = desc[3].GetData<uint32_t>();
+        auto DestHeight             = desc[4].GetData<uint32_t>();
 
         auto eventIter = FindOrCreatePresent(hdr);
 
@@ -821,6 +828,9 @@ void PMTraceConsumer::HandleWin32kEvent(EVENT_RECORD* pEventRecord)
         }
 
         eventIter->second->PresentMode = PresentMode::Composed_Flip;
+        eventIter->second->DestWidth = DestWidth;
+        eventIter->second->DestHeight = DestHeight;
+        eventIter->second->CompositionSurfaceLuid = CompositionSurfaceLuid;
         eventIter->second->SeenWin32KEvents = true;
 
         PMTraceConsumer::Win32KPresentHistoryTokenKey key(CompositionSurfaceLuid, PresentCount, BindId);

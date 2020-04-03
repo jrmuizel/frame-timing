@@ -99,6 +99,9 @@ struct PresentEvent {
     Runtime Runtime;
     PresentMode PresentMode;
     PresentResult FinalState;
+    uint32_t DestWidth;
+    uint32_t DestHeight;
+    uint64_t CompositionSurfaceLuid;
     bool SupportsTearing;
     bool MMIO;
     bool SeenDxgkPresent;
