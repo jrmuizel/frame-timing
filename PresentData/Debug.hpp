@@ -25,8 +25,9 @@ SOFTWARE.
 #define DEBUG_VERBOSE 0
 #if DEBUG_VERBOSE
 
-#define DEBUG_START_TIME_NS     0ull    /* 0 means first event */
-#define DEBUG_STOP_TIME_NS      0ull    /* 0 means end of trace */
+// Time relative to first event
+#define DEBUG_START_TIME_NS     0ull
+#define DEBUG_STOP_TIME_NS      UINT64_MAX
 
 #include <stdint.h>
 
@@ -34,7 +35,7 @@ struct PresentEvent; // Can't include PresentMonTraceConsumer.hpp because it inc
 struct EventMetadata;
 struct _EVENT_RECORD;
 
-void DebugInitialize(uint64_t* firstTimestamp, uint64_t timestampFrequency);
+void DebugInitialize(LARGE_INTEGER* firstTimestamp, LARGE_INTEGER timestampFrequency);
 bool DebugDone();
 void DebugEvent(_EVENT_RECORD* eventRecord, EventMetadata* metadata);
 void DebugCreatePresent(PresentEvent const& p);

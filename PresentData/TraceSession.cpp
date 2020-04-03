@@ -373,7 +373,7 @@ ULONG TraceSession::Start(
         QueryPerformanceCounter(&mStartQpc);
     }
 
-    DebugInitialize(&mStartQpc.QuadPart, mQpcFrequency.QuadPart);
+    DebugInitialize(&mStartQpc, mQpcFrequency);
 
     return ERROR_SUCCESS;
 }

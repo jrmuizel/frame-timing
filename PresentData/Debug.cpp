@@ -60,17 +60,17 @@ struct {
 
 bool gDebugDone = false;
 bool gDebugTrace = false;
-uint64_t* gFirstTimestamp= 0;
-uint64_t gTimestampFrequency = 0;
+LARGE_INTEGER* gFirstTimestamp = nullptr;
+LARGE_INTEGER gTimestampFrequency = {};
 
 uint64_t ConvertTimestampDeltaToNs(uint64_t timestampDelta)
 {
-    return 1000000000ull * timestampDelta / gTimestampFrequency;
+    return 1000000000ull * timestampDelta / gTimestampFrequency.QuadPart;
 }
 
-uint64_t ConvertTimestampToNs(uint64_t timestamp)
+uint64_t ConvertTimestampToNs(LARGE_INTEGER timestamp)
 {
-    return ConvertTimestampDeltaToNs(timestamp - *gFirstTimestamp);
+    return ConvertTimestampDeltaToNs(timestamp.QuadPart - gFirstTimestamp->QuadPart);
 }
 
 char* AddCommas(uint64_t t)
@@ -95,7 +95,7 @@ char* AddCommas(uint64_t t)
 
 void PrintEventHeader(EVENT_HEADER const& hdr)
 {
-    printf("%16s %5u %5u ", AddCommas(ConvertTimestampToNs(hdr.TimeStamp.QuadPart)), hdr.ProcessId, hdr.ThreadId);
+    printf("%16s %5u %5u ", AddCommas(ConvertTimestampToNs(hdr.TimeStamp)), hdr.ProcessId, hdr.ThreadId);
 }
 
 void PrintUpdateHeader(uint64_t id, int indent=0)
@@ -184,10 +184,9 @@ void FlushModifiedPresent()
 
 }
 
-void DebugInitialize(uint64_t* firstTimestamp, uint64_t timestampFrequency)
+void DebugInitialize(LARGE_INTEGER* firstTimestamp, LARGE_INTEGER timestampFrequency)
 {
     gDebugDone = false;
-    gDebugTrace = DEBUG_START_TIME_NS == 0;
     gFirstTimestamp = firstTimestamp;
     gTimestampFrequency = timestampFrequency;
 
@@ -206,18 +205,15 @@ void DebugEvent(EVENT_RECORD* eventRecord, EventMetadata* metadata)
 
     FlushModifiedPresent();
 
-#if DEBUG_START_TIME_NS
-    if (DEBUG_START_TIME_NS <= t) {
+    auto t = ConvertTimestampToNs(hdr.TimeStamp);
+    if (t >= DEBUG_START_TIME_NS) {
         gDebugTrace = true;
     }
-#endif
 
-#if DEBUG_STOP_TIME_NS
-    if (DEBUG_STOP_TIME_NS <= t) {
+    if (t >= DEBUG_STOP_TIME_NS) {
         gDebugTrace = false;
         gDebugDone = true;
     }
-#endif
 
     if (!gDebugTrace) {
         return;
@@ -317,6 +313,7 @@ void DebugEvent(EVENT_RECORD* eventRecord, EventMetadata* metadata)
             printf("Win32K_TokenStateChanged ");
 
             switch (metadata->GetEventData<uint32_t>(eventRecord, L"NewState")) {
+            case Microsoft_Windows_Win32k::TokenState::Completed: printf("Completed\n"); break;
             case Microsoft_Windows_Win32k::TokenState::InFrame:   printf("InFrame\n");   break;
             case Microsoft_Windows_Win32k::TokenState::Confirmed: printf("Confirmed\n"); break;
             case Microsoft_Windows_Win32k::TokenState::Retired:   printf("Retired\n");   break;
