@@ -50,7 +50,7 @@ int main()
             auto p = f.present;
             auto combined_time = QpcDeltaToMilliSeconds(p->ReadyTime - f.StartTime);
             auto renderer_time = QpcDeltaToMilliSeconds(p->QpcTime - f.StartTime);
-            auto gpu_time = (p->ReadyTime - p->QpcTime);
+            auto gpu_time = QpcDeltaToMilliSeconds(p->ReadyTime - p->QpcTime);
             auto screen_time = QpcDeltaToMilliSeconds(p->ScreenTime - f.StartTime);
             if (screen_time > 33.) {
                 late_frames++;
