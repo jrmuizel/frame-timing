@@ -44,11 +44,19 @@ int main()
     /*for (auto p : gPMConsumer->mCompletedPresents) {
         std::cout << p->ThreadId << " " << p->QueueSubmitSequence << " "  << p->ReadyTime - gSession.mStartQpc.QuadPart << "\n";
     }*/
+    int late_frames = 0;
     for (auto f : gPMConsumer->mFrames) {
         if (f.present) {
             auto p = f.present;
-            auto time = QpcDeltaToMilliSeconds(p->ReadyTime - f.StartTime);
-            std::cout << time << "\n";
+            auto combined_time = QpcDeltaToMilliSeconds(p->ReadyTime - f.StartTime);
+            auto renderer_time = QpcDeltaToMilliSeconds(p->QpcTime - f.StartTime);
+            auto gpu_time = (p->ReadyTime - p->QpcTime);
+            auto screen_time = QpcDeltaToMilliSeconds(p->ScreenTime - f.StartTime);
+            if (screen_time > 33.) {
+                late_frames++;
+            }
+            std::cout << renderer_time << ", " << gpu_time << ", " << combined_time << ", " << screen_time << "\n";
         }
     }
+    std::cout << "late_frames: " << late_frames;
 }

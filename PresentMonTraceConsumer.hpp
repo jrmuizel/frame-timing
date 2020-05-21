@@ -128,7 +128,7 @@ struct Frame {
     // Initial event information (might be a kernel event if not presented
     // through DXGI or D3D9)
     uint64_t StartTime;
-    uint32_t EndTime;
+    uint64_t EndTime;
     std::shared_ptr<PresentEvent> present;   
 };
 
