@@ -34,12 +34,12 @@ double QpcDeltaToMilliSeconds(uint64_t qpc)
     return QpcDeltaToSeconds(qpc) * 1000.;
 }
 
-int main()
+int main(int argc, char *argv[])
 {
     bool expectFilteredEvents = false;
     bool simple = false;
     gPMConsumer = new PMTraceConsumer(expectFilteredEvents, simple);
-    auto status = gSession.Start(gPMConsumer, nullptr, "C:\\Users\\mozilla\\Share\\Merged-frames.etl", nullptr);
+    auto status = gSession.Start(gPMConsumer, nullptr, argv[1], nullptr);
     ProcessTrace(&gSession.mTraceHandle, 1, NULL, NULL);
     /*for (auto p : gPMConsumer->mCompletedPresents) {
         std::cout << p->ThreadId << " " << p->QueueSubmitSequence << " "  << p->ReadyTime - gSession.mStartQpc.QuadPart << "\n";
@@ -48,6 +48,7 @@ int main()
     for (auto f : gPMConsumer->mFrames) {
         if (f.present) {
             auto p = f.present;
+            auto start_time = f.StartTime - gSession.mStartQpc.QuadPart;
             auto combined_time = QpcDeltaToMilliSeconds(p->ReadyTime - f.StartTime);
             auto renderer_time = QpcDeltaToMilliSeconds(p->QpcTime - f.StartTime);
             auto gpu_time = QpcDeltaToMilliSeconds(p->ReadyTime - p->QpcTime);
@@ -55,7 +56,7 @@ int main()
             if (screen_time > 33.) {
                 late_frames++;
             }
-            std::cout << renderer_time << ", " << gpu_time << ", " << combined_time << ", " << screen_time << "\n";
+            std::cout << start_time << "," << renderer_time << ", " << gpu_time << ", " << combined_time << ", " << screen_time << "\n";
         }
     }
     std::cout << "late_frames: " << late_frames;
