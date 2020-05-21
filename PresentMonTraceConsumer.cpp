@@ -23,11 +23,14 @@ SOFTWARE.
 #include "PresentMonTraceConsumer.hpp"
 
 #include "D3d9EventStructs.hpp"
+#include "D3d11EventStructs.hpp"
 #include "DwmEventStructs.hpp"
 #include "DxgiEventStructs.hpp"
 #include "DxgkrnlEventStructs.hpp"
 #include "EventMetadataEventStructs.hpp"
 #include "Win32kEventStructs.hpp"
+
+
 
 #include <algorithm>
 #include <assert.h>
@@ -1057,6 +1060,50 @@ void PMTraceConsumer::HandleD3D9Event(EVENT_RECORD* pEventRecord)
     }
 }
 
+
+void PMTraceConsumer::HandleD3D11Event(EVENT_RECORD* pEventRecord)
+{
+    DebugEvent(pEventRecord, &mMetadata);
+
+    auto const& hdr = pEventRecord->EventHeader;
+    switch (hdr.EventDescriptor.Id) {
+    case Microsoft_Windows_D3D11::Marker::Id:
+    {
+
+        auto message = mMetadata.GetEventData<std::wstring>(pEventRecord, L"Label");
+        if (message.find(L"BeginFrame") == 0) {
+            auto frame = mCurrentFramesByThreadId.find(hdr.ThreadId);
+            if (frame == mCurrentFramesByThreadId.end()) {
+                Frame f;
+                f.StartTime = hdr.TimeStamp.QuadPart;
+                mCurrentFramesByThreadId.emplace(hdr.ThreadId, f);
+            }
+            else {
+                assert(false);
+            }
+        } else if (message.find(L"EndFrame") == 0) {
+            auto frame = mCurrentFramesByThreadId.find(hdr.ThreadId);
+            if (frame == mCurrentFramesByThreadId.end()) {
+                assert(false);
+            }
+            else {
+                frame->second.EndTime = hdr.TimeStamp.QuadPart;
+                auto present = mPresentByThreadId.find(hdr.ThreadId);
+                if (present != mPresentByThreadId.end()) {
+                    frame->second.present = present->second;
+                }
+                mFrames.push_back(frame->second);
+                mCurrentFramesByThreadId.erase(frame);
+            }
+        }
+        break;
+    }
+    default:
+        assert(!mFilteredEvents); // Assert that filtering is working if expected
+        break;
+    }
+}
+
 void PMTraceConsumer::CompletePresent(std::shared_ptr<PresentEvent> p, uint32_t recurseDepth)
 {
     DebugCompletePresent(*p, recurseDepth);
@@ -1093,9 +1140,9 @@ void PMTraceConsumer::CompletePresent(std::shared_ptr<PresentEvent> p, uint32_t 
         }
     }
     auto& processMap = mPresentsByProcess[p->ProcessId];
-    processMap.erase(p->QpcTime);
 
     auto& presentDeque = mPresentsByProcessAndSwapChain[std::make_tuple(p->ProcessId, p->SwapChainAddress)];
+    processMap.erase(p->QpcTime);
     auto presentIter = presentDeque.begin();
     assert(!presentIter->get()->Completed); // It wouldn't be here anymore if it was
 

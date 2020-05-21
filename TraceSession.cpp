@@ -34,6 +34,7 @@ SOFTWARE.
 #include "MixedRealityTraceConsumer.hpp"
 
 #include "D3d9EventStructs.hpp"
+#include "D3d11EventStructs.hpp"
 #include "DwmEventStructs.hpp"
 #include "DxgiEventStructs.hpp"
 #include "DxgkrnlEventStructs.hpp"
@@ -235,6 +236,7 @@ void CALLBACK EventRecordCallback(EVENT_RECORD* pEventRecord)
     else if (           hdr.ProviderId == Microsoft_Windows_EventMetadata::GUID)                session->mPMConsumer->HandleMetadataEvent          (pEventRecord);
     else if (           WMR && hdr.ProviderId == DHD_PROVIDER_GUID)                             session->mMRConsumer->HandleDHDEvent               (pEventRecord);
     else if (!SIMPLE && WMR && hdr.ProviderId == SPECTRUMCONTINUOUS_PROVIDER_GUID)              session->mMRConsumer->HandleSpectrumContinuousEvent(pEventRecord);
+    else if (!SIMPLE && hdr.ProviderId == Microsoft_Windows_D3D11::GUID)              session->mPMConsumer->HandleD3D11Event(pEventRecord);
 
 #pragma warning(pop)
 }
@@ -296,7 +298,7 @@ ULONG TraceSession::Start(
     // Configure trace properties
     EVENT_TRACE_LOGFILEA traceProps = {};
     traceProps.LogFileName = (char*) etlPath;
-    traceProps.ProcessTraceMode = PROCESS_TRACE_MODE_EVENT_RECORD | PROCESS_TRACE_MODE_RAW_TIMESTAMP;
+    traceProps.ProcessTraceMode = PROCESS_TRACE_MODE_EVENT_RECORD;// | PROCESS_TRACE_MODE_RAW_TIMESTAMP;
     traceProps.Context = this;
     /* Output members (passed also to BufferCallback):
     traceProps.CurrentTime
@@ -342,7 +344,7 @@ ULONG TraceSession::Start(
 
     // -------------------------------------------------------------------------
     // Start the session
-    auto status = StartTraceA(&mHandle, sessionName, &sessionProps);
+    /*auto status = StartTraceA(&mHandle, sessionName, &sessionProps);
     if (status != ERROR_SUCCESS) {
         mHandle = 0;
         return status;
@@ -353,7 +355,7 @@ ULONG TraceSession::Start(
     if (status != ERROR_SUCCESS) {
         Stop();
         return status;
-    }
+    }*/
 
     // -------------------------------------------------------------------------
     // Open the trace

@@ -73,7 +73,7 @@ struct EventDataDesc {
             assert(false);
             return *(T*) data_;
         }
-        if (size_ < sizeof(T)) {
+        if (size_ < sizeof(T)) { 
 
             // This is allowed and expected.  e.g., sometimes we want a
             // uint32_t promoted into uint64_t (for example to simplify pointer

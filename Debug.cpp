@@ -313,11 +313,12 @@ void DebugEvent(EVENT_RECORD* eventRecord, EventMetadata* metadata)
             printf("Win32K_TokenStateChanged ");
 
             switch (metadata->GetEventData<uint32_t>(eventRecord, L"NewState")) {
+                /*
             case Microsoft_Windows_Win32k::TokenState::Completed: printf("Completed\n"); break;
             case Microsoft_Windows_Win32k::TokenState::InFrame:   printf("InFrame\n");   break;
             case Microsoft_Windows_Win32k::TokenState::Confirmed: printf("Confirmed\n"); break;
             case Microsoft_Windows_Win32k::TokenState::Retired:   printf("Retired\n");   break;
-            case Microsoft_Windows_Win32k::TokenState::Discarded: printf("Discarded\n"); break;
+            case Microsoft_Windows_Win32k::TokenState::Discarded: printf("Discarded\n"); break;*/
             default:                                              printf("Unknown (%u)\n", metadata->GetEventData<uint32_t>(eventRecord, L"NewState")); break;
             }
             break;

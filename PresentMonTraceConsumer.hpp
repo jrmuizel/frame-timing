@@ -124,6 +124,14 @@ private:
     PresentEvent(PresentEvent const& copy); // dne
 };
 
+struct Frame {
+    // Initial event information (might be a kernel event if not presented
+    // through DXGI or D3D9)
+    uint64_t StartTime;
+    uint32_t EndTime;
+    std::shared_ptr<PresentEvent> present;   
+};
+
 // A high-level description of the sequence of events for each present type,
 // ignoring runtime end:
 //
@@ -261,6 +269,10 @@ struct PMTraceConsumer
     std::mutex mNTProcessEventMutex;
     std::vector<NTProcessEvent> mNTProcessEvents;
 
+    std::vector<Frame> mFrames;
+    std::map<uint32_t, Frame> mCurrentFramesByThreadId;
+
+
     bool DequeueProcessEvents(std::vector<NTProcessEvent>& outProcessEvents)
     {
         if (mNTProcessEvents.empty()) {
@@ -303,6 +315,7 @@ struct PMTraceConsumer
     void HandleNTProcessEvent(EVENT_RECORD* pEventRecord);
     void HandleDXGIEvent(EVENT_RECORD* pEventRecord);
     void HandleD3D9Event(EVENT_RECORD* pEventRecord);
+    void HandleD3D11Event(EVENT_RECORD* pEventRecord);
     void HandleDXGKEvent(EVENT_RECORD* pEventRecord);
     void HandleWin32kEvent(EVENT_RECORD* pEventRecord);
     void HandleDWMEvent(EVENT_RECORD* pEventRecord);
